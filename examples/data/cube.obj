@@ -1,0 +1,42 @@
+# Colored cube — 6 faces with different materials
+# Each face has 2 triangles (quads auto-triangulated)
+
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+v 0 0 1
+v 1 0 1
+v 1 1 1
+v 0 1 1
+
+vn  0  0 -1
+vn  0  0  1
+vn  0 -1  0
+vn  0  1  0
+vn -1  0  0
+vn  1  0  0
+
+usemtl face1
+f 1//1 3//1 2//1
+f 1//1 4//1 3//1
+
+usemtl face2
+f 5//2 6//2 7//2
+f 5//2 7//2 8//2
+
+usemtl face3
+f 1//3 2//3 6//3
+f 1//3 6//3 5//3
+
+usemtl face4
+f 3//4 4//4 8//4
+f 3//4 8//4 7//4
+
+usemtl face5
+f 1//5 5//5 8//5
+f 1//5 8//5 4//5
+
+usemtl face6
+f 2//6 3//6 7//6
+f 2//6 7//6 6//6
