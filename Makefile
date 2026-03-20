@@ -8,5 +8,8 @@ build:
 	cp $(WASM_OUT) $(WASM_PKG)
 	@ls -lh $(WASM_OUT)
 
+harness:
+	cargo build --release --manifest-path harness/Cargo.toml
+
 doc: build
 	typst compile examples/documentation.typ examples/documentation.pdf --root .
