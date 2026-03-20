@@ -12,7 +12,7 @@ Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.0/e
 
 ```typst
 #import "@preview/maquette:0.1.0": render-obj
-#let cube = read("examples/data/bunny.obj")
+#let cube = read("examples/data/cube.obj")
 #render-obj(cube)
 ```
 
