@@ -115,9 +115,9 @@ Under the hood, Maquette is a small rasterizer with a real lighting pipeline: mu
 
 Import a render function, read a model file, and call it. That's it.
 ```example
-#import "@preview/maquette:0.1.0": render-obj
+#import "@preview/maquette:0.1.0": render-stl
 
-#let cube = read("data/cube.obj")
+#let cube = read("data/cube.stl")
 #render-stl(cube)
 ```
 
@@ -126,7 +126,7 @@ The `width` and `height` arguments are forwarded to Typst's `image()` for displa
 The default output is PNG; pass `format: "svg"` for vector output: 
 
 ```typst
-#render-stl(cube, width: 80%, format: "svg")
+#render-stl(cube, format: "svg")
 ```
 
 == Inline Show Rule
