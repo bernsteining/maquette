@@ -2,7 +2,11 @@
 
 #import "@preview/zebraw:0.6.1": *
 
-#set page(margin: 1.5em)
+#set page(margin: 1.5em, footer: context grid(
+  columns: (1fr, 1fr),
+  align(left, text(size: 7.5pt, fill: luma(120))[Maquette Documentation]),
+  align(right, text(size: 7.5pt, fill: luma(120), counter(page).display())),
+))
 #set par(justify: true)
 #show: zebraw.with(lang: false, numbering: false)
 
