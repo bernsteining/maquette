@@ -1,12 +1,14 @@
 use crate::math::{parse_f64_fast, parse_i64_fast, Vec3};
 use crate::parser::Triangle;
 
+#[derive(Clone)]
 pub struct PointCloud {
     pub positions: Vec<Vec3>,
     pub normals: Vec<Vec3>,
     pub colors: Vec<(u8, u8, u8)>,
 }
 
+#[derive(Clone)]
 pub enum PlyData {
     Mesh(Vec<Triangle>),
     Points(PointCloud),
