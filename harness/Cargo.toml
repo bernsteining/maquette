@@ -1,0 +1,7 @@
+[package]
+name = "harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wasmi = { version = "1", features = ["simd"] }
