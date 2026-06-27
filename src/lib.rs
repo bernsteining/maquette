@@ -8,6 +8,7 @@ mod clip;
 mod color;
 mod color_map;
 mod config;
+mod decimate;
 mod explode;
 mod expr;
 mod fxaa;
