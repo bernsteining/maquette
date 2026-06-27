@@ -2,6 +2,7 @@ use crate::annotations;
 use crate::clip;
 use crate::color_map;
 use crate::config::{GroupAppearance, LightKind, RenderConfig, ShadowConfig};
+use crate::decimate;
 use crate::explode;
 use crate::color::{linear_to_srgb, parse_hex_color, srgb_to_linear};
 use crate::math::{quantize, fx_hashmap_cap, FxBuildHasher, FxHashMap, Mat4, Vec3, ViewMatSimd};
@@ -495,18 +496,32 @@ fn project_triangles(
         } else { None }
     } else { None };
 
+    // Back-face culling direction. Perspective uses the per-triangle vector to
+    // the camera *point* (a converging eye). Parallel projections (orthographic
+    // plus the axonometric family — all Projection::Ortho here) instead need a
+    // single constant view direction; using the per-triangle camera vector there
+    // over-culls silhouette faces and punches holes when the camera is close.
+    // Kept normal-based (not screen-space winding) so meshes whose winding is
+    // inconsistent with their normals — e.g. point-cloud reconstructions — stay
+    // correct.
+    let parallel_view = if proj == Projection::Ortho {
+        Some(view.camera.sub(view.center))
+    } else {
+        None
+    };
+
     let mut projected: Vec<ProjectedTri> = Vec::with_capacity(triangles.len());
 
     for (ti, tri) in triangles.iter().enumerate() {
-        // World-space backface check — before vertex transforms to skip culled triangles early.
-        // Sign of normal·(camera - centroid) determines facing; skip /3 by scaling camera×3.
         let is_back_facing = if do_cull || is_xray {
-            let sx = tri.vertices[0].x + tri.vertices[1].x + tri.vertices[2].x;
-            let sy = tri.vertices[0].y + tri.vertices[1].y + tri.vertices[2].y;
-            let sz = tri.vertices[0].z + tri.vertices[1].z + tri.vertices[2].z;
-            let dx = view.camera.x * 3.0 - sx;
-            let dy = view.camera.y * 3.0 - sy;
-            let dz = view.camera.z * 3.0 - sz;
+            let (dx, dy, dz) = if let Some(v) = parallel_view {
+                (v.x, v.y, v.z)
+            } else {
+                let sx = tri.vertices[0].x + tri.vertices[1].x + tri.vertices[2].x;
+                let sy = tri.vertices[0].y + tri.vertices[1].y + tri.vertices[2].y;
+                let sz = tri.vertices[0].z + tri.vertices[1].z + tri.vertices[2].z;
+                (view.camera.x * 3.0 - sx, view.camera.y * 3.0 - sy, view.camera.z * 3.0 - sz)
+            };
             tri.normal.x * dx + tri.normal.y * dy + tri.normal.z * dz <= 0.0
         } else {
             false
@@ -659,9 +674,81 @@ fn project_triangles(
     projected
 }
 
-#[inline]
-fn sort_by_depth(projected: &mut [ProjectedTri]) {
-    projected.sort_unstable_by(|a, b| a.depth.partial_cmp(&b.depth).unwrap_or(std::cmp::Ordering::Equal));
+/// Radix sort `projected` by depth.
+/// `descending = false` → nearest last  (SVG painter's back-to-front).
+/// `descending = true`  → nearest first (PNG z-buffer front-to-back).
+fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
+    let n = projected.len();
+    if n <= 1 { return; }
+
+    // Quantize f64 depths to u32 sort keys.
+    // Flip bits so that IEEE-754 ordering becomes unsigned ordering.
+    let mut keys: Vec<u32> = Vec::with_capacity(n);
+    for tri in projected.iter() {
+        let bits = (tri.depth as f32).to_bits();
+        let k = if bits & 0x8000_0000 != 0 { !bits } else { bits ^ 0x8000_0000 };
+        keys.push(if descending { !k } else { k });
+    }
+
+    // Compute all 4 byte-histograms in a single pass, then prefix-sum them.
+    let mut hist = [[0u32; 256]; 4];
+    for &k in &keys {
+        hist[0][(k & 0xFF) as usize] += 1;
+        hist[1][((k >> 8) & 0xFF) as usize] += 1;
+        hist[2][((k >> 16) & 0xFF) as usize] += 1;
+        hist[3][((k >> 24) & 0xFF) as usize] += 1;
+    }
+    for h in &mut hist {
+        let mut sum = 0u32;
+        for c in h.iter_mut() {
+            let count = *c;
+            *c = sum;
+            sum += count;
+        }
+    }
+
+    // Two index buffers in a single allocation; ping-pong via split_at_mut.
+    let mut idx = vec![0u32; 2 * n];
+    for i in 0..n { idx[i] = i as u32; }
+
+    {
+        let (a, b) = idx.split_at_mut(n);
+
+        // Pass 1: a → b (byte 0)
+        for &v in a.iter() {
+            let bucket = (keys[v as usize] & 0xFF) as usize;
+            b[hist[0][bucket] as usize] = v;
+            hist[0][bucket] += 1;
+        }
+        // Pass 2: b → a (byte 1)
+        for &v in b.iter() {
+            let bucket = ((keys[v as usize] >> 8) & 0xFF) as usize;
+            a[hist[1][bucket] as usize] = v;
+            hist[1][bucket] += 1;
+        }
+        // Pass 3: a → b (byte 2)
+        for &v in a.iter() {
+            let bucket = ((keys[v as usize] >> 16) & 0xFF) as usize;
+            b[hist[2][bucket] as usize] = v;
+            hist[2][bucket] += 1;
+        }
+        // Pass 4: b → a (byte 3) — result lands in a = idx[0..n]
+        for &v in b.iter() {
+            let bucket = ((keys[v as usize] >> 24) & 0xFF) as usize;
+            a[hist[3][bucket] as usize] = v;
+            hist[3][bucket] += 1;
+        }
+    }
+
+    // Gather into sorted order. ptr::read avoids cloning the large structs;
+    // each index is consumed exactly once so every element is moved, not copied.
+    let mut sorted = Vec::with_capacity(n);
+    let ptr = projected.as_mut_ptr();
+    for i in 0..n {
+        sorted.push(unsafe { std::ptr::read(ptr.add(idx[i] as usize)) });
+    }
+    unsafe { projected.set_len(0); }
+    *projected = sorted;
 }
 
 // ---------------------------------------------------------------------------
@@ -854,6 +941,17 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
     let mut tris = triangles.to_vec();
     let (mut bmin, mut bmax) = compute_bbox(&tris);
 
+    // 0. Decimation (vertex clustering) — runs first so every later stage and
+    //    the shading itself operate on the reduced mesh.
+    if config.decimate > 0.0 {
+        tris = decimate::decimate(&tris, bmin, bmax, config.decimate);
+        if !tris.is_empty() {
+            let (new_min, new_max) = compute_bbox(&tris);
+            bmin = new_min;
+            bmax = new_max;
+        }
+    }
+
     // 1. Color mapping
     if !config.color_map.is_empty() {
         match config.color_map.as_str() {
@@ -986,11 +1084,11 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, config.width, config.height));
     }
-    sort_by_depth(&mut projected);
+    radix_sort_by_depth(&mut projected, false);
 
     let shadow_tris = if let Some(shadow) = &config.shadow {
         let mut s = project_shadow(&tris, config, shadow_light_dir(config), &view, config.width, config.height, br, bmin.z, false, &shadow.color);
-        sort_by_depth(&mut s);
+        radix_sort_by_depth(&mut s, false);
         s
     } else {
         Vec::new()
@@ -1296,6 +1394,11 @@ fn render_debug_overlay(
     { let mut buf = String::with_capacity(8); push_usize(&mut buf, count_unique_vertices(triangles)); emit_row(svg, "vertices", &buf); }
     { let mut buf = String::with_capacity(8); push_f2(&mut buf, config.ambient.intensity); emit_row(svg, "ambient", &buf); }
     emit_row(svg, "smooth", if config.smooth { "on" } else { "off" });
+    if config.decimate > 0.0 {
+        let mut buf = String::with_capacity(8);
+        push_f2(&mut buf, config.decimate);
+        emit_row(svg, "decimate", &buf);
+    }
 
     let mut effects_str = String::new();
     if config.outline.is_some() { effects_str.push_str("outline"); }
@@ -1502,7 +1605,7 @@ fn render_grid_svg(
         let render_h = cell_h - label_h;
 
         let mut projected = project_triangles(triangles, None, config, view, cell_w, render_h, br, true, group_styles, &lights);
-        sort_by_depth(&mut projected);
+        radix_sort_by_depth(&mut projected, false);
 
         if config.grid_labels {
             svg.push_str("<text x=\""); push_f2(&mut svg, x + cell_w / 2.0);
@@ -1519,7 +1622,7 @@ fn render_grid_svg(
         if let Some(shadow_cfg) = &config.shadow {
             if !is_wireframe {
                 let mut shadow = project_shadow(triangles, config, shadow_light_dir(config), view, cell_w, render_h, br, ground_z, true, &shadow_cfg.color);
-                sort_by_depth(&mut shadow);
+                radix_sort_by_depth(&mut shadow, false);
                 svg.push_str("<g opacity=\""); push_f2(&mut svg, shadow_cfg.opacity); svg.push_str("\">");
                 for tri in &shadow {
                     write_shadow_polygon(&mut svg, tri);
@@ -1637,7 +1740,7 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
     // Front-to-back sort: closer triangles fill z-buffer first, so farther
     // triangles' pixels fail z-test early (skipping color interpolation + writes).
     // Also correct for transparent pass which iterates in reverse (back-to-front).
-    projected.sort_unstable_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+    radix_sort_by_depth(&mut projected, true);
 
     let mut buf = PixelBuffer::new(w, h, bg);
 
@@ -1795,7 +1898,7 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
             &png_bytes,
             config.width,
             config.height,
-            triangles,
+            &tris,
             bmin,
             bmax,
             &view,
@@ -1837,7 +1940,7 @@ fn render_grid_png_buf(
         let mut projected = project_triangles(
             triangles, None, config, view, cell_w as f64, render_h as f64, br, true, group_styles, &lights,
         );
-        projected.sort_unstable_by(|a, b| b.depth.partial_cmp(&a.depth).unwrap_or(std::cmp::Ordering::Equal));
+        radix_sort_by_depth(&mut projected, true);
 
         if let Some(shadow_cfg) = &config.shadow {
             if !is_wireframe {
@@ -1873,6 +1976,16 @@ fn render_grid_png_buf(
 
 /// Return JSON with model info for verbose/debug purposes.
 pub fn get_info(triangles: &[Triangle], config: &RenderConfig) -> String {
+    // Apply decimation so the reported counts match what render() produces.
+    let decimated: Vec<Triangle>;
+    let triangles: &[Triangle] = if config.decimate > 0.0 && !triangles.is_empty() {
+        let (bmin, bmax) = compute_bbox(triangles);
+        decimated = decimate::decimate(triangles, bmin, bmax, config.decimate);
+        &decimated
+    } else {
+        triangles
+    };
+
     let (bmin, bmax) = if triangles.is_empty() {
         (Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0))
     } else {
@@ -1884,6 +1997,7 @@ pub fn get_info(triangles: &[Triangle], config: &RenderConfig) -> String {
 
     let mut s = String::with_capacity(256);
     s.push_str("{\"triangles\":"); push_usize(&mut s, triangles.len());
+    s.push_str(",\"vertices\":"); push_usize(&mut s, count_unique_vertices(triangles));
     s.push_str(",\"bbox_min\":["); push_f4(&mut s, bmin.x); s.push(','); push_f4(&mut s, bmin.y); s.push(','); push_f4(&mut s, bmin.z);
     s.push_str("],\"bbox_max\":["); push_f4(&mut s, bmax.x); s.push(','); push_f4(&mut s, bmax.y); s.push(','); push_f4(&mut s, bmax.z);
     s.push_str("],\"bbox_center\":["); push_f4(&mut s, bc.x); s.push(','); push_f4(&mut s, bc.y); s.push(','); push_f4(&mut s, bc.z);
