@@ -180,6 +180,7 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 | `ground_shadow` | `false` | Ground shadow: `true` or `{ opacity, color }` |
 | `clip_plane` | `null` | Clipping plane `(a, b, c, d)`: keeps `ax+by+cz+d >= 0` |
 | `explode` | `0` | Exploded view factor (OBJ groups or auto-detected components) |
+| `decimate` | `0` | Mesh simplification strength (0--1) Higher = fewer triangles. |
 | `antialias` | `1` | Supersampling for PNG (`2` = 2×2 SSAA, `4` = 4×4) |
 | `fxaa` | `true` | Fast approximate anti-aliasing (PNG only) |
 | `ssao` | `false` | Screen-space AO: `true` or `{ samples, radius, bias, strength }` |
@@ -309,6 +310,8 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 // Clipping plane (a, b, c, d)
 "explode": 0,
 // Exploded view factor
+"decimate": 0,
+// Mesh simplification strength 0-1 (grid vertex clustering; higher = fewer triangles)
 "point_size": 0,
 // Point cloud splat radius (0 = auto)
 "antialias": 1,

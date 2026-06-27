@@ -156,7 +156,7 @@ Now we might want to customize all our rendering pipeline, so let's see how we c
 
 All parameters are optional and can be passed as a dictionary. Defaults are shown below.
 
-#text(size: 10.05pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
+#text(size: 9.85pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
   \"camera\": [3, 3, 3],                             // Camera position in world space (Cartesian)
   \"azimuth\": null,                                 // Spherical camera: horizontal angle in degrees
   \"elevation\": null,                               // Spherical camera: vertical angle in degrees
@@ -208,6 +208,7 @@ All parameters are optional and can be passed as a dictionary. Defaults are show
   \"ground_shadow\": false,                          // true or {opacity, color}
   \"clip_plane\": null,                              // Clipping plane (a, b, c, d)
   \"explode\": 0,                                    // Exploded view factor
+  \"decimate\": 0,                                   // Mesh simplification 0-1 (higher = fewer triangles)
   \"point_size\": 0,                                 // Point cloud neighbor radius (0 = auto)
   \"antialias\": 1,                                  // 0: no antialias, 1:FXAA, 2:SSAA, 3-4:SSAAx2
   \"ssao\": false,                                   // true or {samples, radius, bias, strength}
@@ -1324,7 +1325,9 @@ As a rule of thumb, FXAA does the job for most renders. Turn `antialias: 4` when
 
 Ambient Occlusion adds realistic contact shadows (⚠️ at the cost of increased processing time) in crevices and areas where surfaces are close together, simulating how indirect light is blocked in tight spaces. SSAO computes occlusion by sampling the depth buffer after rasterization. Configure with `ssao: true` for defaults, or customize:
 ```typst
-ssao: (samples: 16, radius: 0.5, bias: 0.025, strength: 1.0)
+#render-obj(crankshaft, (
+  ssao: (samples: 16, radius: 0.5, bias: 0.025, strength: 1.0),
+))
 ```
 
 #grid(columns: (1fr, 1fr), gutter: 1em,
@@ -1468,6 +1471,46 @@ This is the case for this exploded teapot.
   explode: 0.5,
 ))
 ```
+
+#pagebreak()
+
+== #link("https://en.wikipedia.org/wiki/Decimation_(signal_processing)")[Decimation]
+
+Reduce a mesh's triangle count with grid vertex clustering — a fast, format-agnostic mesh simplification that applies identically to STL, OBJ and PLY. It is handy for shrinking dense scans or high-poly exports so they render (and embed in your PDF) faster. It pairs well with the default smooth shading, which re-derives vertex normals and softens the faceting.
+
+The `decimate` strength runs from `0` (off, default) to `1` (most aggressive): a uniform grid is laid over the model, vertices sharing a cell collapse into one, and higher values use a coarser grid that merges more detail. The wireframe overlay below makes the thinning topology visible.
+
+#let dec-row(strength, label) = (
+  render-obj(bunny, (
+    // Locked, mesh-independent framing so both rows share one camera: fixed
+    // center + orthographic + no auto-fit means decimation is the only thing
+    // that changes between renders (no perspective distortion, uniform scale).
+    up: (0, 1, 0), azimuth: 180,
+    auto_center: false, center: (-0.0168, 0.1102, -0.0015),
+    auto_fit: false, projection: "orthographic", distance: 0.20,
+    mode: "solid+wireframe", antialias: 2,
+    decimate: strength,
+    width: 520, height: 520,
+  ), width: 70%),
+  {
+    let i = get-obj-info(bunny, decimate: strength)
+    [
+      #label
+
+      Vertices: *#i.vertices* \
+      Triangles: *#i.triangles*
+    ]
+  },
+)
+
+#grid(
+  columns: (1fr, auto), align: (center + horizon, left + horizon),
+  column-gutter: 1.5em, row-gutter: 1.5em,
+  ..dec-row(0, [*Original* (`decimate: 0`)]),
+  ..dec-row(0.75, [`decimate: 0.75`]),
+)
+
+Fewer triangles means faster rendering, and the default smooth shading re-derives vertex normals afterward, so moderate decimation stays visually clean.
 
 #pagebreak()
 
