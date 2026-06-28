@@ -251,7 +251,7 @@ Set `background` to a hex color to fill the image background.
 ), width: 75%)
 ```
 
-Set `background: "none"` for a transparent background, which blends naturally into any Typst page.
+Set `background: "none"` (or an empty string) for a transparent background. The PNG is exported with a real alpha channel, so the model drops straight onto whatever is behind it on the page. Use `antialias` for smooth transparent edges — FXAA only operates on RGB and is skipped for transparent output.
 
 ```example
 // hl: 2
