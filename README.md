@@ -8,6 +8,67 @@ Everything runs as a single WASM plugin (~460 KB), with focus on speed.
 
 Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.0/examples/documentation.pdf) to see examples of all the features.
 
+## Example
+
+A back-lit Stanford bunny: a red point light placed *inside* the model glows through the thin ears (subsurface scattering), with the camera framed from behind. Lighting, camera and material all live in the source.
+
+<table>
+<tr>
+<td>
+
+```typst
+#import "@preview/maquette:0.1.0": render-obj
+#let bunny = read("examples/data/bunny.obj")
+
+#render-obj(bunny, (
+  up: (0, 1, 0),
+  azimuth: 180,
+  distance: 0.25,
+  background: "none",
+  lights: (
+    (type: "positional",
+     vector: (-0.1, 0.14, -0.04),
+     color: "#ff0000", intensity: 3.0),
+  ),
+  sss: (intensity: 4, power: 3.5, distortion: 0.2),
+), antialias: 4)
+```
+
+</td>
+<td>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/sss_bunny.png" width="100%" alt="Back-lit Stanford bunny with subsurface scattering" />
+</td>
+</tr>
+</table>
+
+## Gallery
+
+<table>
+<tr>
+<td align="center" width="50%">
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_multiview.svg" width="100%" alt="Multi-view grid" /><br/>
+<sub><b>Multi-view grid</b> — front / right / top / isometric on one sheet</sub>
+</td>
+<td align="center" width="50%">
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_groups.png" width="100%" alt="Per-group appearance" /><br/>
+<sub><b>Per-group appearance</b> — per-part colour, stroke &amp; opacity from OBJ groups</sub>
+</td>
+</tr>
+<tr>
+<td align="center">
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_scalar.png" width="100%" alt="Scalar color map" /><br/>
+<sub><b>Scalar color map</b> — a math expression <code>f(x,y,z)</code> over a custom palette</sub>
+</td>
+<td align="center">
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_clip.png" width="100%" alt="Clipping plane" /><br/>
+<sub><b>Clipping plane</b> — a mathematical cut opens the model to its interior</sub>
+</td>
+</tr>
+</table>
+
+Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.0/examples/documentation.pdf) has many examples covering all the features offered by `maquette`.
+
+
 # Usage
 
 ```typst
@@ -122,7 +183,7 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 | `auto_fit` | `true` | Scale model to fill viewport |
 | `width` | `500` | Output width in pixels |
 | `height` | `500` | Output height in pixels |
-| `background` | `"#f0f0f0"` | Background color (hex). Empty string = transparent |
+| `background` | `"#f0f0f0"` | Background color (hex). `"none"` or empty string = transparent (PNG exports with an alpha channel; use `antialias` for smooth transparent edges) |
 
 ### Appearance
 
