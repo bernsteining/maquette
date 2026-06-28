@@ -1,4 +1,5 @@
 use crate::annotations;
+use crate::cache;
 use crate::clip;
 use crate::color_map;
 use crate::config::{GroupAppearance, LightKind, RenderConfig, ShadowConfig};
@@ -355,9 +356,6 @@ fn project_triangles(
     } else {
         ([0.0f32; 256], 0.0f32, 0.0f32)
     };
-    let mut spec_lut = [0.0f32; 256];
-    let mut spec_lut_exp = f32::NAN;  // track which exponent the LUT is built for
-
     let cfg_fresnel = config.fresnel.intensity as f32;
     let cfg_gamma = config.gamma_correction;
     let cfg_exposure = config.tone_mapping.exposure as f32;
@@ -381,6 +379,31 @@ fn project_triangles(
     let cfg_specular = config.specular as f32;
     let cfg_shininess = config.shininess as f32;
     let view_camera = view.camera;
+
+    // Pre-build one specular LUT per distinct shininess (global + group overrides)
+    // so the per-triangle slow path looks up a ready table instead of rebuilding
+    // 256 powf() values whenever interleaved groups change shininess.
+    fn lut_ref<'a>(luts: &'a [(f32, [f32; 256])], sh: f32) -> &'a [f32; 256] {
+        const ZERO: [f32; 256] = [0.0f32; 256];
+        luts.iter().find(|(s, _)| *s == sh).map(|(_, l)| l).unwrap_or(&ZERO)
+    }
+    let spec_luts: Vec<(f32, [f32; 256])> = {
+        let mut v: Vec<(f32, [f32; 256])> = Vec::new();
+        if cfg_specular > 0.0 || group_styles.values().any(|a| a.specular.map_or(false, |s| s > 0.0)) {
+            let mut add = |sh: f32| {
+                if !v.iter().any(|(s, _)| *s == sh) {
+                    let mut lut = [0.0f32; 256];
+                    for i in 0..256 { lut[i] = (i as f32 / 255.0).powf(sh); }
+                    v.push((sh, lut));
+                }
+            };
+            add(cfg_shininess);
+            for a in group_styles.values() {
+                if let Some(sh) = a.shininess { add(sh as f32); }
+            }
+        }
+        v
+    };
     let lights_f32: Vec<LightF32> = lights.iter().map(|l| LightF32 {
         kind: l.kind,
         dx: l.vector.x as f32, dy: l.vector.y as f32, dz: l.vector.z as f32,
@@ -403,10 +426,7 @@ fn project_triangles(
         let can_memoize = !is_wireframe && !is_xray && groups_uniform
             && triangles.iter().all(|t| t.color.is_none() && t.vertex_colors.is_none());
         if can_memoize {
-            if cfg_specular > 0.0 && cfg_shininess != spec_lut_exp {
-                for i in 0..256 { spec_lut[i] = (i as f32 / 255.0).powf(cfg_shininess); }
-                spec_lut_exp = cfg_shininess;
-            }
+            let spec_lut = lut_ref(&spec_luts, cfg_shininess);
             let one_minus_ambient = 1.0 - cfg_ambient_intensity;
             let n_unique = sd.normals.len();
 
@@ -455,7 +475,7 @@ fn project_triangles(
                         up_f32.0, up_f32.1, up_f32.2,
                         one_minus_ambient, cfg_specular, cfg_fresnel,
                         cfg_gamma, tm, cfg_exposure,
-                        &spec_lut, &fresnel_lut,
+                        spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
                         simd_cel_bands,
                         simd_gooch, gooch_warm, gooch_cool,
@@ -469,7 +489,7 @@ fn project_triangles(
                         &lights_f32, view_camera, amb, one_minus_ambient, cfg_specular,
                         cfg_fresnel, cfg_gamma,
                         tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
-                        &spec_lut, &fresnel_lut,
+                        spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
                     ));
                 }
@@ -487,7 +507,7 @@ fn project_triangles(
                         &lights_f32, view_camera, amb, one_minus_ambient, cfg_specular,
                         cfg_fresnel, cfg_gamma,
                         tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
-                        &spec_lut, &fresnel_lut,
+                        spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
                     )
                 }).collect()
@@ -561,11 +581,8 @@ fn project_triangles(
             let shininess = ga.and_then(|a| a.shininess).map(|v| v as f32).unwrap_or(cfg_shininess);
             let mut opacity = ga.and_then(|a| a.opacity).unwrap_or(config.opacity);
 
-            // Rebuild specular LUT when exponent changes (handles per-group overrides)
-            if specular > 0.0 && shininess != spec_lut_exp {
-                for i in 0..256 { spec_lut[i] = (i as f32 / 255.0).powf(shininess); }
-                spec_lut_exp = shininess;
-            }
+            // Look up the pre-built specular LUT for this shininess (no rebuild).
+            let spec_lut = lut_ref(&spec_luts, shininess);
 
             // X-ray mode: set opacity based on face orientation
             if is_xray {
@@ -610,7 +627,7 @@ fn project_triangles(
                         up_f32.0, up_f32.1, up_f32.2,
                         one_minus_ambient, specular, cfg_fresnel,
                         cfg_gamma, tm, cfg_exposure,
-                        &spec_lut, &fresnel_lut,
+                        spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
                         if shading == ShadingMode::Cel { cfg_cel_bands } else { 0 },
                         is_gooch, gooch_warm, gooch_cool,
@@ -633,7 +650,7 @@ fn project_triangles(
                             &lights_f32, view_camera, amb, one_minus_ambient, specular,
                             cfg_fresnel, cfg_gamma,
                             tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
-                            &spec_lut, &fresnel_lut,
+                            spec_lut, &fresnel_lut,
                             sss_intensity, sss_dist, &sss_lut,
                         );
                     }
@@ -658,7 +675,7 @@ fn project_triangles(
                     &lights_f32, view_camera, amb, one_minus_ambient, specular,
                     cfg_fresnel, cfg_gamma,
                     tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
-                    &spec_lut, &fresnel_lut,
+                    spec_lut, &fresnel_lut,
                     sss_intensity, sss_dist, &sss_lut,
                 );
                 (r, g, b, None, opacity)
@@ -1006,6 +1023,39 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
     (tris, bmin, bmax)
 }
 
+/// Geometry hash for the smooth-normal cache: the model-data hash mixed with the
+/// config that changes the *geometry* (and therefore the vertex normals). Color,
+/// material, camera, lighting and shading are deliberately excluded so renders
+/// varying only those reuse the cached normals.
+fn smooth_geom_key(data_key: u64, config: &RenderConfig) -> u64 {
+    #[inline]
+    fn mix(h: u64, x: f64) -> u64 {
+        (h ^ x.to_bits()).wrapping_mul(0x100000001b3)
+    }
+    let mut h = mix(data_key, config.decimate);
+    h = mix(h, config.explode);
+    h = mix(h, config.point_size);
+    match config.clip_plane {
+        Some(p) => for v in p { h = mix(h, v); },
+        None => h = mix(h, f64::INFINITY), // sentinel distinct from any real plane
+    }
+    h
+}
+
+/// Look up (or compute and cache) the smooth vertex normals for `tris`.
+fn cached_smooth<'a>(
+    data_key: u64,
+    config: &RenderConfig,
+    tris: &[Triangle],
+) -> &'a smooth::SmoothData {
+    let key = smooth_geom_key(data_key, config);
+    if let Some(s) = cache::get_smooth(key) {
+        return s;
+    }
+    cache::put_smooth(key, smooth::compute_vertex_normals(tris));
+    cache::get_smooth(key).unwrap()
+}
+
 // ---------------------------------------------------------------------------
 // Point projection helper (for dimensions/outlines)
 // ---------------------------------------------------------------------------
@@ -1032,7 +1082,7 @@ fn make_point_projector(
 // Main entry point
 // ---------------------------------------------------------------------------
 
-pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>) -> String {
+pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>) -> String {
     if triangles.is_empty() {
         return build_empty_svg(config);
     }
@@ -1068,8 +1118,18 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
     let needs_smooth = config.smooth
         && config.shading != "cel"
         && config.shading != "flat";
-    let smooth_data = if needs_smooth {
+    // Owned fallback for the no-cache path (e.g. PLY, whose point-cloud
+    // reconstruction can be camera-dependent); cached for STL/OBJ.
+    let owned_smooth: Option<smooth::SmoothData> = if needs_smooth && data_key.is_none() {
         Some(smooth::compute_vertex_normals(&tris))
+    } else {
+        None
+    };
+    let smooth_data: Option<&smooth::SmoothData> = if needs_smooth {
+        match data_key {
+            Some(k) => Some(cached_smooth(k, config, &tris)),
+            None => owned_smooth.as_ref(),
+        }
     } else {
         None
     };
@@ -1080,7 +1140,7 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
     let lights = resolve_lights(config);
-    let mut projected = project_triangles(&tris, smooth_data.as_ref(), config, &view, config.width, config.height, br, false, group_styles, &lights);
+    let mut projected = project_triangles(&tris, smooth_data, config, &view, config.width, config.height, br, false, group_styles, &lights);
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, config.width, config.height));
     }
@@ -1662,7 +1722,7 @@ fn render_grid_svg(
 // PNG rendering
 // ---------------------------------------------------------------------------
 
-pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>) -> Result<Vec<u8>, String> {
+pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>) -> Result<Vec<u8>, String> {
     let aa = config.antialias.max(1).next_power_of_two();
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
@@ -1721,8 +1781,17 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
     let needs_smooth = config.smooth
         && config.shading != "cel"
         && config.shading != "flat";
-    let smooth_data = if needs_smooth {
+    // Owned fallback for the no-cache path (PLY); cached for STL/OBJ.
+    let owned_smooth: Option<smooth::SmoothData> = if needs_smooth && data_key.is_none() {
         Some(smooth::compute_vertex_normals(&tris))
+    } else {
+        None
+    };
+    let smooth_data: Option<&smooth::SmoothData> = if needs_smooth {
+        match data_key {
+            Some(k) => Some(cached_smooth(k, config, &tris)),
+            None => owned_smooth.as_ref(),
+        }
     } else {
         None
     };
@@ -1733,7 +1802,7 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
     let lights = resolve_lights(config);
-    let mut projected = project_triangles(&tris, smooth_data.as_ref(), config, &view, vw, vh, br, false, group_styles, &lights);
+    let mut projected = project_triangles(&tris, smooth_data, config, &view, vw, vh, br, false, group_styles, &lights);
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, vw, vh));
     }
