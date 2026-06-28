@@ -8,6 +8,7 @@
 /// because WASM execution is single-threaded (same justification as `color.rs` LUTs).
 
 use crate::config::GroupAppearance;
+use crate::math::Vec3;
 use crate::parser::Triangle;
 use crate::ply_parser::PlyData;
 use crate::smooth::SmoothData;
@@ -18,11 +19,14 @@ type StlEntry = (u64, Vec<Triangle>);
 type ObjEntry = (u64, (Vec<Triangle>, HashMap<u32, GroupAppearance>));
 type PlyEntry = (u64, PlyData);
 type SmoothEntry = (u64, SmoothData);
+/// Preprocessed mesh (clustered/clipped/exploded/normalized) + its bbox.
+type PrepEntry = (u64, (Vec<Triangle>, Vec3, Vec3));
 
 static mut STL_CACHE: Vec<StlEntry> = Vec::new();
 static mut OBJ_CACHE: Vec<ObjEntry> = Vec::new();
 static mut PLY_CACHE: Vec<PlyEntry> = Vec::new();
 static mut SMOOTH_CACHE: Vec<SmoothEntry> = Vec::new();
+static mut PREP_CACHE: Vec<PrepEntry> = Vec::new();
 
 /// FNV-1a hash over a byte slice.
 fn fnv1a(data: &[u8]) -> u64 {
@@ -77,4 +81,16 @@ pub fn get_smooth(key: u64) -> Option<&'static SmoothData> {
 
 pub fn put_smooth(key: u64, data: SmoothData) {
     unsafe { (*addr_of_mut!(SMOOTH_CACHE)).push((key, data)) }
+}
+
+/// Preprocessed-mesh cache, keyed by a hash that combines the model-data hash
+/// with every preprocess-affecting config field. Lets renders that vary only
+/// camera/lighting/shading skip the clone + color-map + clip + explode +
+/// normalize pass. STL/OBJ-without-materials only.
+pub fn get_prep(key: u64) -> Option<&'static (Vec<Triangle>, Vec3, Vec3)> {
+    unsafe { get(&*addr_of!(PREP_CACHE), key) }
+}
+
+pub fn put_prep(key: u64, data: (Vec<Triangle>, Vec3, Vec3)) {
+    unsafe { (*addr_of_mut!(PREP_CACHE)).push((key, data)) }
 }
