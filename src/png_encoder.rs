@@ -92,3 +92,42 @@ pub fn encode_png_rgb8(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
 
     out
 }
+
+/// Encode raw RGBA 8-bit pixels as a minimal PNG (color type 6, straight alpha).
+///
+/// `pixels` must be exactly `width * height * 4` bytes (RGBA, row-major).
+pub fn encode_png_rgba8(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
+    let row_bytes = width as usize * 4;
+    debug_assert_eq!(pixels.len(), row_bytes * height as usize);
+
+    // Sub filter (type 1) over 4-byte pixels: byte[i] - byte[i-4].
+    let filtered_len = height as usize * (1 + row_bytes);
+    let mut raw = Vec::with_capacity(filtered_len);
+    for y in 0..height as usize {
+        let row = &pixels[y * row_bytes..(y + 1) * row_bytes];
+        raw.push(1); // filter byte = Sub
+        for i in 0..row_bytes {
+            if i < 4 {
+                raw.push(row[i]);
+            } else {
+                raw.push(row[i].wrapping_sub(row[i - 4]));
+            }
+        }
+    }
+
+    let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 1);
+
+    let mut out = Vec::with_capacity(8 + 25 + 12 + compressed.len() + 12);
+    out.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+
+    let mut ihdr = [0u8; 13];
+    ihdr[0..4].copy_from_slice(&width.to_be_bytes());
+    ihdr[4..8].copy_from_slice(&height.to_be_bytes());
+    ihdr[8] = 8; // bit depth
+    ihdr[9] = 6; // color type: RGBA
+    write_chunk(&mut out, b"IHDR", &ihdr);
+
+    write_chunk(&mut out, b"IDAT", &compressed);
+    write_chunk(&mut out, b"IEND", &[]);
+    out
+}

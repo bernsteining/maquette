@@ -1569,6 +1569,47 @@ impl PixelBuffer {
             &self.pixels,
         ))
     }
+
+    /// Encode as a transparent RGBA PNG, using the z-buffer as model coverage.
+    /// Background pixels (depth still −∞, never rasterized) become fully
+    /// transparent; covered pixels are opaque. With supersampling (`factor` > 1)
+    /// alpha is the covered fraction of the block and colour is averaged over the
+    /// covered subpixels only — so anti-aliased edges fade out with no
+    /// background-colour fringe (straight, non-premultiplied alpha).
+    pub fn encode_png_transparent(&self, factor: usize) -> Result<Vec<u8>, String> {
+        let f = factor.max(1);
+        let nw = self.width / f;
+        let nh = self.height / f;
+        let count = (f * f) as u32;
+        let mut rgba = vec![0u8; nw * nh * 4];
+        for ny in 0..nh {
+            for nx in 0..nw {
+                let (mut sr, mut sg, mut sb, mut covered) = (0u32, 0u32, 0u32, 0u32);
+                for sy in 0..f {
+                    let row = (ny * f + sy) * self.width + nx * f;
+                    for sx in 0..f {
+                        let si = row + sx;
+                        if self.zbuf[si] != f32::NEG_INFINITY {
+                            let pi = si * 3;
+                            sr += self.pixels[pi] as u32;
+                            sg += self.pixels[pi + 1] as u32;
+                            sb += self.pixels[pi + 2] as u32;
+                            covered += 1;
+                        }
+                    }
+                }
+                let di = (ny * nw + nx) * 4;
+                if covered > 0 {
+                    rgba[di] = (sr / covered) as u8;
+                    rgba[di + 1] = (sg / covered) as u8;
+                    rgba[di + 2] = (sb / covered) as u8;
+                    rgba[di + 3] = ((covered * 255 + count / 2) / count) as u8;
+                }
+                // else leaves (0,0,0,0) — fully transparent
+            }
+        }
+        Ok(crate::png_encoder::encode_png_rgba8(nw as u32, nh as u32, &rgba))
+    }
 }
 
 // ---------------------------------------------------------------------------
