@@ -87,6 +87,8 @@
     height: 800,
     antialias: 4,
   ), width: 75%)
+  #v(0.4em)
+  #text(size: 10pt, fill: luma(150))[Version #toml("/maquette/typst.toml").package.version #h(0.4em)·#h(0.4em) #datetime.today().display("[month repr:long] [day], [year]")]
 ]
 #v(1fr)
 
@@ -119,7 +121,7 @@ Under the hood, Maquette is a small rasterizer with a real lighting pipeline: mu
 
 Import a render function, read a model file, and call it. That's it.
 ```example
-#import "@preview/maquette:0.1.0": render-stl
+#import "@preview/maquette:0.1.1": render-stl
 
 #let cube = read("data/cube.stl")
 #render-stl(cube)
@@ -236,7 +238,7 @@ Change the global color of the model by changing the `color` field.
 // hl: 2
 #render-stl(cube, (
   color: "#c0ffee",
-), width: 75%)
+), width: 60%)
 ```
 
 == Background Color
@@ -248,19 +250,21 @@ Set `background` to a hex color to fill the image background.
 #render-stl(cube, (
   center: (0.5, 0.5, 0.5),
   background: "#1a1a2e",
-), width: 75%)
+), width: 60%)
 ```
 
-Set `background: "none"` (or an empty string) for a transparent background. The PNG is exported with a real alpha channel, so the model drops straight onto whatever is behind it on the page. Use `antialias` for smooth transparent edges — FXAA only operates on RGB and is skipped for transparent output.
+Set `background: "none"` (or an empty string) for a transparent background — the PNG carries a real alpha channel, so the model blends into the page (use `antialias` for smooth edges).
 
 ```example
 // hl: 2
 #render-stl(cube, (
   background: "none",
-), width: 75%)
+), width: 60%)
 ```
 
-Our cube view looks like a flat square because of the point of view, we might want to change it in order to change our point of view.
+The cube looks like a flat square from this angle — let's change the point of view.
+
+#pagebreak()
 
 = Camera Position
 
