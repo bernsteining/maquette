@@ -1802,21 +1802,28 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
     let h = config.height as usize * aa;
     let vw = config.width * aa as f64;
     let vh = config.height * aa as f64;
-    let bg = if config.background.is_empty() || config.background == "none" {
-        (255, 255, 255)  // White background for transparent effect (PNG has no alpha)
+    // Transparent output: emit RGBA, using the z-buffer as model coverage. The
+    // buffer is still filled with white so the opaque rasterization is unchanged;
+    // the white only shows through where the model doesn't cover, and there it is
+    // made transparent at encode time (and excluded from edge colour averaging).
+    let transparent = config.background.is_empty() || config.background == "none";
+    let bg = if transparent {
+        (255, 255, 255)
     } else {
         parse_hex_color(&config.background)
     };
 
     if triangles.is_empty() {
-        return PixelBuffer::new(config.width as usize, config.height as usize, bg).encode_png();
+        let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
+        return if transparent { buf.encode_png_transparent(1) } else { buf.encode_png() };
     }
 
     // Preprocessing pipeline (cached when the mesh geometry/colors are unchanged)
     let mut prep_owned: Option<(Vec<Triangle>, Vec3, Vec3)> = None;
     let (tris, bmin, bmax) = cached_preprocess(triangles, config, prep_key, &mut prep_owned);
     if tris.is_empty() {
-        return PixelBuffer::new(config.width as usize, config.height as usize, bg).encode_png();
+        let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
+        return if transparent { buf.encode_png_transparent(1) } else { buf.encode_png() };
     }
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
@@ -1830,7 +1837,8 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
             views.push((turntable_view(bc, br, azimuth, config.turntable.elevation), labels[i].clone()));
         }
         let buf = render_grid_png_buf(&tris, config, &views, br, bmin.z, w, h, bg, group_styles);
-        let png = if aa > 1 { buf.downsample(aa) } else { buf }.encode_png()?;
+        let png = if transparent { buf.encode_png_transparent(aa)? }
+                  else if aa > 1 { buf.downsample(aa).encode_png()? } else { buf.encode_png()? };
         return if config.grid_labels {
             Ok(wrap_png_with_grid_labels(&png, config.width, config.height, &views))
         } else {
@@ -1843,7 +1851,8 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
         if !views.is_empty() {
             let resolved: Vec<_> = views.iter().map(|n| (named_view(n, bc, br), capitalize(n))).collect();
             let buf = render_grid_png_buf(&tris, config, &resolved, br, bmin.z, w, h, bg, group_styles);
-            let png = if aa > 1 { buf.downsample(aa) } else { buf }.encode_png()?;
+            let png = if transparent { buf.encode_png_transparent(aa)? }
+                      else if aa > 1 { buf.downsample(aa).encode_png()? } else { buf.encode_png()? };
             return if config.grid_labels {
                 Ok(wrap_png_with_grid_labels(&png, config.width, config.height, &resolved))
             } else {
@@ -2019,13 +2028,20 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
         buf.apply_sharpen(sharpen.strength as f32);
     }
 
-    // FXAA post-process (when not using SSAA; antialias:0 disables all AA)
-    if config.fxaa && aa <= 1 && config.antialias != 0 {
+    // FXAA post-process (when not using SSAA; antialias:0 disables all AA).
+    // Skipped for transparent output: FXAA blends edges in RGB only, which would
+    // fringe against the white fill while alpha stays hard — use SSAA for smooth
+    // transparent edges instead.
+    if config.fxaa && aa <= 1 && config.antialias != 0 && !transparent {
         crate::fxaa::apply_fxaa(&mut buf.pixels, buf.width, buf.height);
     }
 
-    let final_buf = if aa > 1 { buf.downsample(aa) } else { buf };
-    let png_bytes = final_buf.encode_png()?;
+    let png_bytes = if transparent {
+        buf.encode_png_transparent(aa)?
+    } else {
+        let final_buf = if aa > 1 { buf.downsample(aa) } else { buf };
+        final_buf.encode_png()?
+    };
 
     if let Some(ref ann_cfg) = config.annotations {
         // Scale centroids from supersampled space to output space
