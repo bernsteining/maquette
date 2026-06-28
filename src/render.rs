@@ -691,6 +691,14 @@ fn project_triangles(
     projected
 }
 
+// Reusable scratch for the depth radix sort. WASM is single-threaded and the
+// sort is non-reentrant, so static buffers avoid re-allocating keys/indices and
+// the gathered output on every call (every render sorts at least once; grid and
+// turntable sort many times). Same safety justification as the model cache.
+static mut RADIX_KEYS: Vec<u32> = Vec::new();
+static mut RADIX_IDX: Vec<u32> = Vec::new();
+static mut RADIX_OUT: Vec<ProjectedTri> = Vec::new();
+
 /// Radix sort `projected` by depth.
 /// `descending = false` → nearest last  (SVG painter's back-to-front).
 /// `descending = true`  → nearest first (PNG z-buffer front-to-back).
@@ -698,9 +706,14 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
     let n = projected.len();
     if n <= 1 { return; }
 
+    let keys = unsafe { &mut *std::ptr::addr_of_mut!(RADIX_KEYS) };
+    let idx = unsafe { &mut *std::ptr::addr_of_mut!(RADIX_IDX) };
+    let out = unsafe { &mut *std::ptr::addr_of_mut!(RADIX_OUT) };
+
     // Quantize f64 depths to u32 sort keys.
     // Flip bits so that IEEE-754 ordering becomes unsigned ordering.
-    let mut keys: Vec<u32> = Vec::with_capacity(n);
+    keys.clear();
+    keys.reserve(n);
     for tri in projected.iter() {
         let bits = (tri.depth as f32).to_bits();
         let k = if bits & 0x8000_0000 != 0 { !bits } else { bits ^ 0x8000_0000 };
@@ -709,7 +722,7 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
 
     // Compute all 4 byte-histograms in a single pass, then prefix-sum them.
     let mut hist = [[0u32; 256]; 4];
-    for &k in &keys {
+    for &k in keys.iter() {
         hist[0][(k & 0xFF) as usize] += 1;
         hist[1][((k >> 8) & 0xFF) as usize] += 1;
         hist[2][((k >> 16) & 0xFF) as usize] += 1;
@@ -725,7 +738,8 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
     }
 
     // Two index buffers in a single allocation; ping-pong via split_at_mut.
-    let mut idx = vec![0u32; 2 * n];
+    idx.clear();
+    idx.resize(2 * n, 0);
     for i in 0..n { idx[i] = i as u32; }
 
     {
@@ -757,15 +771,18 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
         }
     }
 
-    // Gather into sorted order. ptr::read avoids cloning the large structs;
-    // each index is consumed exactly once so every element is moved, not copied.
-    let mut sorted = Vec::with_capacity(n);
+    // Gather into the reusable output buffer. ptr::read moves each large struct
+    // exactly once; set_len(0) then prevents `projected` from dropping the moved
+    // elements. Swapping hands the sorted buffer to the caller and recycles the
+    // now-empty old buffer for the next call.
+    out.clear();
+    out.reserve(n);
     let ptr = projected.as_mut_ptr();
     for i in 0..n {
-        sorted.push(unsafe { std::ptr::read(ptr.add(idx[i] as usize)) });
+        out.push(unsafe { std::ptr::read(ptr.add(idx[i] as usize)) });
     }
     unsafe { projected.set_len(0); }
-    *projected = sorted;
+    std::mem::swap(projected, out);
 }
 
 // ---------------------------------------------------------------------------
@@ -1056,6 +1073,61 @@ fn cached_smooth<'a>(
     cache::get_smooth(key).unwrap()
 }
 
+/// Cache key for the preprocessed mesh: the model-data hash mixed with EVERY
+/// config field that `preprocess` reads, so a hit can only occur for inputs that
+/// produce an identical mesh. Must be kept in lock-step with `preprocess`.
+fn prep_cache_key(base: u64, config: &RenderConfig) -> u64 {
+    #[inline]
+    fn m(h: u64, x: u64) -> u64 {
+        (h ^ x).wrapping_mul(0x100000001b3)
+    }
+    let mut h = base;
+    // Color mapping (sets vertex colors).
+    for &b in config.color_map.as_bytes() { h = m(h, b as u64); }
+    h = m(h, 0xF1);
+    for s in &config.color_map_palette {
+        for &b in s.as_bytes() { h = m(h, b as u64); }
+        h = m(h, 0xF2);
+    }
+    for &b in config.scalar_function.as_bytes() { h = m(h, b as u64); }
+    h = m(h, 0xF3);
+    h = m(h, config.overhang_angle.to_bits());
+    h = m(h, config.vertex_smoothing as u64);
+    for &u in &config.up { h = m(h, u.to_bits()); }
+    // Clipping (geometry; uses cull_backface) + explode + decimate.
+    match config.clip_plane {
+        Some(p) => { h = m(h, 1); for &v in &p { h = m(h, v.to_bits()); } }
+        None => h = m(h, 2),
+    }
+    h = m(h, config.cull_backface as u64);
+    h = m(h, config.explode.to_bits());
+    h = m(h, config.decimate.to_bits());
+    h
+}
+
+/// Run `preprocess` or reuse a cached result. When `prep_key` is None (PLY, or
+/// OBJ with materials/highlight) the result is computed into `owned` and
+/// borrowed from there; otherwise it is cached and borrowed from the cache.
+fn cached_preprocess<'a>(
+    triangles: &[Triangle],
+    config: &RenderConfig,
+    prep_key: Option<u64>,
+    owned: &'a mut Option<(Vec<Triangle>, Vec3, Vec3)>,
+) -> (&'a [Triangle], Vec3, Vec3) {
+    if let Some(base) = prep_key {
+        let key = prep_cache_key(base, config);
+        if let Some(e) = cache::get_prep(key) {
+            return (&e.0, e.1, e.2);
+        }
+        cache::put_prep(key, preprocess(triangles, config));
+        let e = cache::get_prep(key).unwrap();
+        return (&e.0, e.1, e.2);
+    }
+    *owned = Some(preprocess(triangles, config));
+    let e = owned.as_ref().unwrap();
+    (&e.0, e.1, e.2)
+}
+
 // ---------------------------------------------------------------------------
 // Point projection helper (for dimensions/outlines)
 // ---------------------------------------------------------------------------
@@ -1082,13 +1154,14 @@ fn make_point_projector(
 // Main entry point
 // ---------------------------------------------------------------------------
 
-pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>) -> String {
+pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>) -> String {
     if triangles.is_empty() {
         return build_empty_svg(config);
     }
 
-    // Preprocessing pipeline
-    let (tris, bmin, bmax) = preprocess(triangles, config);
+    // Preprocessing pipeline (cached when the mesh geometry/colors are unchanged)
+    let mut prep_owned: Option<(Vec<Triangle>, Vec3, Vec3)> = None;
+    let (tris, bmin, bmax) = cached_preprocess(triangles, config, prep_key, &mut prep_owned);
     if tris.is_empty() {
         return build_empty_svg(config);
     }
@@ -1723,7 +1796,7 @@ fn render_grid_svg(
 // PNG rendering
 // ---------------------------------------------------------------------------
 
-pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>) -> Result<Vec<u8>, String> {
+pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>) -> Result<Vec<u8>, String> {
     let aa = config.antialias.max(1).next_power_of_two();
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
@@ -1739,8 +1812,9 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
         return PixelBuffer::new(config.width as usize, config.height as usize, bg).encode_png();
     }
 
-    // Preprocessing pipeline
-    let (tris, bmin, bmax) = preprocess(triangles, config);
+    // Preprocessing pipeline (cached when the mesh geometry/colors are unchanged)
+    let mut prep_owned: Option<(Vec<Triangle>, Vec3, Vec3)> = None;
+    let (tris, bmin, bmax) = cached_preprocess(triangles, config, prep_key, &mut prep_owned);
     if tris.is_empty() {
         return PixelBuffer::new(config.width as usize, config.height as usize, bg).encode_png();
     }
