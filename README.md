@@ -1,12 +1,15 @@
 # Maquette
 
+[![Typst Universe](https://img.shields.io/badge/Typst%20Universe-maquette-239dad)](https://typst.app/universe/package/maquette)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 Maquette is a [Typst](https://typst.app) plugin that renders 3D models directly inside your documents — no screenshots, no external tools, no manual re-exports when you tweak the camera angle.
 
 Maquette takes STL, OBJ, and PLY files and turns them into SVG or PNG images at compile time, right inside the Typst pipeline. Point a camera, set up lighting, pick a shading model, and the result lands in your PDF. Change a parameter, recompile, done. This makes it practical to embed technical 3D illustrations in engineering reports, research papers, and documentation without maintaining a separate asset pipeline.
 
-Everything runs as a single WASM plugin (~460 KB), with focus on speed.
+Everything runs as a single WASM plugin (~485 KB), with focus on speed.
 
-Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.0/examples/documentation.pdf) to see examples of all the features.
+Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.1/examples/documentation.pdf) to see examples of all the features.
 
 ## Example
 
@@ -17,7 +20,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 <td>
 
 ```typst
-#import "@preview/maquette:0.1.0": render-obj
+#import "@preview/maquette:0.1.1": render-obj
 #let bunny = read("examples/data/bunny.obj")
 
 #render-obj(bunny, (
@@ -66,13 +69,13 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 </tr>
 </table>
 
-Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.0/examples/documentation.pdf) has many examples covering all the features offered by `maquette`.
+Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.1/examples/documentation.pdf) has many examples covering all the features offered by `maquette`.
 
 
 # Usage
 
 ```typst
-#import "@preview/maquette:0.1.0": render-obj
+#import "@preview/maquette:0.1.1": render-obj
 #let cube = read("examples/data/cube.obj")
 #render-obj(cube)
 ```
@@ -132,7 +135,7 @@ Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0
 
 ## Documentation
 
-See [examples/documentation.pdf](https://github.com/bernsteining/maquette/blob/v0.1.0/examples/documentation.pdf) for a full walkthrough with examples, or compile it:
+See [examples/documentation.pdf](https://github.com/bernsteining/maquette/blob/v0.1.1/examples/documentation.pdf) for a full walkthrough with examples, or compile it:
 
 ```sh
 make demo
