@@ -1601,6 +1601,9 @@ struct TriSetup {
     dw0_dx: f64, dw0_dy: f64,
     dw1_dx: f64, dw1_dy: f64,
     dw2_dx: f64, dw2_dy: f64,
+    // Reciprocals of the x-gradients (constant per triangle) so the scanline
+    // edge-crossing uses a multiply per row instead of a division.
+    inv_dw0_dx: f64, inv_dw1_dx: f64, inv_dw2_dx: f64,
     row_w0: f64, row_w1: f64, row_w2: f64,
 }
 
@@ -1631,9 +1634,11 @@ impl TriSetup {
         let row_w1 = edge(pts[2], pts[0], p0) * inv_area;
         let row_w2 = edge(pts[0], pts[1], p0) * inv_area;
 
+        let inv = |d: f64| if d.abs() < 1e-12 { 0.0 } else { 1.0 / d };
         Some(Self {
             min_x, max_x, min_y, max_y,
             dw0_dx, dw0_dy, dw1_dx, dw1_dy, dw2_dx, dw2_dy,
+            inv_dw0_dx: inv(dw0_dx), inv_dw1_dx: inv(dw1_dx), inv_dw2_dx: inv(dw2_dx),
             row_w0, row_w1, row_w2,
         })
     }
@@ -1645,11 +1650,15 @@ impl TriSetup {
         let mut left = self.min_x as f64;
         let mut right = self.max_x as f64;
 
-        for &(w, dw) in &[(row_w0, self.dw0_dx), (row_w1, self.dw1_dx), (row_w2, self.dw2_dx)] {
+        for &(w, dw, inv_dw) in &[
+            (row_w0, self.dw0_dx, self.inv_dw0_dx),
+            (row_w1, self.dw1_dx, self.inv_dw1_dx),
+            (row_w2, self.dw2_dx, self.inv_dw2_dx),
+        ] {
             if dw.abs() < 1e-12 {
                 if w < -1e-9 { return None; }
             } else {
-                let x_cross = self.min_x as f64 - w / dw;
+                let x_cross = self.min_x as f64 - w * inv_dw;
                 if dw > 0.0 {
                     left = left.max(x_cross);
                 } else {

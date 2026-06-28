@@ -1291,7 +1291,8 @@ fn compute_group_centroids(tris: &[ProjectedTri]) -> FxHashMap<u32, (f64, f64)> 
 }
 
 fn count_unique_vertices(triangles: &[Triangle]) -> usize {
-    let mut set = HashSet::with_capacity(triangles.len());
+    let mut set: HashSet<_, FxBuildHasher> =
+        HashSet::with_capacity_and_hasher(triangles.len(), FxBuildHasher::default());
     for tri in triangles {
         for v in &tri.vertices {
             set.insert(quantize(*v));
