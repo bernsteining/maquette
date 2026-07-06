@@ -275,7 +275,7 @@ Change the camera position and where it points to using cartesian coordinates wi
 ```example
 // hl: 2-3
 #render-stl(cube, (
-  camera: (2,3,3),
+  camera: (0 ,0,6),
   center: (1, 1, 1),
 ), width: 64%)
 ```
@@ -289,13 +289,25 @@ Instead of placing the camera with Cartesian `(x, y, z)` coordinates, you can us
 #render-obj(teapot, (
   up: (0, 1, 0),
   azimuth: 20,
-  elevation: -20,
+  elevation: 21,
   distance: 7,
 ), width: 64%)
 ```
 
 The `up` parameter defines which direction points "up" in the scene. The default is `(0, 0, 1)` (Z-up), which matches the convention used by most CAD software and STL files. OBJ files exported from Blender, game engines, or other Y-up tools typically need `up: (0, 1, 0)` to display correctly.
 
+== WASD
+
+Similar to the spherical coordinates you can use the classical wasd keys to move the camera around. This will increment the rotation by 5 degrees every time you press a key.
+
+```example
+// hl: 3-5
+#render-obj(teapot, (
+  up: (0, 1, 0),
+  wasd:"aaawwwwwwsd"
+  distance: 7,
+), width: 64%)
+```
 == #link("https://en.wikipedia.org/wiki/Field_of_view")[Field of View]
 
 #grid(columns: (1fr, 1fr), column-gutter: 2em, row-gutter: 1.5em,

@@ -42,8 +42,23 @@ pub(crate) fn resolve_config_view(config: &RenderConfig, bc: Vec3, br: f64) -> V
         axonometric_camera(center, dist, &config.projection).unwrap_or(raw_camera)
     } else {
         // Spherical coordinates (default): build orthonormal basis from `up`
-        let az = config.azimuth.to_radians();
-        let el = config.elevation.to_radians();
+        let (az, el) = if !config.wasd.is_empty() {
+            let (mut a_count, mut w_count) = (0, 0);
+
+            for character in config.wasd.chars() {
+                match character.to_ascii_lowercase() {
+                    'a' => a_count += 1,
+                    'd' => a_count -= 1,
+                    'w' => w_count += 1,
+                    's' => w_count -= 1,
+                    _ => (),
+                }
+            }
+
+            ((a_count as f64 * 5.0).to_radians(), (w_count as f64 * 5.0).to_radians())
+        } else {
+            (config.azimuth.to_radians(), config.elevation.to_radians())
+        };
         let dist = config.distance.filter(|&d| d > 0.0).unwrap_or(br * 3.0);
         axonometric_camera(center, dist, &config.projection).unwrap_or_else(|| {
             let arbitrary = if up.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
