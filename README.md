@@ -23,18 +23,18 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 #import "@preview/maquette:0.1.1": render-obj
 #let bunny = read("examples/data/bunny.obj")
 
-#render-obj(bunny, (
+#render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
-  background: "none",
+  background: none,
   lights: (
     (type: "positional",
      vector: (-0.1, 0.14, -0.04),
      color: "#ff0000", intensity: 3.0),
   ),
   sss: (intensity: 4, power: 3.5, distortion: 0.2),
-), antialias: 4)
+  antialias: 4)
 ```
 
 </td>
@@ -137,19 +137,19 @@ make demo
 ### `render-stl` / `render-obj` / `render-ply`
 
 ```typst
-#render-stl(stl-data, config, width: auto, height: auto, format: "png")
-#render-obj(obj-data, config, width: auto, height: auto, format: "png")
-#render-ply(ply-data, config, width: auto, height: auto, format: "png")
+#render-stl(stl-data, ..config, width: auto, height: auto, format: "png")
+#render-obj(obj-data, ..config, width: auto, height: auto, format: "png")
+#render-ply(ply-data, ..config, width: auto, height: auto, format: "png")
 ```
 
-Renders a 3D model. Data must be read with `encoding: none` (required for binary STL/PLY, optional for OBJ). Config is a JSON string via `json.encode((...))`. Set `format: "svg"` for vector output.
+Renders a 3D model. Data must be read with `encoding: none` (required for binary STL/PLY, optional for OBJ). Configuration parameters are passed as named arguments (e.g. `color: "#c0ffee"`), or bundled into a single dictionary passed positionally (`render-stl(data, (color: "#c0ffee"))`) — both are equivalent. Any parameter set to `none` falls back to its default. `width`/`height`/`format` control display sizing and output format; set `format: "svg"` for vector output.
 
 ### `get-stl-info` / `get-obj-info` / `get-ply-info`
 
 ```typst
-#let info = get-stl-info(stl-data, json.encode(()))
-#let info = get-obj-info(obj-data, json.encode(()))
-#let info = get-ply-info(ply-data, json.encode(()))
+#let info = get-stl-info(stl-data)
+#let info = get-obj-info(obj-data)
+#let info = get-ply-info(ply-data)
 ```
 
 Returns JSON with model metadata (triangle count, vertex count, bounding box, groups).
@@ -177,7 +177,7 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 | `auto_fit` | `true` | Scale model to fill viewport |
 | `width` | `500` | Output width in pixels |
 | `height` | `500` | Output height in pixels |
-| `background` | `"#f0f0f0"` | Background color (hex). `"none"` or empty string = transparent (PNG exports with an alpha channel; use `antialias` for smooth transparent edges) |
+| `background` | `"#f0f0f0"` | Background color (hex). `none`, `"none"` or empty string = transparent (PNG exports with an alpha channel; use `antialias` for smooth transparent edges) |
 
 ### Appearance
 
