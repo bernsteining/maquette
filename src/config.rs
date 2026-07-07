@@ -762,6 +762,10 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
             let key = p.parse_str()?;
             p.expect(b':')?;
             match key {
+                // `none` (Typst) → JSON null on any setting: keep the default (i.e.
+                // "unset" / disabled), so `field: none` never errors. `background` is
+                // excepted below — there, none means transparent, not the default fill.
+                _ if key != "background" && p.is_null() => {}
                 "camera" => cfg.camera = if p.is_null() { None } else { Some(p.parse_f64_3()?) },
                 "center" => cfg.center = p.parse_f64_3()?,
                 "up" => cfg.up = p.parse_f64_3()?,
@@ -780,7 +784,7 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                     "sky" => sky = parse_string,
                     "ground" => ground = parse_string,
                 }, |v, p| v.intensity = p.parse_f64()?),
-                "background" => cfg.background = p.parse_string()?,
+                "background" => cfg.background = if p.is_null() { "none".into() } else { p.parse_string()? },
                 "mode" => cfg.mode = p.parse_string()?,
                 "cull_backface" => cfg.cull_backface = p.parse_bool()?,
                 "wireframe" => cfg.wireframe = parse_object_or!(p, WireframeConfig, {
