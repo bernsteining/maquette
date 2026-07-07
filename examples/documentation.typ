@@ -127,9 +127,7 @@ Import a render function, read a model file, and call it. That's it.
 #render-stl(cube)
 ```
 
-The `width` and `height` arguments are forwarded to Typst's `image()` for display sizing. 
-
-The default output is PNG; pass `format: "svg"` for vector output: 
+Every configuration parameter is passed as a *named argument* (shown throughout), or bundled in a dictionary passed positionally — `render-stl(cube, (color: "#c0ffee"))` — for reuse; both are equivalent. The `width`/`height`/`format` arguments are handled by the wrapper: `width`/`height` size the `image()` for *display*, distinct from the config's pixel-resolution `width`/`height` (set those via a dictionary). The default output is PNG; pass `format: "svg"` for vector output:
 
 ```typst
 #render-stl(cube, format: "svg")
@@ -150,15 +148,13 @@ With a show rule, you can write OBJ / STL / PLY geometry directly in fenced code
   align(center + horizon, render-obj(bytes(pyramid-obj), width: 58%)),
 )
 
-Now we might want to customize all our rendering pipeline, so let's see how we can configure that.
-
 #pagebreak()
 
 = Config Reference
 
-All parameters are optional and can be passed as a dictionary. Defaults are shown below.
+All parameters are optional — pass them as named arguments or a dictionary; defaults are shown below. Setting any to `none` restores its default (for `background`, that means transparent).
 
-#text(size: 9.85pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
+#text(size: 9.5pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
   \"camera\": [3, 3, 3],                             // Camera position in world space (Cartesian)
   \"azimuth\": null,                                 // Spherical camera: horizontal angle in degrees
   \"elevation\": null,                               // Spherical camera: vertical angle in degrees
@@ -171,7 +167,7 @@ All parameters are optional and can be passed as a dictionary. Defaults are show
   \"auto_fit\": true,                                // Scale model to fill viewport
   \"width\": 500,                                    // Output width in pixels
   \"height\": 500,                                   // Output height in pixels
-  \"background\": \"#f0f0f0\",                         // Background color (hex), \"none\" or \"\" = transparent
+  \"background\": \"#f0f0f0\",                         // Background color (hex); none, \"none\" or \"\" = transparent
   // ── Appearance ────────────────────────────────────────────────────
   \"color\": \"#4488cc\",                              // Model fill color (hex)
   \"stroke\": {\"color\": \"none\", \"width\": 0},         // Triangle edge stroke (or just \"#hex\")
@@ -236,9 +232,10 @@ Change the global color of the model by changing the `color` field.
 
 ```example
 // hl: 2
-#render-stl(cube, (
+#render-stl(cube,
   color: "#c0ffee",
-), width: 60%)
+  width: 60%,
+)
 ```
 
 == Background Color
@@ -247,19 +244,21 @@ Set `background` to a hex color to fill the image background.
 
 ```example
 // hl: 3
-#render-stl(cube, (
+#render-stl(cube,
   center: (0.5, 0.5, 0.5),
   background: "#1a1a2e",
-), width: 60%)
+  width: 60%,
+)
 ```
 
-Set `background: "none"` (or an empty string) for a transparent background — the PNG carries a real alpha channel, so the model blends into the page (use `antialias` for smooth edges).
+Set `background` to `none` (the string `"none"` and an empty string `""` work too) for a transparent background — the PNG carries a real alpha channel, so the model blends into the page (use `antialias` for smooth edges).
 
 ```example
 // hl: 2
-#render-stl(cube, (
-  background: "none",
-), width: 60%)
+#render-stl(cube,
+  background: none,
+  width: 60%,
+)
 ```
 
 The cube looks like a flat square from this angle — let's change the point of view.
@@ -274,10 +273,11 @@ Change the camera position and where it points to using cartesian coordinates wi
 
 ```example
 // hl: 2-3
-#render-stl(cube, (
+#render-stl(cube,
   camera: (2,3,3),
   center: (1, 1, 1),
-), width: 64%)
+  width: 64%,
+)
 ```
 
 == #link("https://en.wikipedia.org/wiki/Spherical_coordinate_system")[Spherical coordinates]
@@ -286,12 +286,13 @@ Instead of placing the camera with Cartesian `(x, y, z)` coordinates, you can us
 
 ```example
 // hl: 3-5
-#render-obj(teapot, (
+#render-obj(teapot,
   up: (0, 1, 0),
   azimuth: 20,
   elevation: -20,
   distance: 7,
-), width: 64%)
+  width: 64%,
+)
 ```
 
 The `up` parameter defines which direction points "up" in the scene. The default is `(0, 0, 1)` (Z-up), which matches the convention used by most CAD software and STL files. OBJ files exported from Blender, game engines, or other Y-up tools typically need `up: (0, 1, 0)` to display correctly.
@@ -302,22 +303,24 @@ The `up` parameter defines which direction points "up" in the scene. The default
   [
     ```example
     // hl: 3
-    #render-obj(teapot, (
+    #render-obj(teapot,
       up: (0, 1, 0),
       fov: 20,
-    ), width: 100%)
+      width: 100%,
+    )
     ```
   ],
   [
     ```example
     // hl: 5-6
-    #render-obj(teapot, (
+    #render-obj(teapot,
       up: (0, 1, 0),
       azimuth: 45,
       distance: 30,
       auto_fit: false,
       fov: 10,
-    ), width: 100%)
+      width: 100%,
+    )
     ```
   ],
 )
@@ -338,10 +341,10 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Objects farther from the camera appear smaller, giving a natural sense of depth.
     ```example
     // hl: 3-4
-    #render-stl(cube, (
+    #render-stl(cube,
       camera: (3, 2, 2),
       stroke: (color: "#111111", width: 1.0),
-    ))
+    )
     ```
   ],
   [
@@ -349,11 +352,11 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     No perspective foreshortening: parallel lines stay parallel regardless of distance.
     ```example
     // hl: 5
-    #render-stl(cube, (
+    #render-stl(cube,
       camera: (3, 2, 2),
       stroke: (color: "#111111", width: 1.0),
       projection: "orthographic",
-    ))
+    )
     ```
   ],
 )
@@ -364,11 +367,11 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Three principal axes appear equally foreshortened. Common in technical illustrations and game art.
     ```example
     // hl: 5
-    #render-stl(cube, (
+    #render-stl(cube,
       camera: (3, 2, 2),
       stroke: (color: "#111111", width: 1.0),
       projection: "isometric",
-    ))
+    )
     ```
   ],
   [
@@ -376,11 +379,11 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Two axes equally foreshortened, the third differs. Elevation ~20.7°, azimuth 45°.
     ```example
     // hl: 5
-    #render-stl(cube, (
+    #render-stl(cube,
       camera: (3, 2, 2),
       stroke: (color: "#111111", width: 1.0),
       projection: "dimetric",
-    ))
+    )
     ```
   ],
 )
@@ -391,11 +394,11 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     All three axes have different foreshortening. Elevation ~25°, azimuth ~30°.
     ```example
     // hl: 5
-    #render-stl(cube, (
+    #render-stl(cube,
       camera: (3, 2, 2),
       stroke: (color: "#111111", width: 1.0),
       projection: "trimetric",
-    ))
+    )
     ```
   ],
   [
@@ -403,11 +406,11 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Top-down axonometric where the plan view dominates. Elevation ~54.7°, azimuth 45°.
     ```example
     // hl: 5
-    #render-stl(cube, (
+    #render-stl(cube,
       camera: (3, 2, 2),
       stroke: (color: "#111111", width: 1.0),
       projection: "military",
-    ))
+    )
     ```
   ],
 )
@@ -419,24 +422,28 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     == #link("https://en.wikipedia.org/wiki/Oblique_projection#Cabinet_projection")[Cabinet]
     Oblique projection: front face at true shape, depth axis at half scale, 45° angle.
     ```example
-    // hl: 5
-    #render-stl(cube, (
+    // hl: 6
+    #render-stl(cube,
       camera: (3, 2, 2),
-      stroke: (color: "#111111", width: 1.0),
+      stroke: 
+        (color: "#111111", 
+         width: 1.0),
       projection: "cabinet",
-    ))
+    )
     ```
   ],
   [
     == #link("https://en.wikipedia.org/wiki/Oblique_projection#Cavalier_projection")[Cavalier]
     Like cabinet, but the depth axis is drawn at full scale at a 45° angle. All dimensions are preserved equally.
     ```example
-    // hl: 5
-    #render-stl(cube, (
+    // hl: 6
+    #render-stl(cube,
       camera: (3, 2, 2),
-      stroke: (color: "#111111", width: 1.0),
+      stroke: 
+        (color: "#111111",
+         width: 1.0),
       projection: "cavalier",
-    ))
+    )
     ```
   ],
   [
@@ -444,12 +451,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Equidistant: angular distance maps linearly to radius. Uniform distortion across the field.
     ```example
     // hl: 5
-    #render-obj(teapot, (
+    #render-obj(teapot,
       up: (0, 1, 0),
       elevation: 25,
       distance: 2.5,
       projection: "fisheye",
-    ))
+    )
     ```
   ],
   [
@@ -457,12 +464,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Conformal: preserves local shapes but enlarges the periphery. Compare the teapot's spout/handle to fisheye.
     ```example
     // hl: 5
-    #render-obj(teapot, (
+    #render-obj(teapot,
       up: (0, 1, 0),
       elevation: 25,
       distance: 2.5,
       projection: "stereographic",
-    ))
+    )
     ```
   ],
   [
@@ -470,12 +477,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Perspective with barrel distortion: straight lines curve outward near the edges, simulating a wide-angle lens.
     ```example
     // hl: 5
-    #render-obj(teapot, (
+    #render-obj(teapot,
       up: (0, 1, 0),
       elevation: 25,
       distance: 14,
       projection: "curvilinear",
-    ))
+    )
     ```
   ],
   [
@@ -483,12 +490,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Horizontal angles map linearly (like a panorama), vertical stays perspective. Keeps vertical lines straight.
     ```example
     // hl: 5
-    #render-obj(teapot, (
+    #render-obj(teapot,
       up: (0, 1, 0),
       elevation: 25,
       distance: 2.5,
       projection: "cylindrical",
-    ))
+    )
     ```
   ],
   [
@@ -496,11 +503,11 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Architectural photography projection: verticals stay straight, horizontals curve gracefully. A hybrid between cylindrical and stereographic.
     ```example
     // hl: 4
-    #render-obj(teapot, (
+    #render-obj(teapot,
       up: (0, 1, 0),
       distance: 2.5,
       projection: "pannini",
-    ))
+    )
     ```
   ],
   [
@@ -508,11 +515,11 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     Full 360° inverse projection: objects ahead wrap to the outer edge, objects behind map to the center. Backface culling auto-disabled. Example shows Tiny Planet from inside our teapot.
     ```example
     // hl: 4
-    #render-obj(teapot, (
+    #render-obj(teapot,
       camera: (0, 1.7, 0),
       up: (0, 0, 1),
       projection: "tiny-planet",
-    ))
+    )
     ```
   ],
 )
@@ -568,25 +575,27 @@ ambient: (intensity: 0.15, sky: "#ccd4e0", ground: "#d4ccc4")
   align(center)[
     *Flat ambient (default)*
     ```examplev
-    #render-obj(bunny, (
+    #render-obj(bunny,
       up: (0, 1, 0),
       azimuth: 180,
       distance: 0.25,
       specular: 0.3,
       ambient: 0.3,
-    ), width: 100%)```
+      width: 100%,
+    )```
   ],
   align(center)[
     *Hemisphere ambient*
     ```examplev
     // hl: 6
-    #render-obj(bunny, (
+    #render-obj(bunny,
       up: (0, 1, 0),
       azimuth: 180,
       distance: 0.25,
       specular: 0.3,
       ambient: (intensity: 0.4, sky: "#8899cc", ground: "#443322"),
-    ), width: 100%)```
+      width: 100%,
+    )```
   ],
 )
 
@@ -598,11 +607,12 @@ Draws bold edges where front-facing and back-facing triangles meet, producing a 
 
 ```example
 // hl: 4
-#render-stl(cube, (
+#render-stl(cube,
   camera: (3, 2, 2),
   center: (0.5, 0.5, 0.5),
   outline: (color: "#000000", width: 5),
-), width: 70%)
+  width: 70%,
+)
 ```
 
 == Ground Shadow
@@ -614,11 +624,12 @@ ground_shadow: (opacity: 0.3, color: "#000000")
 
 ```example
 // hl: 4
-#render-stl(cube, (
+#render-stl(cube,
   camera: (3, 2, 2),
   light_dir: (1, -1, 3),
   ground_shadow: (opacity: 0.35, color: "#2244aa"),
-), width: 70%)
+  width: 70%,
+)
 ```
 
 #pagebreak()
@@ -747,18 +758,28 @@ Each light has `type`, `vector`, `color`, and `intensity`. Positional lights emi
 Per-light shadows are not computed. The `ground_shadow` feature uses a single direction: the first directional light in the array, or `light_dir` as fallback.
 
 ```example
-// hl: 6-10
-#render-obj(teapot, (
+// hl: 6-19
+#render-obj(teapot,
   up: (0, 1, 0),
   ambient: 0.05,
   specular: 0.5,
   color: "#cccccc",
   lights: (
-    (type: "positional", vector: (3, 3, 0), color: "#ff4444", intensity: 1.2),
-    (type: "positional", vector: (-3, 2, 2), color: "#44ff44", intensity: 1.0),
-    (type: "directional", vector: (0, 1, 0), color: "#4444ff", intensity: 0.5),
+    (type: "positional", 
+     vector: (3, 3, 0), 
+     color: "#ff4444", 
+     intensity: 1.2),
+    (type: "positional", 
+     vector: (-3, 2, 2), 
+     color: "#44ff44", 
+     intensity: 1.0),
+    (type: "directional", 
+     vector: (0, 1, 0), 
+     color: "#4444ff", 
+     intensity: 0.5),
   ),
-), width: 100%)
+  width: 100%,
+)
 ```
 
 == #link("https://en.wikipedia.org/wiki/Tone_mapping")[Tone Mapping]
@@ -851,31 +872,34 @@ Fake view-dependent subsurface scattering simulates light passing through thin g
 === Without Subsurface Scattering
 
 ```example
-#render-obj(bunny, (
+#render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
   lights: (
-  (type: "positional", 
-   vector: (-0.1, 0.14, -0.04),
-   color: "#ff0000", intensity: 3.0)),
-  ), width: 100%)
+    (type: "positional", vector: (-0.1, 0.14, -0.04), color: "#ff0000", intensity: 3.0),
+  ),
+  width: 100%,
+)
 ```
 
 === Subsurface Scattering (back-lit bunny)
 
 ```example
-// hl: 9
-#render-obj(bunny, (
+// hl: 11
+#render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
   lights: (
-  (type: "positional", 
-   vector: (-0.1, 0.14, -0.04),
-   color: "#ff0000", intensity: 3.0)),
+    (type: "positional", 
+     vector: (-0.1, 0.14, -0.04), 
+     color: "#ff0000", 
+     intensity: 3.0),
+  ),
   sss: (intensity: 4, power: 3.5, distortion: 0.2),
-), width: 100%)
+  width: 100%,
+)
 ```
 
 #pagebreak()
@@ -889,25 +913,24 @@ Color mapping replaces the uniform model color with a gradient derived from geom
 Colors vertices based on local surface curvature — the rate at which the surface bends. Low curvature (flat areas) maps to blue/dark colors, while high curvature (sharp edges, creases) maps to red/bright colors. Useful for quality inspection, identifying sharp features, or visualizing mesh topology.
 
 ```example
-// hl: 10
-#render-obj(bunny, (
+// hl: 8
+#render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
   ambient: 0.3,
   specular: 0.5,
-  width: 400,
-  height: 400,
   vertex_smoothing: 4,
   color_map: "curvature",
-), width: 70%)
+  width: 70%,
+)
 ```
 
 You might have noticed the appearance of a `vertex_smoothing` setting in the previous render. This parameter allows to smoothen the color distribution across vertices, otherwise the color looks flaky, as you can see with `vertex_smoothing: 0`:
 
 ```example
 // hl: 7-8
-#render-obj(bunny, (
+#render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
@@ -915,7 +938,8 @@ You might have noticed the appearance of a `vertex_smoothing` setting in the pre
   specular: 0.5,
   color_map: "curvature",
   vertex_smoothing: 0,
-), width: 70%)
+  width: 70%,
+)
 ```
 
 == Overhang Map
@@ -924,7 +948,7 @@ Faces steeper than `overhang_angle` (relative to vertical) are highlighted in re
 
 ```example
 // hl: 7-8
-#render-obj(bunny, (
+#render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
@@ -932,7 +956,8 @@ Faces steeper than `overhang_angle` (relative to vertical) are highlighted in re
   specular: 0.5,
   color_map: "overhang",
   overhang_angle: 45,
-), width: 70%)
+  width: 70%,
+)
 ```
 
 #pagebreak()
@@ -960,7 +985,7 @@ Some examples:
 
 ```example
 // hl: 7-8
-#render-obj(bunny, (
+#render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
@@ -968,12 +993,13 @@ Some examples:
   specular: 0.5,
   color_map: "scalar",
   scalar_function: "smoothstep(-0.1, 0.1, x)",
-), width: 80%)
+  width: 80%,
+)
 ```
 
 ```example
 // hl: 7-14
-#render-obj(bunny, (
+#render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
@@ -987,7 +1013,8 @@ Some examples:
     "#e85d75",
     "#ffcc33",
   ),
-), width: 80%)
+  width: 80%,
+)
 ```
 
 #pagebreak()
@@ -1002,7 +1029,7 @@ Some binary STL files encode per-face colors in the attribute bytes using the RG
 // hl: 1
 #let colored = read("data/colored_cube.stl", encoding: none)
 
-#render-stl(colored, (projection: "isometric"), width: 65%)
+#render-stl(colored, projection: "isometric", width: 65%)
 ```
 
 == PLY Format
@@ -1015,11 +1042,12 @@ Maquette handles PLY files in ASCII and binary (little/big-endian) formats — a
 // hl: 1
 #let rubi_blender = read("data/rubi_blender.ply", encoding: none)
 
-#render-ply(rubi_blender, (
+#render-ply(rubi_blender,
   azimuth: 45,
   elevation: 25,
   distance: 10,
-), width: 65%)
+  width: 65%,
+)
 ```
 
 === Point Clouds
@@ -1030,12 +1058,13 @@ PLY files can also contain clouds of points. 3D scanning apps usually allow to e
 // hl: 1
 #let rubi_scan = read("data/rubi_scan.ply", encoding: none)
 
-#render-ply(rubi_scan, (
+#render-ply(rubi_scan,
   up: (0,1,0),
   elevation: 25,
   distance: 0.8,
   auto_fit: false,
-), width: 65%)
+  width: 65%,
+)
 ```
 
 == OBJ Material Coloring
@@ -1066,13 +1095,14 @@ usemtl face6
 // hl: 5-9
 #let obj-cube = read("data/cube.obj")
 
-#render-obj(obj-cube, (
+#render-obj(obj-cube,
   camera: (3,3,3),
   materials: (
     face4: "#2ecc71",
     face5: "#222222",
     face6: "#ff2222",
-  )))
+  ),
+)
 ```
 ]
 )
@@ -1126,7 +1156,7 @@ Here's an example of a #link("https://www.cgtrader.com/items/124377/download-pag
 ```example
 // hl: 6-10
 #align(center,
-render-obj(crankshaft, (
+render-obj(crankshaft,
   camera: (-100, -100, 500),
   up: (0, -1, 0),
   color: "#777777",
@@ -1135,7 +1165,8 @@ render-obj(crankshaft, (
     Model__Crankshaft: "#00ff00",
     Model__Piston_B: (color: "#0000ff"),
   ),
-), width: 87%))
+  width: 87%,
+))
 ```
 
 #pagebreak()
@@ -1145,19 +1176,23 @@ render-obj(crankshaft, (
 Instead of a plain color, pass a dictionary with specific appearance overrides to selectively change parts appearance.
 
 ```example
-// hl: 6-11
-#render-obj(crankshaft, (
+// hl: 6-13
+#render-obj(crankshaft,
   camera: (-100, -100, 500),
   up: (0, -1, 0),
   color: "#777777",
   antialias: 4,
   highlight: (
-    Model__Crankshaft: (color: "#cc0000", stroke: "#ffffff", stroke_width: 0.5),
+    Model__Crankshaft: 
+      (color: "#cc0000", 
+       stroke: "#ffffff", 
+       stroke_width: 0.5),
     Model__Piston_A: (color: "#88ccff", opacity: 0.3),
     Model__Piston_C: (color: "#88ccff", opacity: 0.3),
     Model__Piston_D: (color: "#88ccff", opacity: 0.3),
   ),
-), width: 100%)
+  width: 100%,
+)
 ```
 
 === Annotations
@@ -1167,18 +1202,25 @@ Annotate OBJ groups by drawing a leader line from each group's centroid to a tex
 Pass `annotations: true` to label all groups with default styling, or pass an object to customize. The `groups` field filters to specific groups; `color`, `font_size`, and `offset` control appearance.
 
 ```example
-// hl: 5-10
-#render-obj(crankshaft, (
+// hl: 5-16
+#render-obj(crankshaft,
   camera: (-100, -100, 500),
   up: (0, -1, 0),
   color: "#777777",
   annotations: (
-    groups: ("Model__Piston_A", "Model__Piston_B", "Model__Piston_C", "Model__Piston_D", "Model__Piston_E", "Model__Piston_F"),
+    groups: 
+      ("Model__Piston_A", 
+       "Model__Piston_B", 
+       "Model__Piston_C", 
+       "Model__Piston_D", 
+       "Model__Piston_E", 
+       "Model__Piston_F"),
     color: "#bb2222",
     font_size: 12,
     offset: 45,
   ),
-), width: 100%)
+  width: 100%,
+)
 ```
 
 #pagebreak()
@@ -1190,16 +1232,15 @@ Pass `annotations: true` to label all groups with default styling, or pass an ob
 Nothing new, since it's the default mode we saw earlier, but it allows me to introduce this beautiful low poly `brain_skull.obj`.
 
 ```example
-#let skull-brain = read("data/brain_skull.obj", encoding: none)
+#let skull-brain = read("data/brain_skull.obj")
 
-#render-obj(skull-brain, (
+#render-obj(skull-brain,
   azimuth: 270,
   up: (0,1,0),
   distance: 200,
   color: "#e8e8e8",
-  width: 600,
-  height: 600,
-), width: 100%)
+  width: 100%,
+)
 ```
 
 == X-Ray Mode
@@ -1214,7 +1255,7 @@ Our previous skull model now unveils its inner brain!
 
 ```example
 // hl: 5-10
-#render-obj(skull-brain, (
+#render-obj(skull-brain,
   azimuth: 270,
   up: (0,1,0),
   distance: 200,
@@ -1224,7 +1265,8 @@ Our previous skull model now unveils its inner brain!
   ),
   xray_opacity: 0.3,
   mode: "x-ray",
-), width: 100%)
+  width: 100%,
+)
 ```
 
 Useful when the model has no groups to distinguish.
@@ -1239,14 +1281,16 @@ It's a great occasion to showcase SVG output, no rasterization artifacts and kin
 
 ```examplev
 // hl: 6-8
-#render-obj(teapot, (
+#render-obj(teapot,
   up: (0, 1, 0),
   distance: 8,
   auto_fit: false,
   background: "#ffffff",
   wireframe: (color: "#cc3333", width: 0.1),
   mode: "wireframe",
-), width: 55%, format: "svg")
+  width: 55%,
+  format: "svg",
+)
 ```
 
 == Solid + Wireframe
@@ -1256,13 +1300,14 @@ Combines solid shading with wireframe edges overlaid on top. Useful for visualiz
 Here ```typst antialias: 4``` should be set, wireframe's strokes benefit from antialiasing.
 ```example
 // hl: 4-6
-#render-obj(teapot, (
+#render-obj(teapot,
   up: (0, 1, 0),
   distance: 8,
   antialias:4,
   mode: "solid+wireframe",
   wireframe: (width: 0.3),
-), width: 80%)
+  width: 80%,
+)
 ```
 
 #pagebreak()
@@ -1329,9 +1374,9 @@ As a rule of thumb, FXAA does the job for most renders. Turn `antialias: 4` when
 
 Ambient Occlusion adds realistic contact shadows (⚠️ at the cost of increased processing time) in crevices and areas where surfaces are close together, simulating how indirect light is blocked in tight spaces. SSAO computes occlusion by sampling the depth buffer after rasterization. Configure with `ssao: true` for defaults, or customize:
 ```typst
-#render-obj(crankshaft, (
+#render-obj(crankshaft,
   ssao: (samples: 16, radius: 0.5, bias: 0.025, strength: 1.0),
-))
+)
 ```
 
 #grid(columns: (1fr, 1fr), gutter: 1em,
@@ -1432,7 +1477,7 @@ With `cull_backface: false`, the inner model becomes visible through the opening
 
 ```example
 // hl: 9-10
-#render-obj(skull-brain, (
+#render-obj(skull-brain,
   azimuth: 220,
   up: (0,1,0),
   highlight: (
@@ -1442,7 +1487,8 @@ With `cull_backface: false`, the inner model becomes visible through the opening
   distance: 200,
   clip_plane: (2, -1, 0, 1),
   cull_backface: false,
-), width: 72%)
+  width: 72%,
+)
 ```
 
 #pagebreak()
@@ -1455,12 +1501,12 @@ For OBJ files with `g` or `o` groups, each group is treated as a separate compon
 
 ```example
 // hl: 5
-#render-obj(crankshaft, (
+#render-obj(crankshaft,
   up: (0, -1, 0),
   camera: (-200, -200, 500),
   color: "#555555",
   explode: 0.8,
-))
+)
 ```
 
 For PLY, STL files or OBJ files without groups, connected components are detected automatically using shared edges (union-find). Each component is then offset by `explode * (component_centroid - model_center)`. 
@@ -1469,11 +1515,11 @@ This is the case for this exploded teapot.
 
 ```example
 // hl: 4
-#render-obj(teapot, (
+#render-obj(teapot,
   camera: (0, 2, 5),
   up: (0, 1, 0),
   explode: 0.5,
-))
+)
 ```
 
 #pagebreak()
@@ -1526,10 +1572,11 @@ Render multiple named views in a single image, similar to an engineering drawing
 
 ```example
 // hl: 2-3
-#render-obj(teapot, (
+#render-obj(teapot,
   views: ("front", "right", "top", "isometric"),
   grid_labels: true,
-), width: 100%)
+  width: 100%,
+)
 ```
 
 == Turntable
@@ -1538,10 +1585,11 @@ Automatically generates a grid of views evenly spaced around the model at a fixe
 
 ```example
 // hl: 2-3
-#render-obj(teapot, (
+#render-obj(teapot,
   turntable: (iterations: 6, elevation: 40),
   grid_labels: true,
-), width: 100%)
+  width: 100%,
+)
 ```
 
 #pagebreak()
@@ -1554,14 +1602,15 @@ It also renders lights as octahedrons of the color they emit, to allow placing l
 
 ```example
 // hl: 2
-#render-obj(teapot, (
+#render-obj(teapot,
   debug: true,
   lights: (
     (type: "positional", vector: (2, 4, 0), color: "#ff4444", intensity: 1.2),
     (type: "positional", vector: (-1, 2, 2), color: "#44ff44", intensity: 1.0),
     (type: "directional", vector: (0, 1, 0), color: "#4444ff", intensity: 0.5),
   ),
-), width: 100%)
+  width: 100%,
+)
 ```
 
 == #link("https://en.wikipedia.org/wiki/Normal_mapping")[Normal Mapping]
@@ -1569,11 +1618,12 @@ It also renders lights as octahedrons of the color they emit, to allow placing l
 
    ```example
    // hl: 4
-   #render-obj(bunny, (
+   #render-obj(bunny,
      up: (0, 1, 0),
      azimuth: 180, distance: 0.25,
      shading: "normal",
-   ), width: 100%)
+     width: 100%,
+   )
    ```
 
 == More functions
