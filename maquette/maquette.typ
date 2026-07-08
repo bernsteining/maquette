@@ -18,10 +18,6 @@
   let config = (:)
   if args.pos().len() > 0 {
     let first = args.pos().at(0)
-    if type(first) == str {
-      // Legacy: pre-encoded JSON string
-      return (cfg: bytes(first), width: width, height: height, format: format)
-    }
     if type(first) == dictionary {
       config = first
     }

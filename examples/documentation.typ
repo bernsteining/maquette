@@ -17,14 +17,14 @@
 #let teapot = read("data/teapot.obj")
 #let crankshaft = read("data/crankshaft.obj")
 #let skull-brain = read("data/brain_skull.obj")
-#let rubi_blender = read("data/rubi_blender.ply", encoding: none)
+#let rubi = read("data/rubi_blender.ply", encoding: none)
 #let rubi_scan = read("data/rubi_scan.ply", encoding: none)
 
 #let doc-scope = (
   render-stl: render-stl, render-obj: render-obj, render-ply: render-ply,
   get-stl-info: get-stl-info, get-obj-info: get-obj-info, get-ply-info: get-ply-info,
   cube: cube, colored: colored,
-  obj-cube: obj-cube, teapot: teapot, crankshaft: crankshaft, bunny:bunny, skull-brain: skull-brain, rubi_blender: rubi_blender, rubi_scan: rubi_scan
+  obj-cube: obj-cube, teapot: teapot, crankshaft: crankshaft, bunny:bunny, skull-brain: skull-brain, rubi: rubi, rubi_scan: rubi_scan
 )
 #let filter-eval(text) = text.split("\n").filter(l =>
   not l.starts-with("#import") and not (l.starts-with("#let ") and l.contains("read("))
@@ -351,10 +351,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     == #link("https://en.wikipedia.org/wiki/Orthographic_projection")[Orthographic]
     No perspective foreshortening: parallel lines stay parallel regardless of distance.
     ```example
-    // hl: 5
+    // hl: 6
     #render-stl(cube,
       camera: (3, 2, 2),
-      stroke: (color: "#111111", width: 1.0),
+      stroke: 
+        (color: "#111111", 
+         width: 1.0),
       projection: "orthographic",
     )
     ```
@@ -366,10 +368,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     == #link("https://en.wikipedia.org/wiki/Isometric_projection")[Isometric]
     Three principal axes appear equally foreshortened. Common in technical illustrations and game art.
     ```example
-    // hl: 5
+    // hl: 6
     #render-stl(cube,
       camera: (3, 2, 2),
-      stroke: (color: "#111111", width: 1.0),
+      stroke: 
+        (color: "#111111", 
+         width: 1.0),
       projection: "isometric",
     )
     ```
@@ -378,10 +382,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     == #link("https://en.wikipedia.org/wiki/Axonometric_projection#Dimetric_projection")[Dimetric]
     Two axes equally foreshortened, the third differs. Elevation ~20.7°, azimuth 45°.
     ```example
-    // hl: 5
+    // hl: 6
     #render-stl(cube,
       camera: (3, 2, 2),
-      stroke: (color: "#111111", width: 1.0),
+      stroke: 
+        (color: "#111111",
+         width: 1.0),
       projection: "dimetric",
     )
     ```
@@ -393,10 +399,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     == #link("https://en.wikipedia.org/wiki/Axonometric_projection#Trimetric_projection")[Trimetric]
     All three axes have different foreshortening. Elevation ~25°, azimuth ~30°.
     ```example
-    // hl: 5
+    // hl: 6
     #render-stl(cube,
       camera: (3, 2, 2),
-      stroke: (color: "#111111", width: 1.0),
+      stroke: 
+        (color: "#111111", 
+         width: 1.0),
       projection: "trimetric",
     )
     ```
@@ -405,10 +413,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     == #link("https://en.wikipedia.org/wiki/Military_projection")[Military]
     Top-down axonometric where the plan view dominates. Elevation ~54.7°, azimuth 45°.
     ```example
-    // hl: 5
+    // hl: 6
     #render-stl(cube,
       camera: (3, 2, 2),
-      stroke: (color: "#111111", width: 1.0),
+      stroke: 
+        (color: "#111111", 
+         width: 1.0),
       projection: "military",
     )
     ```
@@ -877,7 +887,10 @@ Fake view-dependent subsurface scattering simulates light passing through thin g
   azimuth: 180,
   distance: 0.25,
   lights: (
-    (type: "positional", vector: (-0.1, 0.14, -0.04), color: "#ff0000", intensity: 3.0),
+    (type: "positional",
+     vector: (-0.1, 0.14, -0.04), 
+     color: "#ff0000", 
+     intensity: 3.0),
   ),
   width: 100%,
 )
@@ -1040,9 +1053,9 @@ Maquette handles PLY files in ASCII and binary (little/big-endian) formats — a
 
 ```example
 // hl: 1
-#let rubi_blender = read("data/rubi_blender.ply", encoding: none)
+#let rubi = read("data/rubi_blender.ply", encoding: none)
 
-#render-ply(rubi_blender,
+#render-ply(rubi,
   azimuth: 45,
   elevation: 25,
   distance: 10,
