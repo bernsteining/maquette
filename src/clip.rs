@@ -130,54 +130,78 @@ fn clip_triangle(
     }
 }
 
-/// Chain unordered edges into closed loops, then fan-triangulate each loop.
+/// Chain unordered edges into closed loops, then triangulate each loop.
 fn generate_cap(edges: &[CapEdge], cap_normal: Vec3, out: &mut Vec<Triangle>) {
-    let loops = chain_edges(edges);
+    for chain in &chain_edges(edges) {
+        triangulate_loop(chain, cap_normal, out);
+    }
+}
 
-    for chain in &loops {
-        if chain.len() < 3 {
-            continue;
+#[inline]
+fn push_cap_tri(out: &mut Vec<Triangle>, chain: &[(Vec3, Color3)], a: usize, b: usize, c: usize, cap_normal: Vec3) {
+    out.push(Triangle {
+        vertices: [chain[a].0, chain[b].0, chain[c].0],
+        normal: cap_normal,
+        color: None,
+        vertex_colors: Some([chain[a].1, chain[b].1, chain[c].1]),
+        group_id: None,
+    });
+}
+
+/// Triangulate one closed cross-section loop by ear clipping. Unlike a
+/// centroid fan this handles concave polygons (e.g. a bunny silhouette) without
+/// spraying triangles outside the contour.
+fn triangulate_loop(chain: &[(Vec3, Color3)], cap_normal: Vec3, out: &mut Vec<Triangle>) {
+    let nv = chain.len();
+    if nv < 3 { return; }
+
+    // Project onto the cap plane using a right-handed basis (u, v, cap_normal).
+    let a = if cap_normal.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+    let u = cap_normal.cross(a).normalized();
+    let vv = cap_normal.cross(u);
+    let p: Vec<(f64, f64)> = chain.iter().map(|&(pt, _)| (pt.dot(u), pt.dot(vv))).collect();
+
+    #[inline]
+    fn cross2(o: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
+        (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
+    }
+    #[inline]
+    fn in_tri(pt: (f64, f64), a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> bool {
+        let d1 = cross2(a, b, pt); let d2 = cross2(b, c, pt); let d3 = cross2(c, a, pt);
+        !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
+    }
+
+    // Signed area → make the working index list counter-clockwise in (u, v).
+    let mut signed = 0.0;
+    for i in 0..nv { let j = (i + 1) % nv; signed += p[i].0 * p[j].1 - p[j].0 * p[i].1; }
+    let mut idx: Vec<usize> = (0..nv).collect();
+    if signed < 0.0 { idx.reverse(); }
+
+    let mut guard = 0usize;
+    while idx.len() > 3 {
+        let m = idx.len();
+        let mut clipped = false;
+        for k in 0..m {
+            let (ip, ic, inx) = (idx[(k + m - 1) % m], idx[k], idx[(k + 1) % m]);
+            let (a2, b2, c2) = (p[ip], p[ic], p[inx]);
+            if cross2(a2, b2, c2) <= 0.0 { continue; } // reflex vertex — not an ear
+            // Reject if any other vertex falls inside the candidate ear.
+            if idx.iter().any(|&io| io != ip && io != ic && io != inx && in_tri(p[io], a2, b2, c2)) {
+                continue;
+            }
+            push_cap_tri(out, chain, ip, ic, inx, cap_normal);
+            idx.remove(k);
+            clipped = true;
+            break;
         }
-
-        // Compute centroid
-        let n = chain.len() as f64;
-        let center = Vec3::new(
-            chain.iter().map(|&(v, _)| v.x).sum::<f64>() / n,
-            chain.iter().map(|&(v, _)| v.y).sum::<f64>() / n,
-            chain.iter().map(|&(v, _)| v.z).sum::<f64>() / n,
-        );
-        let center_color = {
-            let n = chain.len() as f64;
-            let (sr, sg, sb) = chain.iter().fold((0.0, 0.0, 0.0), |(r, g, b), &(_, c)| {
-                (r + c.0 as f64, g + c.1 as f64, b + c.2 as f64)
-            });
-            ((sr / n).round() as u8, (sg / n).round() as u8, (sb / n).round() as u8)
-        };
-
-        // Check winding via signed area relative to cap_normal
-        let mut area = 0.0;
-        for i in 0..chain.len() {
-            let j = (i + 1) % chain.len();
-            let vi = chain[i].0 - center;
-            let vj = chain[j].0 - center;
-            area += vi.cross(vj).dot(cap_normal);
-        }
-
-        // Fan triangulate from centroid
-        let reversed = area < 0.0;
-        let len = chain.len();
-        for i in 0..len {
-            let j = (i + 1) % len;
-            let (a, b) = if reversed { (j, i) } else { (i, j) };
-            out.push(Triangle {
-                vertices: [center, chain[a].0, chain[b].0],
-                normal: cap_normal,
-                color: None,
-                vertex_colors: Some([center_color, chain[a].1, chain[b].1]),
-                group_id: None,
-            });
+        guard += 1;
+        if !clipped || guard > nv * nv + 8 {
+            // Degenerate/self-intersecting input: fan the remainder as a fallback.
+            for k in 1..idx.len() - 1 { push_cap_tri(out, chain, idx[0], idx[k], idx[k + 1], cap_normal); }
+            return;
         }
     }
+    if idx.len() == 3 { push_cap_tri(out, chain, idx[0], idx[1], idx[2], cap_normal); }
 }
 
 /// Chain unordered edges into closed loops using quantized vertex matching.
