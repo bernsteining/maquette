@@ -20,10 +20,17 @@
 #let rubi = read("data/rubi_blender.ply", encoding: none)
 #let rubi_scan = read("data/rubi_scan.ply", encoding: none)
 
+// Realistic brushed-steel material shared across the Cast Shadows examples.
+#let steel = (
+  camera: (-100, -100, 500), up: (0, -1, 0),
+  color: "#7d8590", specular: 0.6, shininess: 48,
+  fresnel: 0.3, tone_mapping: "aces",
+)
+
 #let doc-scope = (
   render-stl: render-stl, render-obj: render-obj, render-ply: render-ply,
   get-stl-info: get-stl-info, get-obj-info: get-obj-info, get-ply-info: get-ply-info,
-  cube: cube, colored: colored,
+  cube: cube, colored: colored, steel: steel,
   obj-cube: obj-cube, teapot: teapot, crankshaft: crankshaft, bunny:bunny, skull-brain: skull-brain, rubi: rubi, rubi_scan: rubi_scan
 )
 #let filter-eval(text) = text.split("\n").filter(l =>
@@ -154,7 +161,7 @@ With a show rule, you can write OBJ / STL / PLY geometry directly in fenced code
 
 All parameters are optional — pass them as named arguments or a dictionary; defaults are shown below. Setting any to `none` restores its default (for `background`, that means transparent).
 
-#text(size: 9.5pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
+#text(size: 9.2pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
   \"camera\": [3, 3, 3],                             // Camera position in world space (Cartesian)
   \"azimuth\": null,                                 // Spherical camera: horizontal angle in degrees
   \"elevation\": null,                               // Spherical camera: vertical angle in degrees
@@ -204,6 +211,7 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   \"outline\": false,                                // true or {color, width}
   // ── Effects ───────────────────────────────────────────────────────
   \"ground_shadow\": false,                          // true or {opacity, color}
+  \"shadows\": false,                                // Cast/self shadows: true or {per_pixel, softness, color, omni, ...}
   \"clip_plane\": null,                              // Clipping plane (a, b, c, d)
   \"explode\": 0,                                    // Exploded view factor
   \"decimate\": 0,                                   // Mesh simplification 0-1 (higher = fewer triangles)
@@ -625,25 +633,6 @@ Draws bold edges where front-facing and back-facing triangles meet, producing a 
 )
 ```
 
-== Ground Shadow
-
-A ground shadow is cast by projecting every triangle onto the ground plane along the light direction. Pass `ground_shadow: true` for defaults, or customize:
-```typst
-ground_shadow: (opacity: 0.3, color: "#000000")
-```
-
-```example
-// hl: 4
-#render-stl(cube,
-  camera: (3, 2, 2),
-  light_dir: (1, -1, 3),
-  ground_shadow: (opacity: 0.35, color: "#2244aa"),
-  width: 70%,
-)
-```
-
-#pagebreak()
-
 == #link("https://en.wikipedia.org/wiki/Gouraud_shading")[Smooth Shading]
 
 Smooth shading is enabled by default. Vertex normals are averaged across adjacent faces and lighting is interpolated per-pixel (Gouraud shading), smoothing out the faceted appearance. Set `smooth: false` to revert to flat shading, where each triangle gets a single color based on its face normal.
@@ -765,7 +754,7 @@ By default, a single white directional light is used (from `light_dir`). The `li
 
 Each light has `type`, `vector`, `color`, and `intensity`. Positional lights emit from a point in world space, creating distance-dependent shading.
 
-Per-light shadows are not computed. The `ground_shadow` feature uses a single direction: the first directional light in the array, or `light_dir` as fallback.
+Each light casts its own cast shadow when `shadows` is enabled (see the Cast Shadows section); the `ground_shadow` drop shadow instead uses a single direction — the first directional light, or `light_dir` as fallback.
 
 ```example
 // hl: 6-19
@@ -1322,6 +1311,111 @@ Here ```typst antialias: 4``` should be set, wireframe's strokes benefit from an
   width: 80%,
 )
 ```
+
+#pagebreak()
+
+= Shadows
+
+Maquette offers two kinds of shadow, from cheapest to most physically accurate: a projected *ground shadow* that drops the model's silhouette onto the floor plane, and true *cast shadows* computed with a depth map per light, where every part of the model can shadow every other.
+
+== Ground Shadow
+
+A ground shadow is cast by projecting every triangle onto the ground plane along the light direction. Pass `ground_shadow: true` for defaults, or customize:
+```typst
+ground_shadow: (opacity: 0.3, color: "#000000")
+```
+
+```example
+// hl: 4
+#render-stl(cube,
+  camera: (3, 2, 2),
+  light_dir: (1, -1, 3),
+  ground_shadow: (opacity: 0.35, color: "#2244aa"),
+  width: 44%,
+)
+```
+
+== #link("https://en.wikipedia.org/wiki/Shadow_mapping")[Cast Shadows]
+
+Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *self-shadowing* — every part occluding every other, computed with a depth map per light. The examples below share this brushed-steel material so the shadows read against a realistic surface:
+
+```typ
+#let steel = (
+  camera: (-100, -100, 500), up: (0, -1, 0),
+  color: "#7d8590", specular: 0.6, shininess: 48,
+  fresnel: 0.3, tone_mapping: "aces",
+)
+```
+
+Shadows are *off by default*. Passing `shadows: true` grounds the model — notice the contact shadows where the pistons meet the crank and between the counterweights:
+
+```example
+// hl: 3
+#grid(columns: (1fr, 1fr), gutter: 0.6em,
+  render-obj(crankshaft, ..steel, ambient: 0.4, light_dir: (2, 3, 2.5), width: 100%),
+  render-obj(crankshaft, ..steel, ambient: 0.4, light_dir: (2, 3, 2.5), shadows: true, width: 100%),
+)
+```
+
+Sampling defaults to *per-vertex* — cheap and great on dense meshes. `per_pixel: true` samples every fragment instead, keeping shadow edges crisp on low-poly and CAD models (PNG only, ~2.5× the cost).
+
+```example
+// hl: 2
+#render-obj(crankshaft, ..steel,
+  ambient: 0.4, light_dir: (2, 3, 2.5),
+  shadows: (per_pixel: true),
+  width: 44%,
+)
+```
+
+Add `light_size` (world units) for #link("https://en.wikipedia.org/wiki/Percentage-closer_soft_shadows")[PCSS] soft shadows — sharp where parts touch, softening with distance.
+
+```example
+// hl: 3
+#render-obj(crankshaft, ..steel,
+  ambient: 0.4, light_dir: (2, 3, 2.5),
+  shadows: (per_pixel: true, light_size: 6),
+  width: 44%,
+)
+```
+
+With `per_pixel` sampling, `color` tints the shadow instead of darkening to neutral grey — here a cool blue, softened with `strength` so it reads as coloured light rather than black.
+
+```example
+// hl: 3
+#render-obj(crankshaft, ..steel,
+  ambient: 0.4, light_dir: (2, 3, 2.5),
+  shadows: (per_pixel: true, color: "#5577cc", strength: 0.7),
+  width: 44%,
+)
+```
+
+Each light casts its own shadow. Set `cast_shadow: false` on a fill light so only the key light casts — here the warm key grounds the model while the cool blue fill stays shadow-free.
+
+```example
+// hl: 4
+#render-obj(crankshaft, ..steel, ambient: 0.3,
+  lights: (
+    (type: "directional", vector: (2, 3, 2.5), color: "#fff2e0", intensity: 1.4),
+    (type: "directional", vector: (-3, 1, -1), color: "#dce8ff", intensity: 0.8, cast_shadow: false),
+  ),
+  shadows: true,
+  width: 44%,
+)
+```
+
+A positional light *inside* the geometry needs `omni: true` — six cube-map faces so it shadows in every direction, not just toward the model centre.
+
+```example
+// hl: 4
+#render-obj(crankshaft, ..steel, ambient: 0.28,
+  lights: ((type: "positional", vector: (0, 0, 250), color: "#ffffff", intensity: 2.2),),
+  shadows: (per_pixel: true, omni: true),
+  width: 44%,
+)
+```
+
+Further tuning: `resolution` (map size, default 512), `strength` (0–1 darkness), `softness` (PCF blur radius), and `bias`/`normal_bias`/`slope_bias` (shadow-acne control).
 
 #pagebreak()
 
