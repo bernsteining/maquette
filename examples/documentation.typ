@@ -1401,30 +1401,30 @@ Sampling is *per-vertex* by default — cheap and great on dense meshes. `per_pi
 ]
 #grid(columns: (1fr, 1fr, 1fr), gutter: 0.8em, row-gutter: 1em,
   _shadow((shadows: (per_pixel: true)), "shadows: (per_pixel: true)"),
-  _shadow((shadows: (per_pixel: true, light_size: 6)), "…, light_size: 6  (PCSS soft)"),
+  _shadow((shadows: (per_pixel: true, light_size: 6)), "…, light_size: 6  (soft)"),
   _shadow((shadows: (per_pixel: true, color: "#5577cc", strength: 0.7)), "…, color: \"#5577cc\", strength: 0.7"),
   _shadow((ambient: 0.3, lights: (
       (type: "directional", vector: (2, 3, 2.5), color: "#fff2e0", intensity: 1.4),
       (type: "directional", vector: (-3, 1, -1), color: "#dce8ff", intensity: 0.8, cast_shadow: false)),
-    shadows: true), "fill light → cast_shadow: false"),
+    shadows: true), "cast_shadow: false  (on the fill light)"),
   _shadow((ambient: 0.28, lights: ((type: "positional", vector: (0, 0, 250), color: "#fff", intensity: 2.2),),
     shadows: (per_pixel: true, omni: true)), "positional inside → omni: true"),
 )
 
-Passing `shadows: true` uses the defaults; pass a dictionary to set any of these:
+Two of these need `per_pixel`: #link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCSS] (percentage-closer soft shadows), turned on by `light_size` — sharp where parts touch, blurring with distance — and coloured shadows via `color`. The per-light panel uses a #link("https://en.wikipedia.org/wiki/Key_light")[key light] (the main light) plus a softer #link("https://en.wikipedia.org/wiki/Fill_light")[fill light], with `cast_shadow: false` on the fill so only the key casts; `omni: true` builds a #link("https://en.wikipedia.org/wiki/Cube_mapping")[cube map] so a light *inside* the model casts in every direction. Passing `shadows: true` uses the defaults; pass a dictionary to set any of these:
 
 #table(
   columns: (auto, auto, 1fr),
   align: (left + horizon, left + horizon, left + horizon),
-  inset: (x: 7pt, y: 5pt),
+  inset: (x: 7pt, y: 3.6pt),
   stroke: none,
   fill: (_, y) => if y == 0 { luma(235) } else if calc.odd(y) { luma(248) },
   table.header([*Option*], [*Default*], [*What it does*]),
   [`per_pixel`], [`false`], [Sample shadows per fragment instead of per vertex — crisp edges on low-poly and CAD models. PNG only, \~2.5× the cost, and required by `light_size` and `color` below.],
-  [`light_size`], [`0`], [Light radius in world units. Any value `> 0` enables #link("https://en.wikipedia.org/wiki/Percentage-closer_soft_shadows")[PCSS] soft shadows — sharp where parts touch, blurring with distance.],
+  [`light_size`], [`0`], [Light radius in world units. Any value `> 0` enables the PCSS soft shadows described above — sharp where parts touch, blurring with distance.],
   [`color`], [`""`], [Hex tint for the shadowed regions instead of darkening toward neutral grey (e.g. a cool blue).],
   [`strength`], [`1.0`], [How dark shadows go, from `0` (none) to `1` (removes all direct light).],
-  [`softness`], [`1`], [PCF blur radius in texels: `0` = hard edges, `1` = 3×3, higher = softer everywhere.],
+  [`softness`], [`1`], [#link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCF] (percentage-closer filtering) blur radius, in #link("https://en.wikipedia.org/wiki/Texel_(graphics)")[texels]: `0` = hard edges, `1` = 3×3, higher = softer everywhere.],
   [`resolution`], [`512`], [Shadow-map size per light (res × res texels). Higher is sharper but slower to build.],
   [`omni`], [`false`], [Render six cube-map faces so a positional light *inside* the geometry casts in every direction. \~6× the cost.],
   [`bias`], [`0.0008`], [Constant depth-compare bias — the baseline fix for shadow acne (self-shadowing speckle).],
@@ -1432,7 +1432,7 @@ Passing `shadows: true` uses the defaults; pass a dictionary to set any of these
   [`slope_bias`], [`1.0`], [Adds extra bias on surfaces lit at a grazing angle, where acne is worst.],
 )
 
-`per_pixel`, `light_size`, and `color` require PNG output. A per-light `cast_shadow: false` (set inside the `lights` array, see #link(<multi-light>)[Multi-Light]) exempts that light from casting — useful to keep a fill light shadow-free while the key light grounds the model.
+`per_pixel`, `light_size`, and `color` require PNG output. Note that `cast_shadow` is *not* a `shadows` option but a per-light one, set inside the `lights` array (see #link(<multi-light>)[Multi-Light]): `cast_shadow: false` exempts that light from casting, so only the remaining lights do.
 
 #pagebreak()
 
