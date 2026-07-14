@@ -321,6 +321,42 @@ impl Default for ShadowConfig {
     }
 }
 
+/// How a clip plane's normal is derived.
+#[derive(Clone, PartialEq)]
+pub enum ClipSource {
+    /// Explicit world-space plane `ax + by + cz + d = 0`; the `>= 0` half is kept.
+    Plane([f64; 4]),
+    /// Normal follows the camera's view direction — a depth-wise cutaway.
+    Camera,
+    /// Axis-aligned normal: 0 = x, 1 = y, 2 = z.
+    Axis(u8),
+    /// Explicit world-space normal, positioned by `depth`/`distance`.
+    Normal([f64; 3]),
+}
+
+/// Clipping configuration: slice the model with a plane. The plane is either a
+/// fully explicit world-space equation, or a normal (camera / axis / vector)
+/// positioned along the model by `depth` (fraction of extent) or `distance`
+/// (world units from the near side).
+#[derive(Clone)]
+pub struct ClipConfig {
+    pub source: ClipSource,
+    /// Position along the normal, 0..1 of the model's extent (0 = near, 1 = far).
+    pub depth: f64,
+    /// World-space position from the near side; overrides `depth` when set.
+    pub distance: Option<f64>,
+    /// Keep the far side (larger projection along the normal) instead of the near.
+    pub keep_far: bool,
+    /// Close the cut cross-section with cap faces.
+    pub cap: bool,
+}
+
+impl Default for ClipConfig {
+    fn default() -> Self {
+        Self { source: ClipSource::Camera, depth: 0.5, distance: None, keep_far: true, cap: true }
+    }
+}
+
 /// Cast-shadow (shadow-mapping) configuration. Each light renders a depth map
 /// from its viewpoint; direct light is attenuated where a vertex is occluded.
 #[derive(Clone)]
@@ -552,7 +588,7 @@ pub struct RenderConfig {
     pub specular: f64,
     pub shininess: f64,
     pub outline: Option<OutlineConfig>,
-    pub clip_plane: Option<[f64; 4]>,
+    pub clip: Option<ClipConfig>,
     pub explode: f64,
     pub decimate: f64,
     pub debug: bool,
@@ -621,7 +657,7 @@ impl Default for RenderConfig {
             specular: 0.2,
             shininess: 32.0,
             outline: None,
-            clip_plane: None,
+            clip: None,
             explode: 0.0,
             decimate: 0.0,
             debug: false,
@@ -660,6 +696,45 @@ impl Default for RenderConfig {
 // ---------------------------------------------------------------------------
 // Parsing functions
 // ---------------------------------------------------------------------------
+
+fn axis_index(s: &str) -> u8 {
+    match s { "x" | "X" => 0, "y" | "Y" => 1, _ => 2 }
+}
+
+/// Parse the `clip` value: `null` (off), a 4-array world plane, or an object
+/// selecting a clip mode (`from`/`axis`/`plane`/`normal`, `depth`, `distance`,
+/// `keep`, `cap`).
+fn parse_clip(p: &mut JsonParser) -> Result<Option<ClipConfig>, String> {
+    p.skip_ws();
+    if p.is_null() { return Ok(None); }
+    if p.peek() == b'[' {
+        return Ok(Some(ClipConfig { source: ClipSource::Plane(p.parse_f64_4()?), ..Default::default() }));
+    }
+    if p.peek() == b'{' {
+        let mut c = ClipConfig::default();
+        p.expect(b'{')?; p.skip_ws();
+        while p.peek() != b'}' {
+            let k = p.parse_str()?; p.expect(b':')?;
+            match k {
+                "from" => { let _ = p.parse_string()?; c.source = ClipSource::Camera; }
+                "axis" => c.source = ClipSource::Axis(axis_index(&p.parse_string()?)),
+                "plane" => c.source = ClipSource::Plane(p.parse_f64_4()?),
+                "normal" => c.source = ClipSource::Normal(p.parse_f64_3()?),
+                "depth" => c.depth = p.parse_f64()?,
+                "distance" => c.distance = Some(p.parse_f64()?),
+                "keep" => c.keep_far = p.parse_string()? != "near",
+                "cap" => c.cap = p.parse_bool()?,
+                _ => p.skip_value()?,
+            }
+            p.eat_comma_or(b'}');
+        }
+        p.expect(b'}')?;
+        return Ok(Some(c));
+    }
+    // Unrecognized scalar (e.g. a bare bool) — treat as off.
+    p.skip_value()?;
+    Ok(None)
+}
 
 fn parse_group_appearance(p: &mut JsonParser) -> Result<GroupAppearance, String> {
     let mut ga = GroupAppearance::default();
@@ -880,7 +955,7 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                     "color" => color = parse_string,
                     "width" => width = parse_f64,
                 }),
-                "clip_plane" => cfg.clip_plane = if p.is_null() { None } else { Some(p.parse_f64_4()?) },
+                "clip" => cfg.clip = parse_clip(p)?,
                 "explode" => cfg.explode = p.parse_f64()?,
                 "decimate" => cfg.decimate = p.parse_f64()?,
                 "debug" => cfg.debug = p.parse_bool()?,

@@ -1149,6 +1149,47 @@ fn turntable_labels(n: usize) -> Vec<String> {
 // Preprocessing pipeline
 // ---------------------------------------------------------------------------
 
+/// Resolve a `ClipConfig` to a concrete world-space plane `[a,b,c,d]` (keep the
+/// `>= 0` half) plus the cap flag. For camera/axis/normal sources the plane's
+/// normal is positioned along the model's extent by `depth`/`distance`.
+fn resolve_clip(clip: &crate::config::ClipConfig, bmin: Vec3, bmax: Vec3, config: &RenderConfig) -> ([f64; 4], bool) {
+    use crate::config::ClipSource;
+    let n = match &clip.source {
+        ClipSource::Plane(p) => return (*p, clip.cap),
+        ClipSource::Camera => {
+            let bc = bbox_center(bmin, bmax);
+            let br = bbox_radius(bmin, bmax);
+            let view = resolve_config_view(config, bc, br);
+            view.center.sub(view.camera).normalized() // forward: camera → scene
+        }
+        ClipSource::Axis(0) => Vec3::new(1.0, 0.0, 0.0),
+        ClipSource::Axis(1) => Vec3::new(0.0, 1.0, 0.0),
+        ClipSource::Axis(_) => Vec3::new(0.0, 0.0, 1.0),
+        ClipSource::Normal(v) => Vec3::new(v[0], v[1], v[2]).normalized(),
+    };
+    // Extent of the model projected onto the normal.
+    let corners = [
+        Vec3::new(bmin.x, bmin.y, bmin.z), Vec3::new(bmax.x, bmin.y, bmin.z),
+        Vec3::new(bmin.x, bmax.y, bmin.z), Vec3::new(bmax.x, bmax.y, bmin.z),
+        Vec3::new(bmin.x, bmin.y, bmax.z), Vec3::new(bmax.x, bmin.y, bmax.z),
+        Vec3::new(bmin.x, bmax.y, bmax.z), Vec3::new(bmax.x, bmax.y, bmax.z),
+    ];
+    let (mut tmin, mut tmax) = (f64::INFINITY, f64::NEG_INFINITY);
+    for c in corners { let t = n.dot(c); tmin = tmin.min(t); tmax = tmax.max(t); }
+    // Position of the cut along the normal (measured from the near side).
+    let t = match clip.distance {
+        Some(d) => tmin + d,
+        None => tmin + clip.depth.clamp(0.0, 1.0) * (tmax - tmin),
+    };
+    // keep_far → keep `n·x >= t`; keep_near → flip the normal so `-n·x >= -t`.
+    let plane = if clip.keep_far {
+        [n.x, n.y, n.z, -t]
+    } else {
+        [-n.x, -n.y, -n.z, t]
+    };
+    (plane, clip.cap)
+}
+
 fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, Vec3, Vec3) {
     let mut tris = triangles.to_vec();
     let (mut bmin, mut bmax) = compute_bbox(&tris);
@@ -1191,8 +1232,9 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
     }
 
     // 2. Clipping
-    if let Some(plane) = config.clip_plane {
-        tris = clip::clip_triangles(&tris, plane, config.cull_backface);
+    if let Some(clip_cfg) = &config.clip {
+        let (plane, cap) = resolve_clip(clip_cfg, bmin, bmax, config);
+        tris = clip::clip_triangles(&tris, plane, cap);
     }
 
     // 3. Explode
@@ -1202,7 +1244,7 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
     }
 
     // 4. Recompute bbox after clipping/exploding
-    if config.clip_plane.is_some() || config.explode.abs() > 1e-12 {
+    if config.clip.is_some() || config.explode.abs() > 1e-12 {
         if !tris.is_empty() {
             let (new_min, new_max) = compute_bbox(&tris);
             bmin = new_min;
@@ -1222,6 +1264,34 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
 /// config that changes the *geometry* (and therefore the vertex normals). Color,
 /// material, camera, lighting and shading are deliberately excluded so renders
 /// varying only those reuse the cached normals.
+/// Mix the clip configuration into a geometry cache key. A camera-relative clip
+/// depends on the view, so the camera parameters are folded in for that source.
+fn clip_key(h: u64, config: &RenderConfig) -> u64 {
+    use crate::config::ClipSource;
+    #[inline]
+    fn m(h: u64, x: u64) -> u64 { (h ^ x).wrapping_mul(0x100000001b3) }
+    let c = match &config.clip { None => return m(h, 0x2), Some(c) => c };
+    let mut h = m(h, 0x1);
+    match &c.source {
+        ClipSource::Plane(p) => { h = m(h, 10); for &v in p { h = m(h, v.to_bits()); } }
+        ClipSource::Camera => {
+            h = m(h, 11);
+            match config.camera { Some(cam) => for v in cam { h = m(h, v.to_bits()); }, None => h = m(h, 0x9E) }
+            h = m(h, config.azimuth.to_bits());
+            h = m(h, config.elevation.to_bits());
+            h = m(h, config.distance.unwrap_or(0.0).to_bits());
+            for &b in config.projection.as_bytes() { h = m(h, b as u64); }
+            for &u in &config.up { h = m(h, u.to_bits()); }
+        }
+        ClipSource::Axis(a) => { h = m(h, 12); h = m(h, *a as u64); }
+        ClipSource::Normal(n) => { h = m(h, 13); for &v in n { h = m(h, v.to_bits()); } }
+    }
+    h = m(h, c.depth.to_bits());
+    h = m(h, c.distance.map(|d| d.to_bits()).unwrap_or(0xDEAD));
+    h = m(h, c.keep_far as u64);
+    m(h, c.cap as u64)
+}
+
 fn smooth_geom_key(data_key: u64, config: &RenderConfig) -> u64 {
     #[inline]
     fn mix(h: u64, x: f64) -> u64 {
@@ -1230,11 +1300,7 @@ fn smooth_geom_key(data_key: u64, config: &RenderConfig) -> u64 {
     let mut h = mix(data_key, config.decimate);
     h = mix(h, config.explode);
     h = mix(h, config.point_size);
-    match config.clip_plane {
-        Some(p) => for v in p { h = mix(h, v); },
-        None => h = mix(h, f64::INFINITY), // sentinel distinct from any real plane
-    }
-    h
+    clip_key(h, config)
 }
 
 /// Look up (or compute and cache) the smooth vertex normals for `tris`.
@@ -1272,12 +1338,8 @@ fn prep_cache_key(base: u64, config: &RenderConfig) -> u64 {
     h = m(h, config.overhang_angle.to_bits());
     h = m(h, config.vertex_smoothing as u64);
     for &u in &config.up { h = m(h, u.to_bits()); }
-    // Clipping (geometry; uses cull_backface) + explode + decimate.
-    match config.clip_plane {
-        Some(p) => { h = m(h, 1); for &v in &p { h = m(h, v.to_bits()); } }
-        None => h = m(h, 2),
-    }
-    h = m(h, config.cull_backface as u64);
+    // Clipping (geometry) + explode + decimate.
+    h = clip_key(h, config);
     h = m(h, config.explode.to_bits());
     h = m(h, config.decimate.to_bits());
     h
@@ -1717,7 +1779,7 @@ fn render_debug_overlay(
     let mut effects_str = String::new();
     if config.outline.is_some() { effects_str.push_str("outline"); }
     if config.shadow.is_some() { if !effects_str.is_empty() { effects_str.push_str(", "); } effects_str.push_str("shadow"); }
-    if config.clip_plane.is_some() { if !effects_str.is_empty() { effects_str.push_str(", "); } effects_str.push_str("clip"); }
+    if config.clip.is_some() { if !effects_str.is_empty() { effects_str.push_str(", "); } effects_str.push_str("clip"); }
     if config.explode > 0.0 { if !effects_str.is_empty() { effects_str.push_str(", "); } effects_str.push_str("explode"); }
     if !config.color_map.is_empty() { if !effects_str.is_empty() { effects_str.push_str(", "); } effects_str.push_str(&config.color_map); }
     if !effects_str.is_empty() {
