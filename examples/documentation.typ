@@ -1164,6 +1164,7 @@ Here's an example of a #link("https://www.cgtrader.com/items/124377/download-pag
 render-obj(crankshaft,
   camera: (-100, -100, 500),
   up: (0, -1, 0),
+  zoom: 1.25, pan: (0, 0.08),
   color: "#777777",
   highlight: (
     Model__Camshaft: "#ff0000",
@@ -1185,10 +1186,11 @@ Instead of a plain color, pass a dictionary with specific appearance overrides t
 #render-obj(crankshaft,
   camera: (-100, -100, 500),
   up: (0, -1, 0),
+  zoom: 1.25, pan: (0, 0.08),
   color: "#777777",
   antialias: 4,
   highlight: (
-    Model__Crankshaft: 
+    Model__Crankshaft:
       (color: "#cc0000", 
        stroke: "#ffffff", 
        stroke_width: 0.5),
@@ -1496,6 +1498,7 @@ Ambient Occlusion adds realistic contact shadows (⚠️ at the cost of increase
     #render-obj(crankshaft, (
       camera: (-100, -100, 500),
       up: (0, -1, 0),
+      zoom: 1.25, pan: (0, 0.08),
       specular: 0.5,
       color: "#777777",
       width: 400,
@@ -1507,6 +1510,7 @@ Ambient Occlusion adds realistic contact shadows (⚠️ at the cost of increase
     #render-obj(crankshaft, (
       camera: (-100, -100, 500),
       up: (0, -1, 0),
+      zoom: 1.25, pan: (0, 0.08),
       ssao: (samples: 16, radius: 0.5, strength: 1),
       antialias: 4,
       color: "#777777",
