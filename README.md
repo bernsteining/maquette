@@ -103,7 +103,8 @@ Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0
 | | Gamma correction | Linear-to-sRGB conversion |
 | **Visualization** | Color maps | Height, overhang, curvature, or custom scalar function |
 | | Silhouette outlines | Contour edge detection and rendering |
-| | Ground shadows | Projected shadow onto ground plane |
+| | Ground shadows | Projected drop shadow onto ground plane |
+| | Cast shadows | Shadow-mapped self-shadowing: per-vertex or per-pixel, multi-light, PCSS soft shadows, omni point lights |
 | | Clipping planes | Mathematical plane cuts with interior visibility |
 | | Exploded views | Auto-separate components outward from center |
 | | Annotations | Leader lines with labels for OBJ group names |
@@ -232,7 +233,8 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 
 | Key | Default | Description |
 |---|---|---|
-| `ground_shadow` | `false` | Ground shadow: `true` or `{ opacity, color }` |
+| `ground_shadow` | `false` | Ground drop shadow: `true` or `{ opacity, color }` |
+| `shadows` | `false` | Cast/self shadows: `true` or `{ resolution, bias, normal_bias, slope_bias, strength, softness, per_pixel, light_size, color, omni }` |
 | `clip_plane` | `null` | Clipping plane `(a, b, c, d)`: keeps `ax+by+cz+d >= 0` |
 | `explode` | `0` | Exploded view factor (OBJ groups or auto-detected components) |
 | `decimate` | `0` | Mesh simplification strength (0--1) Higher = fewer triangles. |
@@ -360,7 +362,20 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 // Silhouette edge outlines: true or { color, width }
 // ── Effects ───────────────────────────────────────────────────────
 "ground_shadow": false,
-// Ground shadow: true or { opacity, color }
+// Ground drop shadow: true or { opacity, color }
+"shadows": false,
+// Cast/self shadows (shadow mapping): true or {
+//   resolution: 512,      // shadow-map size per light
+//   bias: 0.0008,         // constant depth bias
+//   normal_bias: 2.0,     // offset along normal (texels) — primary acne fix
+//   slope_bias: 1.0,      // extra bias at grazing angles
+//   strength: 1.0,        // shadow darkness (0 disables)
+//   softness: 1,          // PCF radius in texels
+//   per_pixel: false,     // sharp per-fragment sampling (PNG, ~2.5x cost)
+//   light_size: 0.0,      // >0 = PCSS soft shadows (per-pixel only)
+//   color: "",            // optional shadow tint, hex (per-pixel only)
+//   omni: false }         // cube map for point lights inside the geometry
+// Per light: (type: "positional", …, cast_shadow: false) to opt a light out.
 "clip_plane": null,
 // Clipping plane (a, b, c, d)
 "explode": 0,
