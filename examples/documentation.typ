@@ -23,6 +23,7 @@
 // Realistic brushed-steel material shared across the Cast Shadows examples.
 #let steel = (
   camera: (-100, -100, 500), up: (0, -1, 0),
+  zoom: 1.25, pan: (0, 0.08),
   color: "#7d8590", specular: 0.6, shininess: 48,
   fresnel: 0.3, tone_mapping: "aces",
 )
@@ -172,6 +173,8 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   \"projection\": \"perspective\",                     // \"perspective\", \"orthographic\", \"isometric\" ...
   \"auto_center\": true,                             // Auto-center on model bounding box
   \"auto_fit\": true,                                // Scale model to fill viewport
+  \"zoom\": 1.0,                                     // Multiplier on auto-fit scale (>1 zooms in)
+  \"pan\": [0, 0],                                   // Screen-space recentring [right, up] as viewport fraction
   \"width\": 500,                                    // Output width in pixels
   \"height\": 500,                                   // Output height in pixels
   \"background\": \"#f0f0f0\",                         // Background color (hex); none, \"none\" or \"\" = transparent
@@ -1342,6 +1345,7 @@ Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *s
 ```typ
 #let steel = (
   camera: (-100, -100, 500), up: (0, -1, 0),
+  zoom: 1.25, pan: (0, 0.08),   // fill the frame
   color: "#7d8590", specular: 0.6, shininess: 48,
   fresnel: 0.3, tone_mapping: "aces",
 )
