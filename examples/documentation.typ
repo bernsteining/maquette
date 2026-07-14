@@ -1374,13 +1374,23 @@ Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *s
 
 Shadows are *off by default*. `shadows: true` grounds the model — note the contact shadows where the pistons meet the crank:
 
-```example
-// hl: 3
-#grid(columns: (1fr, 1fr), gutter: 0.6em,
-  render-obj(crankshaft, ..steel, width: 100%),
-  render-obj(crankshaft, ..steel, shadows: true, width: 100%),
-)
+```typ
+#render-obj(crankshaft, ..steel)                 // shadows off
+#render-obj(crankshaft, ..steel, shadows: true)  // shadows on
 ```
+
+#grid(columns: (1fr, 1fr), column-gutter: 1.2em,
+  align(center)[
+    #render-obj(crankshaft, ..steel, width: 100%)
+    #v(-0.3em)
+    #text(size: 8pt, fill: luma(90), raw("shadows: false (default)"))
+  ],
+  align(center)[
+    #render-obj(crankshaft, ..steel, shadows: true, width: 100%)
+    #v(-0.3em)
+    #text(size: 8pt, fill: luma(90), raw("shadows: true"))
+  ],
+)
 
 Sampling is *per-vertex* by default — cheap and great on dense meshes. `per_pixel: true` samples every fragment for crisp edges on low-poly and CAD models (PNG only, ~2.5× the cost), and unlocks the softer, tinted variants below. Each panel passes a different `shadows` value on top of `..steel`:
 
