@@ -176,6 +176,8 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 | `projection` | `"perspective"` | `"perspective"`, `"orthographic"`, `"isometric"`, `"cabinet"`, `"cavalier"`, `"fisheye"`, `"stereographic"`, `"curvilinear"`, `"cylindrical"`, `"pannini"`, `"tiny-planet"` |
 | `auto_center` | `true` | Auto-center camera on model bounding box |
 | `auto_fit` | `true` | Scale model to fill viewport |
+| `zoom` | `1.0` | Multiplier on the auto-fit scale (>1 zooms in) |
+| `pan` | `(0, 0)` | Screen-space recentring `(right, up)` as a fraction of the viewport |
 | `width` | `500` | Output width in pixels |
 | `height` | `500` | Output height in pixels |
 | `background` | `"#f0f0f0"` | Background color (hex). `none`, `"none"` or empty string = transparent (PNG exports with an alpha channel; use `antialias` for smooth transparent edges) |
@@ -293,6 +295,10 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 // Auto-center on model bounding box
 "auto_fit": true,
 // Scale model to fill viewport
+"zoom": 1.0,
+// Multiplier on the auto-fit scale (>1 zooms in)
+"pan": [0, 0],
+// Screen-space recentring [right, up] as a fraction of the viewport
 "width": 500,
 // Output width in pixels
 "height": 500,

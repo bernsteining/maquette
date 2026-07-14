@@ -149,6 +149,24 @@ pub(crate) enum ProjectionSetup {
     TinyPlanet { f: f64, hw: f64, hh: f64 },
 }
 
+impl ProjectionSetup {
+    /// Offset the stored screen origin by (dx, dy) pixels — used to apply `pan`.
+    fn panned(self, dx: f64, dy: f64) -> Self {
+        use ProjectionSetup::*;
+        match self {
+            Ortho { s, hw, hh } => Ortho { s, hw: hw + dx, hh: hh + dy },
+            Perspective { sx, sy, hw, hh } => Perspective { sx, sy, hw: hw + dx, hh: hh + dy },
+            Cabinet { s, hw, hh, fc, fs, cd } => Cabinet { s, hw: hw + dx, hh: hh + dy, fc, fs, cd },
+            Fisheye { f, hw, hh } => Fisheye { f, hw: hw + dx, hh: hh + dy },
+            Stereographic { f, hw, hh } => Stereographic { f, hw: hw + dx, hh: hh + dy },
+            Curvilinear { d, k, aspect, hw, hh } => Curvilinear { d, k, aspect, hw: hw + dx, hh: hh + dy },
+            Cylindrical { f, hw, hh } => Cylindrical { f, hw: hw + dx, hh: hh + dy },
+            Pannini { f, hw, hh } => Pannini { f, hw: hw + dx, hh: hh + dy },
+            TinyPlanet { f, hw, hh } => TinyPlanet { f, hw: hw + dx, hh: hh + dy },
+        }
+    }
+}
+
 /// Focal length for equidistant projections (fisheye, cylindrical).
 #[inline]
 fn focal_equidistant(config: &RenderConfig, view: &ViewParams, hw: f64, hh: f64, br: f64) -> f64 {
@@ -176,6 +194,17 @@ fn focal_stereographic(config: &RenderConfig, view: &ViewParams, hw: f64, hh: f6
 pub(crate) fn setup_projection(proj: Projection, config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64) -> ProjectionSetup {
     let hw = vw / 2.0;
     let hh = vh / 2.0;
+    // `zoom` scales the auto-fit result: every fit formula divides by the bounding
+    // radius, so a smaller effective radius enlarges the model within the frame.
+    let br = br / config.zoom.max(1e-6);
+    // `pan` recentres the model in screen space: [right, up] as a fraction of the
+    // viewport, applied to the stored screen origin after scale is computed.
+    let setup = setup_projection_inner(proj, config, view, vw, vh, br, hw, hh);
+    setup.panned(config.pan[0] * vw, -config.pan[1] * vh)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn setup_projection_inner(proj: Projection, config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64, hw: f64, hh: f64) -> ProjectionSetup {
     match proj {
         Projection::Ortho => {
             ProjectionSetup::Ortho { s: ortho_scale(config, view, vw, vh, br), hw, hh }
