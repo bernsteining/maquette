@@ -263,7 +263,7 @@ Set `background` to a hex color to fill the image background.
 )
 ```
 
-Set `background` to `none` (the string `"none"` and an empty string `""` work too) for a transparent background — the PNG carries a real alpha channel, so the model blends into the page (use `antialias` for smooth edges).
+Set `background` to `none` (the string `"none"` and an empty string `""` work too) for a transparent background — the PNG carries a real alpha channel, so the model blends into the page.
 
 ```example
 // hl: 2
@@ -1599,15 +1599,27 @@ Sharpening enhances edge contrast using a 3×3 unsharp mask. Pass `sharpen: true
 
 Slice the model with a plane to cut part of it away — for section drawings or to reveal internal geometry. `clip` takes either an explicit world-space plane `(a, b, c, d)`, keeping the `ax + by + cz + d >= 0` half, or a dictionary that positions the plane for you.
 
-The handiest form is a *camera cutaway*: `from: "camera"` squares the plane to the view direction and `depth` (`0` = near face, `1` = far) sets how deep to cut, so the slice always faces the viewer whatever the angle. With `cap: false` you see straight in — here, the brain inside the skull:
+Wrapping the plane in a dict lets you add `cap: false`, which leaves the cross-section open so you can see inside — here an explicit plane opens the skull to reveal the brain:
 
 ```example
-// hl: 5
+// hl: 5-6
 #render-obj(skull-brain,
   azimuth: 220, up: (0, 1, 0), distance: 200,
   highlight: ("Skull": (color: "#e8e8e8"), "Brain": (color: "#ff69b4")),
-  clip: (from: "camera", depth: 0.5, cap: false),
-  width: 66%,
+  clip: (plane: (2, -1, 0, 1), cap: false),
+  cull_backface: false,
+  width: 72%,
+)
+```
+
+The handiest form is a *camera cutaway*: `from: "camera"` squares the plane to the view direction and `depth` (`0` = near face, `1` = far) sets how deep to cut, so the slice always faces the viewer whatever the angle:
+
+```example
+// hl: 4
+#render-obj(bunny,
+  up: (0, 1, 0), azimuth: 180, color: "#4488cc",
+  clip: (from: "camera", depth: 0.5),
+  width: 60%,
 )
 ```
 
