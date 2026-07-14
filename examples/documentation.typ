@@ -341,10 +341,10 @@ The `fov` parameter controls the vertical field of view angle (in degrees) for p
 
 == Framing — Zoom & Pan
 
-`auto_fit` fits the model's bounding *sphere* to the viewport, so long or spread-out models leave wide empty margins — this crankshaft fills barely half the frame by default. `zoom` multiplies the fit scale to reclaim that space; `pan: (right, up)` then recentres the model in screen space (as a fraction of the viewport), so a tighter zoom doesn't push it out of frame.
+`auto_fit` fits the model's bounding *sphere* to the viewport, so broad or spread-out models leave empty margins — this teapot is wide and flat, so fitting its sphere to the frame width strands generous space above and below it. `zoom` multiplies the fit scale to reclaim that space; `pan: (right, up)` then shifts the model in screen space (as a fraction of the viewport), so a tighter zoom can be recentred to taste.
 
 #let _framing(z, p, cap) = align(center + bottom)[
-  #render-obj(crankshaft, camera: (-100, -100, 500), up: (0, -1, 0),
+  #render-obj(teapot, up: (0, 1, 0),
     color: "#8a9099", specular: 0.5, tone_mapping: "aces",
     ambient: 0.35, light_dir: (2, 3, 2.5), zoom: z, pan: p, width: 100%)
   #v(-0.4em)
@@ -352,11 +352,11 @@ The `fov` parameter controls the vertical field of view angle (in degrees) for p
 ]
 #grid(columns: (1fr, 1fr, 1fr), gutter: 1em,
   _framing(1.0, (0, 0), "zoom: 1.0 (default)"),
-  _framing(1.3, (0, 0), "zoom: 1.3"),
-  _framing(1.3, (0, 0.09), "zoom: 1.3, pan: (0, 0.09)"),
+  _framing(1.45, (0, 0), "zoom: 1.45"),
+  _framing(1.45, (-0.12, 0), "zoom: 1.45, pan: (-0.12, 0)"),
 )
 
-At `zoom: 1.3` the model finally fills the width, but it sits low and the pistons clip at the bottom edge; `pan: (0, 0.09)` lifts it back into view. Both default to no-ops (`zoom: 1.0`, `pan: (0, 0)`), so existing renders are unaffected.
+At `zoom: 1.45` the teapot fills the frame vertically, but its spout and handle now press against both side edges; `pan: (-0.12, 0)` slides it left, tucking the handle in from the right edge. Both default to no-ops (`zoom: 1.0`, `pan: (0, 0)`), so existing renders are unaffected.
 
 #pagebreak()
 
@@ -992,19 +992,26 @@ Faces steeper than `overhang_angle` (relative to vertical) are highlighted in re
 Color vertices based on a user-defined mathematical function `f(x,y,z)`. The `scalar_function` expression is evaluated at each vertex position, producing scalar values that are automatically normalized to `[0, 1]` (min value → 0, max value → 1), then linearly interpolated through the `color_map_palette` color stops. If no palette is specified, the default blue → cyan → green → yellow → red gradient is used. Per-vertex colors are interpolated across triangle faces for smooth results.
 
 The expression can use:
-- *Variables:* `x`, `y`, `z` (vertex coordinates)
-- *Constants:* `pi`, `e`, `tau`
-- *Arithmetic:* `+`, `-`, `*`, `/`, `^` (power)
-- *Comparison:* `<`, `>`, `<=`, `>=`, `==`, `!=` (return 0.0 or 1.0)
-- *Logical:* `&&` (and), `||` (or), `!` (not)
-- *Functions:*
-  - Basic: `abs`, `sqrt`, `min`, `max`, `clamp`, `sign`, `pow`
-  - Trigonometric: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`
-  - Hyperbolic: `sinh`, `cosh`, `tanh`
-  - Exponential/Logarithmic: `exp`, `ln`, `log10`, `log2`
-  - Rounding: `floor`, `ceil`, `round`, `fract`
-  - Graphics: `step`, `smoothstep`, `mix`, `lerp`, `length`
-  - Other: `mod`
+
+#grid(columns: (0.9fr, 1.1fr), column-gutter: 1.5em,
+  [
+    - *Variables:* `x`, `y`, `z` (vertex coordinates)
+    - *Constants:* `pi`, `e`, `tau`
+    - *Arithmetic:* `+`, `-`, `*`, `/`, `^` (power)
+    - *Comparison:* `<`, `>`, `<=`, `>=`, `==`, `!=` (return 0.0 or 1.0)
+    - *Logical:* `&&` (and), `||` (or), `!` (not)
+  ],
+  [
+    - *Functions:*
+      - Basic: `abs`, `sqrt`, `min`, `max`, `clamp`, `sign`, `pow`
+      - Trigonometric: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`
+      - Hyperbolic: `sinh`, `cosh`, `tanh`
+      - Exponential/Logarithmic: `exp`, `ln`, `log10`, `log2`
+      - Rounding: `floor`, `ceil`, `round`, `fract`
+      - Graphics: `step`, `smoothstep`, `mix`, `lerp`, `length`
+      - Other: `mod`
+  ],
+)
 
 Some examples:
 
@@ -1602,7 +1609,7 @@ Slice the model with a plane to cut part of it away — for section drawings or 
 Wrapping the plane in a dict lets you add `cap: false`, which leaves the cross-section open so you can see inside — here an explicit plane opens the skull to reveal the brain:
 
 ```example
-// hl: 5-6
+// hl: 4-5
 #render-obj(skull-brain,
   azimuth: 220, up: (0, 1, 0), distance: 200,
   highlight: ("Skull": (color: "#e8e8e8"), "Brain": (color: "#ff69b4")),
@@ -1612,13 +1619,14 @@ Wrapping the plane in a dict lets you add `cap: false`, which leaves the cross-s
 )
 ```
 
-The handiest form is a *camera cutaway*: `from: "camera"` squares the plane to the view direction and `depth` (`0` = near face, `1` = far) sets how deep to cut, so the slice always faces the viewer whatever the angle:
+The handiest form is a *camera cutaway*: `from: "camera"` squares the plane to the view direction and `depth` (`0` = near face, `1` = far) sets how deep to cut, so the slice always faces the viewer whatever the angle. Here `cap: false` leaves the cut open — paired with `cull_backface: false` it reveals the hollow interior:
 
 ```example
-// hl: 4
+// hl: 3-4
 #render-obj(bunny,
   up: (0, 1, 0), azimuth: 180, color: "#4488cc",
-  clip: (from: "camera", depth: 0.5),
+  clip: (from: "camera", depth: 0.5, cap: false),
+  cull_backface: false,
   width: 60%,
 )
 ```
