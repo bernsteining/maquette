@@ -771,7 +771,7 @@ Fresnel rim lighting brightens edges where the surface curves away from the came
 
 #pagebreak()
 
-== Multi-Light
+== Multi-Light <multi-light>
 
 By default, a single white directional light is used (from `light_dir`). The `lights` array lets you define multiple lights, each with a type, direction or position, color, and intensity. When `lights` is set, it overrides `light_dir`.
 
@@ -1411,7 +1411,28 @@ Sampling is *per-vertex* by default — cheap and great on dense meshes. `per_pi
     shadows: (per_pixel: true, omni: true)), "positional inside → omni: true"),
 )
 
-So `light_size` gives #link("https://en.wikipedia.org/wiki/Percentage-closer_soft_shadows")[PCSS] soft shadows (sharp where parts touch, softening with distance); `color` tints them; `cast_shadow: false` exempts a fill light so only the key casts; and `omni: true` wraps a light *inside* the model with a six-face cube map. Further tuning: `resolution` (map size, default 512), `strength` (0–1 darkness), `softness` (PCF blur radius), and `bias`/`normal_bias`/`slope_bias` (shadow-acne control).
+Passing `shadows: true` uses the defaults; pass a dictionary to set any of these:
+
+#table(
+  columns: (auto, auto, 1fr),
+  align: (left + horizon, left + horizon, left + horizon),
+  inset: (x: 7pt, y: 5pt),
+  stroke: none,
+  fill: (_, y) => if y == 0 { luma(235) } else if calc.odd(y) { luma(248) },
+  table.header([*Option*], [*Default*], [*What it does*]),
+  [`per_pixel`], [`false`], [Sample shadows per fragment instead of per vertex — crisp edges on low-poly and CAD models. PNG only, \~2.5× the cost, and required by `light_size` and `color` below.],
+  [`light_size`], [`0`], [Light radius in world units. Any value `> 0` enables #link("https://en.wikipedia.org/wiki/Percentage-closer_soft_shadows")[PCSS] soft shadows — sharp where parts touch, blurring with distance.],
+  [`color`], [`""`], [Hex tint for the shadowed regions instead of darkening toward neutral grey (e.g. a cool blue).],
+  [`strength`], [`1.0`], [How dark shadows go, from `0` (none) to `1` (removes all direct light).],
+  [`softness`], [`1`], [PCF blur radius in texels: `0` = hard edges, `1` = 3×3, higher = softer everywhere.],
+  [`resolution`], [`512`], [Shadow-map size per light (res × res texels). Higher is sharper but slower to build.],
+  [`omni`], [`false`], [Render six cube-map faces so a positional light *inside* the geometry casts in every direction. \~6× the cost.],
+  [`bias`], [`0.0008`], [Constant depth-compare bias — the baseline fix for shadow acne (self-shadowing speckle).],
+  [`normal_bias`], [`2.0`], [Offsets the sample along the surface normal (in texels); the primary acne fix.],
+  [`slope_bias`], [`1.0`], [Adds extra bias on surfaces lit at a grazing angle, where acne is worst.],
+)
+
+`per_pixel`, `light_size`, and `color` require PNG output. A per-light `cast_shadow: false` (set inside the `lights` array, see #link(<multi-light>)[Multi-Light]) exempts that light from casting — useful to keep a fill light shadow-free while the key light grounds the model.
 
 #pagebreak()
 
