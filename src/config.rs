@@ -130,6 +130,14 @@ impl<'a> JsonParser<'a> {
         Ok([a, b, c])
     }
 
+    fn parse_f64_2(&mut self) -> Result<[f64; 2], String> {
+        self.expect(b'[')?;
+        let a = self.parse_f64()?; self.expect(b',')?;
+        let b = self.parse_f64()?;
+        self.expect(b']')?;
+        Ok([a, b])
+    }
+
     fn parse_f64_4(&mut self) -> Result<[f64; 4], String> {
         self.expect(b'[')?;
         let a = self.parse_f64()?; self.expect(b',')?;
@@ -574,6 +582,10 @@ pub struct RenderConfig {
     pub annotations: Option<AnnotationConfig>,
     pub point_size: f64,
     pub shadows: Option<ShadowMapConfig>,
+    /// Multiplier on the auto-fit scale (1.0 = fill bounding sphere; >1 zooms in).
+    pub zoom: f64,
+    /// Screen-space recentring as a fraction of the viewport: [right, up].
+    pub pan: [f64; 2],
 }
 
 impl Default for RenderConfig {
@@ -639,6 +651,8 @@ impl Default for RenderConfig {
             annotations: None,
             point_size: 0.0,
             shadows: None,
+            zoom: 1.0,
+            pan: [0.0, 0.0],
         }
     }
 }
@@ -842,6 +856,8 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                 }, |v, p| v.color = p.parse_string()?),
                 "auto_center" => cfg.auto_center = p.parse_bool()?,
                 "auto_fit" => cfg.auto_fit = p.parse_bool()?,
+                "zoom" => cfg.zoom = p.parse_f64()?,
+                "pan" => cfg.pan = p.parse_f64_2()?,
                 "materials" => cfg.materials = p.parse_string_map()?,
                 "highlight" => cfg.highlight = parse_highlight_map(p)?,
                 "ground_shadow" => cfg.shadow = parse_optional_object!(p, ShadowConfig, {
