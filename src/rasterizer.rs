@@ -477,6 +477,71 @@ impl PixelBuffer {
         }
     }
 
+    /// Per-pixel-shaded rasterize (used by per-pixel shadows): interpolates the
+    /// vertex colors + world positions affinely, then runs `shade(color, world)`
+    /// per covered pixel to produce the final color. Scalar (quality) path.
+    pub fn rasterize_triangle_shadowed<F: FnMut((u8, u8, u8), [f64; 3]) -> (u8, u8, u8)>(
+        &mut self,
+        pts: &[(f64, f64); 3],
+        depths: &[f64; 3],
+        colors: &[(u8, u8, u8); 3],
+        world: &[[f64; 3]; 3],
+        mut shade: F,
+    ) {
+        let setup = match TriSetup::new(pts, self.width, self.height) {
+            Some(s) => s,
+            None => return,
+        };
+        let width = self.width;
+        let zbuf = &mut self.zbuf;
+        let pixels = &mut self.pixels;
+        let (c0r, c0g, c0b) = (colors[0].0 as f64, colors[0].1 as f64, colors[0].2 as f64);
+        let (c1r, c1g, c1b) = (colors[1].0 as f64, colors[1].1 as f64, colors[1].2 as f64);
+        let (c2r, c2g, c2b) = (colors[2].0 as f64, colors[2].1 as f64, colors[2].2 as f64);
+        let (d0, d1, d2) = (depths[0], depths[1], depths[2]);
+
+        let mut row_w0 = setup.row_w0;
+        let mut row_w1 = setup.row_w1;
+        let mut row_w2 = setup.row_w2;
+        for py in setup.min_y..=setup.max_y {
+            if let Some((xl, xr)) = setup.scanline(row_w0, row_w1, row_w2) {
+                let off = (xl - setup.min_x) as f64;
+                let mut w0 = row_w0 + off * setup.dw0_dx;
+                let mut w1 = row_w1 + off * setup.dw1_dx;
+                let mut w2 = row_w2 + off * setup.dw2_dx;
+                let row_base = py * width;
+                for px in xl..=xr {
+                    if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
+                        let depth = (w0 * d0 + w1 * d1 + w2 * d2) as f32;
+                        let idx = row_base + px;
+                        unsafe {
+                            if depth > *zbuf.get_unchecked(idx) {
+                                *zbuf.get_unchecked_mut(idx) = depth;
+                                let r = (w0 * c0r + w1 * c1r + w2 * c2r).round().clamp(0.0, 255.0) as u8;
+                                let g = (w0 * c0g + w1 * c1g + w2 * c2g).round().clamp(0.0, 255.0) as u8;
+                                let b = (w0 * c0b + w1 * c1b + w2 * c2b).round().clamp(0.0, 255.0) as u8;
+                                let wx = w0 * world[0][0] + w1 * world[1][0] + w2 * world[2][0];
+                                let wy = w0 * world[0][1] + w1 * world[1][1] + w2 * world[2][1];
+                                let wz = w0 * world[0][2] + w1 * world[1][2] + w2 * world[2][2];
+                                let (fr, fg, fb) = shade((r, g, b), [wx, wy, wz]);
+                                let p = pixels.as_mut_ptr().add(idx * 3);
+                                *p = fr;
+                                *p.add(1) = fg;
+                                *p.add(2) = fb;
+                            }
+                        }
+                    }
+                    w0 += setup.dw0_dx;
+                    w1 += setup.dw1_dx;
+                    w2 += setup.dw2_dx;
+                }
+            }
+            row_w0 += setup.dw0_dy;
+            row_w1 += setup.dw1_dy;
+            row_w2 += setup.dw2_dy;
+        }
+    }
+
     /// Rasterize a transparent triangle: test z-buffer but don't write it, alpha-blend.
     /// Uses scanline clipping + f32x4 SIMD (4 pixels per iteration).
     pub fn rasterize_triangle_blend(

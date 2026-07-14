@@ -313,6 +313,49 @@ impl Default for ShadowConfig {
     }
 }
 
+/// Cast-shadow (shadow-mapping) configuration. Each light renders a depth map
+/// from its viewpoint; direct light is attenuated where a vertex is occluded.
+#[derive(Clone)]
+pub struct ShadowMapConfig {
+    /// Shadow-map resolution (per light, res × res texels).
+    pub resolution: usize,
+    /// Constant depth-compare bias in normalized [0,1] depth units.
+    pub bias: f64,
+    /// Normal-offset bias: push the sample point along the surface normal by
+    /// this many shadow texels before comparing. Primary acne fix (0 = off).
+    pub normal_bias: f64,
+    /// Slope-scaled bias factor: grows the depth bias at grazing light angles
+    /// (0 = off, 1 = standard). Complements the constant `bias`.
+    pub slope_bias: f64,
+    /// Shadow darkness: 1.0 removes all direct light in shadow, 0.0 disables.
+    pub strength: f64,
+    /// PCF kernel radius in texels (0 = hard edges, 1 = 3×3 soft, …).
+    pub softness: usize,
+    /// Per-pixel sampling (PNG only): sharp shadow edges instead of the cheaper
+    /// per-vertex interpolation. Costs more (samples the map per fragment).
+    pub per_pixel: bool,
+    /// Optional shadow tint (hex). "" = neutral (shadows go to ambient only).
+    pub color: String,
+    /// Light size for contact-hardening soft shadows (PCSS), in world units.
+    /// 0 = off (uniform PCF). Only used with per-pixel sampling.
+    pub light_size: f64,
+    /// Omnidirectional (cube) shadow maps for positional lights — needed when a
+    /// point light sits inside/among the geometry. 6× the cost; off by default.
+    pub omni: bool,
+}
+
+impl Default for ShadowMapConfig {
+    fn default() -> Self {
+        // 512 is the sweet spot: per-vertex sampling makes ≥512 visually
+        // indistinguishable from 1024 while costing ~60% less to build.
+        // Normal-offset carries the acne fix, so the constant bias stays small.
+        Self {
+            resolution: 512, bias: 0.0008, normal_bias: 2.0, slope_bias: 1.0,
+            strength: 1.0, softness: 1, per_pixel: false, color: String::new(), light_size: 0.0, omni: false,
+        }
+    }
+}
+
 /// Annotation configuration.
 #[derive(Clone)]
 pub struct AnnotationConfig {
@@ -454,6 +497,8 @@ pub struct LightDef {
     pub vector: [f64; 3],
     pub color: (f32, f32, f32),
     pub intensity: f64,
+    /// Whether this light casts shadows (when `shadows` is enabled).
+    pub cast_shadow: bool,
 }
 
 impl Default for LightDef {
@@ -463,6 +508,7 @@ impl Default for LightDef {
             vector: [1.0, 2.0, 3.0],
             color: (1.0f32, 1.0f32, 1.0f32),
             intensity: 1.0,
+            cast_shadow: true,
         }
     }
 }
@@ -527,6 +573,7 @@ pub struct RenderConfig {
     pub sss: Option<SssConfig>,
     pub annotations: Option<AnnotationConfig>,
     pub point_size: f64,
+    pub shadows: Option<ShadowMapConfig>,
 }
 
 impl Default for RenderConfig {
@@ -591,6 +638,7 @@ impl Default for RenderConfig {
             sss: None,
             annotations: None,
             point_size: 0.0,
+            shadows: None,
         }
     }
 }
@@ -675,6 +723,7 @@ fn parse_light_def(p: &mut JsonParser) -> Result<LightDef, String> {
                     light.color = (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b));
                 }
                 "intensity" => light.intensity = p.parse_f64()?,
+                "cast_shadow" => light.cast_shadow = p.parse_bool()?,
                 _ => { p.skip_value()?; }
             }
             if p.eat_comma_or(b'}') { break; }
@@ -875,6 +924,18 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                     "offset" => offset = parse_f64,
                 }),
                 "point_size" => cfg.point_size = p.parse_f64()?,
+                "shadows" => cfg.shadows = parse_optional_object!(p, ShadowMapConfig, {
+                    "resolution" => resolution = parse_usize,
+                    "bias" => bias = parse_f64,
+                    "normal_bias" => normal_bias = parse_f64,
+                    "slope_bias" => slope_bias = parse_f64,
+                    "strength" => strength = parse_f64,
+                    "softness" => softness = parse_usize,
+                    "per_pixel" => per_pixel = parse_bool,
+                    "color" => color = parse_string,
+                    "light_size" => light_size = parse_f64,
+                    "omni" => omni = parse_bool,
+                }),
                 _ => { p.skip_value()?; }
             }
             if p.eat_comma_or(b'}') { break; }
