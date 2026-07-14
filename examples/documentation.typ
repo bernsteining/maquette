@@ -216,7 +216,7 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   // ── Effects ───────────────────────────────────────────────────────
   \"ground_shadow\": false,                          // true or {opacity, color}
   \"shadows\": false,                                // Cast/self shadows: true or {per_pixel, softness, color, omni, ...}
-  \"clip_plane\": null,                              // Clipping plane (a, b, c, d)
+  \"clip\": null,                                    // Cut plane: (a,b,c,d) or {from|axis|normal, depth, keep, cap}
   \"explode\": 0,                                    // Exploded view factor
   \"decimate\": 0,                                   // Mesh simplification 0-1 (higher = fewer triangles)
   \"point_size\": 0,                                 // Point cloud neighbor radius (0 = auto)
@@ -1595,27 +1595,40 @@ Sharpening enhances edge contrast using a 3×3 unsharp mask. Pass `sharpen: true
 
 = Effects
 
-== #link("https://en.wikipedia.org/wiki/Clipping_(computer_graphics)")[Clipping Plane]
+== #link("https://en.wikipedia.org/wiki/Clipping_(computer_graphics)")[Clipping]
 
-Cut away part of a model using a mathematical plane defined as $(a, b, c, d)$ where $a x + b y + c z + d >= 0$ is kept.
+Slice the model with a plane to cut part of it away — for section drawings or to reveal internal geometry. `clip` takes either an explicit world-space plane `(a, b, c, d)`, keeping the `ax + by + cz + d >= 0` half, or a dictionary that positions the plane for you.
 
-With `cull_backface: false`, the inner model becomes visible through the opening instead of being capped — useful for inspecting internal geometry.
+The handiest form is a *camera cutaway*: `from: "camera"` squares the plane to the view direction and `depth` (`0` = near face, `1` = far) sets how deep to cut, so the slice always faces the viewer whatever the angle. With `cap: false` you see straight in — here, the brain inside the skull:
 
 ```example
-// hl: 9-10
+// hl: 5
 #render-obj(skull-brain,
-  azimuth: 220,
-  up: (0,1,0),
-  highlight: (
-    "Skull": (color: "#e8e8e8"),
-    "Brain": (color: "#ff69b4"),
-  ),
-  distance: 200,
-  clip_plane: (2, -1, 0, 1),
-  cull_backface: false,
-  width: 72%,
+  azimuth: 220, up: (0, 1, 0), distance: 200,
+  highlight: ("Skull": (color: "#e8e8e8"), "Brain": (color: "#ff69b4")),
+  clip: (from: "camera", depth: 0.5, cap: false),
+  width: 66%,
 )
 ```
+
+The plane's normal comes from one of `from`/`axis`/`normal` (or a raw `(a,b,c,d)` array), positioned along the model by `depth` or `distance`:
+
+#table(
+  columns: (auto, auto, 1fr),
+  align: (left + horizon, left + horizon, left + horizon),
+  inset: (x: 7pt, y: 3.6pt),
+  stroke: none,
+  fill: (_, y) => if y == 0 { luma(235) } else if calc.odd(y) { luma(248) },
+  table.header([*Key*], [*Default*], [*What it does*]),
+  [`(a, b, c, d)`], [—], [Explicit world-space plane (array form); keeps the `ax+by+cz+d >= 0` side.],
+  [`from: "camera"`], [—], [Plane perpendicular to the view direction — a depth-wise cutaway that always faces the viewer.],
+  [`axis: "x"/"y"/"z"`], [—], [Axis-aligned plane.],
+  [`normal: (x, y, z)`], [—], [Explicit world-space normal.],
+  [`depth`], [`0.5`], [Cut position as a fraction `0`–`1` of the model along the normal (`0` = near side, `1` = far).],
+  [`distance`], [—], [Cut position in world units from the near side; overrides `depth` when set.],
+  [`keep`], [`"far"`], [Which side to keep, `"far"` or `"near"`.],
+  [`cap`], [`true`], [Close the cut cross-section with a flat face; `false` reveals hollow interiors.],
+)
 
 #pagebreak()
 
