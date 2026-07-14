@@ -237,7 +237,7 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 |---|---|---|
 | `ground_shadow` | `false` | Ground drop shadow: `true` or `{ opacity, color }` |
 | `shadows` | `false` | Cast/self shadows: `true` or `{ resolution, bias, normal_bias, slope_bias, strength, softness, per_pixel, light_size, color, omni }` |
-| `clip_plane` | `null` | Clipping plane `(a, b, c, d)`: keeps `ax+by+cz+d >= 0` |
+| `clip` | `null` | Clip/cutaway: world plane `(a, b, c, d)`, or `{ from\|axis\|normal, depth, distance, keep, cap }` |
 | `explode` | `0` | Exploded view factor (OBJ groups or auto-detected components) |
 | `decimate` | `0` | Mesh simplification strength (0--1) Higher = fewer triangles. |
 | `antialias` | `1` | Supersampling for PNG (`2` = 2×2 SSAA, `4` = 4×4) |
@@ -382,8 +382,8 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 //   color: "",            // optional shadow tint, hex (per-pixel only)
 //   omni: false }         // cube map for point lights inside the geometry
 // Per light: (type: "positional", …, cast_shadow: false) to opt a light out.
-"clip_plane": null,
-// Clipping plane (a, b, c, d)
+"clip": null,
+// Cut/cutaway: world plane (a,b,c,d), or {from|axis|normal, depth, distance, keep, cap}
 "explode": 0,
 // Exploded view factor
 "decimate": 0,
