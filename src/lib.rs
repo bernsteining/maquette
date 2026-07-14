@@ -22,6 +22,7 @@ mod projection;
 mod rasterizer;
 mod render;
 mod shading;
+mod shadow;
 mod smooth;
 mod ssao;
 mod svg;

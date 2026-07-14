@@ -17,6 +17,7 @@ pub(crate) struct ResolvedLight {
     pub(crate) kind: LightKind,
     pub(crate) vector: Vec3,
     pub(crate) color: (f32, f32, f32),
+    pub(crate) cast_shadow: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -36,6 +37,7 @@ pub(crate) fn resolve_lights(config: &RenderConfig) -> Vec<ResolvedLight> {
             kind: LightKind::Directional,
             vector: Vec3::new(config.light_dir[0], config.light_dir[1], config.light_dir[2]).normalized(),
             color: (1.0f32, 1.0f32, 1.0f32),
+            cast_shadow: true,
         }]
     } else {
         let lights = &config.lights;
@@ -49,6 +51,7 @@ pub(crate) fn resolve_lights(config: &RenderConfig) -> Vec<ResolvedLight> {
                     Vec3::new(l.vector[0], l.vector[1], l.vector[2])
                 },
                 color: (l.color.0 * intensity, l.color.1 * intensity, l.color.2 * intensity),
+                cast_shadow: l.cast_shadow,
             }
         }).collect()
     }
@@ -180,6 +183,7 @@ pub(crate) fn shade_batch_4(
     sss_intensity: f32, sss_distortion: f32, sss_lut: &[f32; 256],
     cel_bands: usize,
     is_gooch: bool, gooch_warm: (f32, f32, f32), gooch_cool: (f32, f32, f32),
+    shadow: Option<&[v128]>,
 ) -> [(u8, u8, u8); 4] {
     let zero = f32x4_splat(0.0);
     let one = f32x4_splat(1.0);
@@ -230,7 +234,10 @@ pub(crate) fn shade_batch_4(
         // Signed ndotl (original normal, not oriented)
         let ndotl = f32x4_add(f32x4_add(
             f32x4_mul(nx4, ldx), f32x4_mul(ny4, ldy)), f32x4_mul(nz4, ldz));
+        // In shadow, bias toward the cool tone (t4 → 0).
+        let sf0 = shadow.map(|s| s[0]);
         let t4 = f32x4_mul(f32x4_add(ndotl, one), f32x4_splat(0.5));
+        let t4 = if let Some(sf) = sf0 { f32x4_mul(t4, sf) } else { t4 };
 
         // cool = gooch_cool * 0.5 + base_lin * 0.5; warm = gooch_warm * 0.5 + base_lin * 0.5
         let half = f32x4_splat(0.5);
@@ -259,6 +266,7 @@ pub(crate) fn shade_batch_4(
             let h_inv = f32x4_div(one, f32x4_sqrt(f32x4_add(h_len_sq, eps)));
             let ndoth = f32x4_min(f32x4_max(f32x4_mul(ndoth_unnorm, h_inv), zero), one);
             let s = f32x4_mul(lut_lookup_4(ndoth, spec_lut), f32x4_splat(specular));
+            let s = if let Some(sf) = sf0 { f32x4_mul(s, sf) } else { s };
             hr = f32x4_add(hr, s);
             hg = f32x4_add(hg, s);
             hb = f32x4_add(hb, s);
@@ -287,7 +295,10 @@ pub(crate) fn shade_batch_4(
 
     let oma4 = f32x4_splat(one_minus_ambient);
 
-    for light in lights {
+    for (li, light) in lights.iter().enumerate() {
+        // Per-light cast-shadow attenuation (1 = lit, 0 = fully shadowed).
+        let sf = shadow.map(|s| s[li]);
+
         // Light direction
         let (ldx, ldy, ldz) = if light.kind == LightKind::Directional {
             (f32x4_splat(light.dx), f32x4_splat(light.dy), f32x4_splat(light.dz))
@@ -311,8 +322,9 @@ pub(crate) fn shade_batch_4(
             f32x4_mul(f32x4_floor(f32x4_mul(ndotl_raw, bands4)), inv_bands4)
         } else { ndotl_raw };
 
-        // Diffuse: one_minus_ambient * ndotl * light_color
+        // Diffuse: one_minus_ambient * ndotl * light_color (attenuated by shadow)
         let df = f32x4_mul(oma4, ndotl);
+        let df = if let Some(sf) = sf { f32x4_mul(df, sf) } else { df };
         diff_r = f32x4_add(diff_r, f32x4_mul(f32x4_splat(light.cr), df));
         diff_g = f32x4_add(diff_g, f32x4_mul(f32x4_splat(light.cg), df));
         diff_b = f32x4_add(diff_b, f32x4_mul(f32x4_splat(light.cb), df));
@@ -334,6 +346,7 @@ pub(crate) fn shade_batch_4(
                 let half = f32x4_splat(0.5);
                 v128_bitselect(one, zero, f32x4_gt(spec_raw, half))
             } else { spec_raw };
+            let spec_val = if let Some(sf) = sf { f32x4_mul(spec_val, sf) } else { spec_val };
             spec_r = f32x4_add(spec_r, f32x4_mul(f32x4_splat(light.cr), spec_val));
             spec_g = f32x4_add(spec_g, f32x4_mul(f32x4_splat(light.cg), spec_val));
             spec_b = f32x4_add(spec_b, f32x4_mul(f32x4_splat(light.cb), spec_val));
@@ -448,6 +461,7 @@ pub(crate) fn shade_point(
     sss_intensity: f32,
     sss_distortion: f32,
     sss_lut: &[f32; 256],
+    shadow: Option<(&[f32], usize, usize)>,
 ) -> (u8, u8, u8) {
     let nx = normal.x as f32;
     let ny = normal.y as f32;
@@ -491,12 +505,15 @@ pub(crate) fn shade_point(
         let warm_g = gooch_warm.1 * 0.5 + lg * kd;
         let warm_b = gooch_warm.2 * 0.5 + lb * kd;
 
+        // Light 0's shadow factor: index li*stride + vi with li = 0.
+        let sf0 = shadow.map(|(f, _st, vi)| f[vi]).unwrap_or(1.0);
+        let t = t * sf0;
         let mut hr = cool_r + t * (warm_r - cool_r);
         let mut hg = cool_g + t * (warm_g - cool_g);
         let mut hb = cool_b + t * (warm_b - cool_b);
 
         if specular > 0.0 {
-            let s = specular_contrib(ldx, ldy, ldz, vdx, vdy, vdz, onx, ony, onz, spec_lut, specular);
+            let s = specular_contrib(ldx, ldy, ldz, vdx, vdy, vdz, onx, ony, onz, spec_lut, specular) * sf0;
             hr += s;
             hg += s;
             hb += s;
@@ -513,21 +530,22 @@ pub(crate) fn shade_point(
     let mut spec_g = 0.0f32;
     let mut spec_b = 0.0f32;
 
-    for light in lights {
+    for (li, light) in lights.iter().enumerate() {
+        let sf = shadow.map(|(f, st, vi)| f[li * st + vi]).unwrap_or(1.0);
         let (ldx, ldy, ldz) = get_light_dir(light, wpx, wpy, wpz);
 
         let ndotl = (nx * ldx + ny * ldy + nz * ldz).abs();
         let band = if shading == ShadingMode::Cel && cel_bands > 0 {
             (ndotl * cel_bands as f32).floor() / cel_bands as f32
         } else { ndotl };
-        let diffuse_factor = one_minus_ambient * band;
+        let diffuse_factor = one_minus_ambient * band * sf;
         diff_r += light.cr * diffuse_factor;
         diff_g += light.cg * diffuse_factor;
         diff_b += light.cb * diffuse_factor;
 
         if specular > 0.0 {
             let raw = specular_contrib(ldx, ldy, ldz, vdx, vdy, vdz, onx, ony, onz, spec_lut, specular);
-            let s = if shading == ShadingMode::Cel { if raw > 0.5 { 1.0f32 } else { 0.0f32 } } else { raw };
+            let s = (if shading == ShadingMode::Cel { if raw > 0.5 { 1.0f32 } else { 0.0f32 } } else { raw }) * sf;
             spec_r += light.cr * s;
             spec_g += light.cg * s;
             spec_b += light.cb * s;

@@ -34,6 +34,9 @@ struct ProjectedTri {
     group_id: Option<u32>,
     /// Opacity (0.0–1.0). 1.0 = fully opaque.
     opacity: f64,
+    /// Per-pixel shadow data (world vertex positions + face normal). Set only
+    /// when per-pixel shadows are active; the raster pass samples the maps here.
+    pp: Option<([Vec3; 3], Vec3)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +307,134 @@ pub(crate) fn pointcloud_to_triangles(
 // Core triangle projection
 // ---------------------------------------------------------------------------
 
+/// Everything the shade paths need to apply cast shadows. `maps` has one entry
+/// per light (None = non-caster); `factors` is the per-unique-vertex×light
+/// attenuation for the smooth paths (None under flat shading, which samples the
+/// maps per-face on the fly).
+struct ShadowData {
+    maps: Vec<Option<crate::shadow::LightShadow>>,
+    bias: crate::shadow::BiasParams,
+    strength: f32,
+    softness: usize,
+    factors: Option<Vec<f32>>,
+    /// Per-pixel sampling active (PNG path only). When true, `factors` is None
+    /// and the raster pass samples the maps per fragment via `ProjectedTri.pp`.
+    per_pixel: bool,
+    /// Shadow tint in linear-ish sRGB u8 (None = neutral).
+    tint: Option<(u8, u8, u8)>,
+    /// PCSS light size in world units (0 = uniform PCF).
+    light_size: f64,
+    /// Ambient light fraction — the brightness a fully shadowed pixel keeps.
+    ambient_keep_base: f32,
+}
+
+impl ShadowData {
+    /// Lit multiplier (1 = lit, 0 = shadowed) for light `li` at a point/normal.
+    /// Used by the flat-shading path, which has no precomputed vertex factors.
+    #[inline]
+    fn sample(&self, li: usize, p: Vec3, normal: Vec3) -> f32 {
+        match &self.maps[li] {
+            Some(map) => 1.0 - self.strength * (1.0 - map.lit(p, normal, &self.bias, self.softness)),
+            None => 1.0,
+        }
+    }
+
+    /// Aggregate geometric lit factor (0 = shadowed, 1 = lit) across all casting
+    /// lights at a world point. Used by the per-pixel raster path.
+    #[inline]
+    fn pp_factor(&self, p: Vec3, normal: Vec3) -> f32 {
+        let mut sum = 0.0f32;
+        let mut n = 0u32;
+        for map in &self.maps {
+            if let Some(m) = map {
+                sum += if self.light_size > 0.0 {
+                    m.lit_pcss(p, normal, &self.bias, self.softness, self.light_size)
+                } else {
+                    m.lit(p, normal, &self.bias, self.softness)
+                };
+                n += 1;
+            }
+        }
+        if n == 0 { 1.0 } else { sum / n as f32 }
+    }
+
+    /// Final per-pixel color: darken toward the (optionally tinted) ambient floor
+    /// by the shadow factor at `p`.
+    #[inline]
+    fn pp_shade(&self, c: (u8, u8, u8), p: Vec3, normal: Vec3) -> (u8, u8, u8) {
+        let t = self.pp_factor(p, normal);
+        let keep = 1.0 - self.strength * (1.0 - self.ambient_keep_base);
+        let (tr, tg, tb) = self.tint
+            .map(|(r, g, b)| (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0))
+            .unwrap_or((1.0, 1.0, 1.0));
+        let chan = |cc: u8, tint: f32| {
+            let m = keep * tint;          // shadow floor for this channel
+            let mul = m + t * (1.0 - m);  // lerp floor→1 by lit factor
+            (cc as f32 * mul).round().clamp(0.0, 255.0) as u8
+        };
+        (chan(c.0, tr), chan(c.1, tg), chan(c.2, tb))
+    }
+}
+
+/// Build shadow maps + per-vertex factors. Returns None when shadows are
+/// disabled or there are no lights. Camera-independent, so it can be reused
+/// across all views of a grid/turntable.
+fn build_shadow_data(
+    triangles: &[Triangle],
+    lights: &[ResolvedLight],
+    smooth: Option<&smooth::SmoothData>,
+    config: &RenderConfig,
+    group_styles: &HashMap<u32, GroupAppearance>,
+    bc: Vec3,
+    br: f64,
+    allow_per_pixel: bool,
+) -> Option<ShadowData> {
+    let cfg = config.shadows.as_ref()?;
+    if cfg.strength <= 0.0 || lights.is_empty() {
+        return None;
+    }
+    // Per-pixel is PNG-only; SVG callers pass allow_per_pixel = false.
+    let per_pixel = cfg.per_pixel && allow_per_pixel;
+    let tint = if cfg.color.is_empty() { None } else { Some(parse_hex_color(&cfg.color)) };
+    let up = Vec3::new(config.up[0], config.up[1], config.up[2]);
+    // Occluder filter: skip triangles that are (nearly) transparent so a glassy
+    // or x-ray part doesn't cast a solid shadow.
+    let global_opacity = config.opacity;
+    let is_occluder = |tri: &Triangle| -> bool {
+        let o = tri.group_id
+            .and_then(|gid| group_styles.get(&gid))
+            .and_then(|a| a.opacity)
+            .unwrap_or(global_opacity);
+        o >= 0.5
+    };
+    let maps = crate::shadow::build_shadow_maps(triangles, lights, bc, br, up, cfg, &is_occluder);
+    let bias = crate::shadow::BiasParams { bias: cfg.bias, normal_bias: cfg.normal_bias, slope_bias: cfg.slope_bias };
+    let strength = cfg.strength as f32;
+
+    // Precompute per-unique-vertex factors for the smooth paths (per-vertex
+    // mode only; per-pixel samples the maps during rasterization instead).
+    let factors = if per_pixel {
+        None
+    } else {
+        smooth.map(|sd| {
+            let n_unique = sd.positions.len();
+            let mut factors = vec![1.0f32; maps.len() * n_unique];
+            for (li, map) in maps.iter().enumerate() {
+                let Some(map) = map else { continue };
+                let base = li * n_unique;
+                for (vi, p) in sd.positions.iter().enumerate() {
+                    let lit = map.lit(*p, sd.normals[vi], &bias, cfg.softness);
+                    factors[base + vi] = 1.0 - strength * (1.0 - lit);
+                }
+            }
+            factors
+        })
+    };
+
+    let ambient_keep_base = (config.ambient.intensity as f32).clamp(0.0, 1.0);
+    Some(ShadowData { maps, bias, strength, softness: cfg.softness, factors, per_pixel, tint, light_size: cfg.light_size, ambient_keep_base })
+}
+
 fn project_triangles(
     triangles: &[Triangle],
     smooth: Option<&smooth::SmoothData>,
@@ -315,7 +446,11 @@ fn project_triangles(
     force_ortho: bool,
     group_styles: &HashMap<u32, GroupAppearance>,
     lights: &[ResolvedLight],
+    shadow: Option<&ShadowData>,
 ) -> Vec<ProjectedTri> {
+    // Smooth paths consume the precomputed per-vertex factors; the flat path
+    // (below) samples the maps directly, so it needs the full bundle.
+    let shadow_factors: Option<&[f32]> = shadow.and_then(|s| s.factors.as_deref());
     let proj = if force_ortho { Projection::Ortho } else { resolve_projection(&config.projection) };
     let proj_setup = setup_projection(proj, config, view, vw, vh, br);
     let view_mat = Mat4::look_at(view.camera, view.center, view.up);
@@ -457,9 +592,18 @@ fn project_triangles(
                 let cam_y = view_camera.y as f32;
                 let cam_z = view_camera.z as f32;
                 let n_batches = n_unique / 4;
+                let n_lights = lights_f32.len();
+                // Reused per-light shadow-factor lanes for the current batch of 4.
+                let mut sh_scratch: Vec<v128> = vec![f32x4_splat(1.0); n_lights];
                 let mut cache: Vec<(u8, u8, u8)> = Vec::with_capacity(n_unique);
                 for i in 0..n_batches {
                     let b = i * 4;
+                    let sh4: Option<&[v128]> = shadow_factors.map(|f| {
+                        for li in 0..n_lights {
+                            sh_scratch[li] = unsafe { v128_load(f.as_ptr().add(li * n_unique + b) as *const v128) };
+                        }
+                        &sh_scratch[..]
+                    });
                     let nx4 = unsafe { v128_load(snx.as_ptr().add(b) as *const v128) };
                     let ny4 = unsafe { v128_load(sny.as_ptr().add(b) as *const v128) };
                     let nz4 = unsafe { v128_load(snz.as_ptr().add(b) as *const v128) };
@@ -479,6 +623,7 @@ fn project_triangles(
                         sss_intensity, sss_dist, &sss_lut,
                         simd_cel_bands,
                         simd_gooch, gooch_warm, gooch_cool,
+                        sh4,
                     );
                     cache.extend_from_slice(&colors);
                 }
@@ -491,6 +636,7 @@ fn project_triangles(
                         tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
                         spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
+                        shadow_factors.map(|f| (f, n_unique, i)),
                     ));
                 }
                 cache
@@ -509,6 +655,7 @@ fn project_triangles(
                         tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
                         spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
+                        shadow_factors.map(|f| (f, n_unique, i)),
                     )
                 }).collect()
             };
@@ -531,6 +678,13 @@ fn project_triangles(
     };
 
     let mut projected: Vec<ProjectedTri> = Vec::with_capacity(triangles.len());
+
+    // Slow-path shadow scratch: gathered per-light lanes for a triangle's 3 verts.
+    let sh_n_lights = lights_f32.len();
+    let sh_stride = smooth.map(|s| s.positions.len()).unwrap_or(0);
+    let mut slow_sh_scratch: Vec<v128> = vec![f32x4_splat(1.0); sh_n_lights];
+    // Flat-path shadow scratch: one factor per light, sampled at the face centroid.
+    let mut flat_sh_scratch: Vec<f32> = vec![1.0; sh_n_lights];
 
     for (ti, tri) in triangles.iter().enumerate() {
         let is_back_facing = if do_cull || is_xray {
@@ -618,6 +772,13 @@ fn project_triangles(
                     let px4 = f32x4(tri.vertices[0].x as f32, tri.vertices[1].x as f32, tri.vertices[2].x as f32, 0.0);
                     let py4 = f32x4(tri.vertices[0].y as f32, tri.vertices[1].y as f32, tri.vertices[2].y as f32, 0.0);
                     let pz4 = f32x4(tri.vertices[0].z as f32, tri.vertices[1].z as f32, tri.vertices[2].z as f32, 0.0);
+                    let sh4: Option<&[v128]> = shadow_factors.map(|f| {
+                        for li in 0..sh_n_lights {
+                            let base = li * sh_stride;
+                            slow_sh_scratch[li] = f32x4(f[base + i0], f[base + i1], f[base + i2], 1.0);
+                        }
+                        &slow_sh_scratch[..]
+                    });
                     let colors = shade_batch_4(
                         nx4, ny4, nz4, px4, py4, pz4,
                         blr, blg, blb,
@@ -631,6 +792,7 @@ fn project_triangles(
                         sss_intensity, sss_dist, &sss_lut,
                         if shading == ShadingMode::Cel { cfg_cel_bands } else { 0 },
                         is_gooch, gooch_warm, gooch_cool,
+                        sh4,
                     );
                     [colors[0], colors[1], colors[2]]
                 } else {
@@ -645,6 +807,7 @@ fn project_triangles(
                             (vr as f32 / 255.0, vg as f32 / 255.0, vb as f32 / 255.0)
                         };
                         let amb = hemi_ambient(vn[i], grp_sky, grp_gnd, up_f32);
+                        let uidx = [i0, i1, i2][i];
                         vcols[i] = shade_point(
                             vn[i], tri.vertices[i], base_lin,
                             &lights_f32, view_camera, amb, one_minus_ambient, specular,
@@ -652,6 +815,7 @@ fn project_triangles(
                             tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
                             spec_lut, &fresnel_lut,
                             sss_intensity, sss_dist, &sss_lut,
+                            shadow_factors.map(|f| (f, sh_stride, uidx)),
                         );
                     }
                     vcols
@@ -670,6 +834,14 @@ fn project_triangles(
                 } else {
                     (fr as f32 / 255.0, fg as f32 / 255.0, fb as f32 / 255.0)
                 };
+                // Flat shading has no smooth vertices, so sample the shadow maps
+                // per-face at the centroid (stride 1, index 0 → f[li]).
+                let flat_shadow = shadow.filter(|s| !s.per_pixel).map(|s| {
+                    for li in 0..sh_n_lights {
+                        flat_sh_scratch[li] = s.sample(li, centroid, tri.normal);
+                    }
+                    (&flat_sh_scratch[..], 1usize, 0usize)
+                });
                 let (r, g, b) = shade_point(
                     tri.normal, centroid, base_lin,
                     &lights_f32, view_camera, amb, one_minus_ambient, specular,
@@ -677,6 +849,7 @@ fn project_triangles(
                     tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
                     spec_lut, &fresnel_lut,
                     sss_intensity, sss_dist, &sss_lut,
+                    flat_shadow,
                 );
                 (r, g, b, None, opacity)
             }
@@ -685,7 +858,12 @@ fn project_triangles(
         let pts = apply_projection(&proj_setup, &cam);
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
-        projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity });
+        let pp = if shadow.map_or(false, |s| s.per_pixel) {
+            Some((tri.vertices, tri.normal))
+        } else {
+            None
+        };
+        projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity, pp });
     }
 
     projected
@@ -832,7 +1010,7 @@ fn project_shadow(
         let pts = apply_projection(&proj_setup, &cam);
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
-        projected.push(ProjectedTri { pts, depths, depth, r: sr, g: sg, b: sb, vertex_colors: None, group_id: None, opacity: 1.0 });
+        projected.push(ProjectedTri { pts, depths, depth, r: sr, g: sg, b: sb, vertex_colors: None, group_id: None, opacity: 1.0, pp: None });
     }
 
     projected
@@ -1213,7 +1391,8 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
     let lights = resolve_lights(config);
-    let mut projected = project_triangles(&tris, smooth_data, config, &view, config.width, config.height, br, false, group_styles, &lights);
+    let shadow_data = build_shadow_data(&tris, &lights, smooth_data, config, group_styles, bc, br, false);
+    let mut projected = project_triangles(&tris, smooth_data, config, &view, config.width, config.height, br, false, group_styles, &lights, shadow_data.as_ref());
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, config.width, config.height));
     }
@@ -1434,6 +1613,7 @@ fn make_debug_light_tris(
                 vertex_colors: None,
                 group_id: Some(u32::MAX),
                 opacity: 0.85,
+                pp: None,
             });
         }
     }
@@ -1727,6 +1907,9 @@ fn render_grid_svg(
     let is_wireframe = config.mode == "wireframe";
 
     let lights = resolve_lights(config);
+    // Shadow maps are camera-independent → build once, reuse for every view.
+    let (gbmin, gbmax) = compute_bbox(triangles);
+    let shadow_data = build_shadow_data(triangles, &lights, None, config, group_styles, bbox_center(gbmin, gbmax), br, false);
     let estimated = triangles.len() * 200 * views.len() + 512;
     let mut svg = String::with_capacity(estimated);
     svg_open(&mut svg, config.width, config.height, &config.background);
@@ -1738,7 +1921,7 @@ fn render_grid_svg(
         let y = row as f64 * cell_h;
         let render_h = cell_h - label_h;
 
-        let mut projected = project_triangles(triangles, None, config, view, cell_w, render_h, br, true, group_styles, &lights);
+        let mut projected = project_triangles(triangles, None, config, view, cell_w, render_h, br, true, group_styles, &lights, shadow_data.as_ref());
         radix_sort_by_depth(&mut projected, false);
 
         if config.grid_labels {
@@ -1886,7 +2069,8 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
     let lights = resolve_lights(config);
-    let mut projected = project_triangles(&tris, smooth_data, config, &view, vw, vh, br, false, group_styles, &lights);
+    let shadow_data = build_shadow_data(&tris, &lights, smooth_data, config, group_styles, bc, br, true);
+    let mut projected = project_triangles(&tris, smooth_data, config, &view, vw, vh, br, false, group_styles, &lights, shadow_data.as_ref());
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, vw, vh));
     }
@@ -1914,10 +2098,22 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
             if tri.opacity >= 1.0 {
                 let max_d = tri.depths[0].max(tri.depths[1]).max(tri.depths[2]) as f32;
                 if buf.hiz_can_skip(&tri.pts, max_d) { continue; }
-                if let Some(vcols) = &tri.vertex_colors {
-                    buf.rasterize_triangle_smooth(&tri.pts, &tri.depths, vcols);
-                } else {
-                    buf.rasterize_triangle(&tri.pts, &tri.depths, tri.r, tri.g, tri.b);
+                match (shadow_data.as_ref(), tri.pp) {
+                    // Per-pixel shadows: sample the maps at each fragment's world pos.
+                    (Some(sd), Some((wp, normal))) => {
+                        let cols = tri.vertex_colors.unwrap_or([(tri.r, tri.g, tri.b); 3]);
+                        let world = [[wp[0].x, wp[0].y, wp[0].z], [wp[1].x, wp[1].y, wp[1].z], [wp[2].x, wp[2].y, wp[2].z]];
+                        buf.rasterize_triangle_shadowed(&tri.pts, &tri.depths, &cols, &world, |c, p| {
+                            sd.pp_shade(c, Vec3::new(p[0], p[1], p[2]), normal)
+                        });
+                    }
+                    _ => {
+                        if let Some(vcols) = &tri.vertex_colors {
+                            buf.rasterize_triangle_smooth(&tri.pts, &tri.depths, vcols);
+                        } else {
+                            buf.rasterize_triangle(&tri.pts, &tri.depths, tri.r, tri.g, tri.b);
+                        }
+                    }
                 }
                 buf.hiz_update(&tri.pts);
             }
@@ -2089,6 +2285,11 @@ fn render_grid_png_buf(
     let is_wireframe = config.mode == "wireframe";
 
     let lights = resolve_lights(config);
+    // Shadow maps are camera-independent → build once, reuse for every view.
+    let (gbmin, gbmax) = compute_bbox(triangles);
+    // Grid uses the per-vertex/flat sampling path (its raster loop has no
+    // per-pixel branch), so disable per-pixel here regardless of config.
+    let shadow_data = build_shadow_data(triangles, &lights, None, config, group_styles, bbox_center(gbmin, gbmax), br, false);
     let mut buf = PixelBuffer::new(w, h, bg);
 
     for (i, (view, _label)) in views.iter().enumerate() {
@@ -2098,7 +2299,7 @@ fn render_grid_png_buf(
         let oy = (row * cell_h + label_h) as f64;
 
         let mut projected = project_triangles(
-            triangles, None, config, view, cell_w as f64, render_h as f64, br, true, group_styles, &lights,
+            triangles, None, config, view, cell_w as f64, render_h as f64, br, true, group_styles, &lights, shadow_data.as_ref(),
         );
         radix_sort_by_depth(&mut projected, true);
 
