@@ -26,6 +26,7 @@
   zoom: 1.25, pan: (0, 0.08),
   color: "#7d8590", specular: 0.6, shininess: 48,
   fresnel: 0.3, tone_mapping: "aces",
+  ambient: 0.4, light_dir: (2, 3, 2.5),
 )
 
 #let doc-scope = (
@@ -337,6 +338,25 @@ The `up` parameter defines which direction points "up" in the scene. The default
 )
 
 The `fov` parameter controls the vertical field of view angle (in degrees) for perspective projection. Lower values produce a telephoto effect, higher values create wide-angle distortion. Default is 45. By default (`auto_fit: true`), Maquette scales the model to fill the viewport; set `auto_fit: false` to use raw world-space coordinates, which lets you control framing manually with `distance` and `fov`.
+
+== Framing — Zoom & Pan
+
+`auto_fit` fits the model's bounding *sphere* to the viewport, so long or spread-out models leave wide empty margins — this crankshaft fills barely half the frame by default. `zoom` multiplies the fit scale to reclaim that space; `pan: (right, up)` then recentres the model in screen space (as a fraction of the viewport), so a tighter zoom doesn't push it out of frame.
+
+#let _framing(z, p, cap) = align(center + bottom)[
+  #render-obj(crankshaft, camera: (-100, -100, 500), up: (0, -1, 0),
+    color: "#8a9099", specular: 0.5, tone_mapping: "aces",
+    ambient: 0.35, light_dir: (2, 3, 2.5), zoom: z, pan: p, width: 100%)
+  #v(-0.4em)
+  #text(size: 8.5pt, fill: luma(90), raw(cap))
+]
+#grid(columns: (1fr, 1fr, 1fr), gutter: 1em,
+  _framing(1.0, (0, 0), "zoom: 1.0 (default)"),
+  _framing(1.3, (0, 0), "zoom: 1.3"),
+  _framing(1.3, (0, 0.09), "zoom: 1.3, pan: (0, 0.09)"),
+)
+
+At `zoom: 1.3` the model finally fills the width, but it sits low and the pistons clip at the bottom edge; `pan: (0, 0.09)` lifts it back into view. Both default to no-ops (`zoom: 1.0`, `pan: (0, 0)`), so existing renders are unaffected.
 
 #pagebreak()
 
@@ -1342,86 +1362,46 @@ ground_shadow: (opacity: 0.3, color: "#000000")
 
 == #link("https://en.wikipedia.org/wiki/Shadow_mapping")[Cast Shadows]
 
-Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *self-shadowing* — every part occluding every other, computed with a depth map per light. The examples below share this brushed-steel material so the shadows read against a realistic surface:
+Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *self-shadowing* — every part occluding every other, computed with a depth map per light. Every render below shares one brushed-steel setup, so the code stays focused on the `shadows` option:
 
 ```typ
 #let steel = (
-  camera: (-100, -100, 500), up: (0, -1, 0),
-  zoom: 1.25, pan: (0, 0.08),   // fill the frame
-  color: "#7d8590", specular: 0.6, shininess: 48,
-  fresnel: 0.3, tone_mapping: "aces",
+  camera: (-100, -100, 500), up: (0, -1, 0), zoom: 1.25, pan: (0, 0.08),
+  color: "#7d8590", specular: 0.6, shininess: 48, fresnel: 0.3,
+  tone_mapping: "aces", ambient: 0.4, light_dir: (2, 3, 2.5),
 )
 ```
 
-Shadows are *off by default*. Passing `shadows: true` grounds the model — notice the contact shadows where the pistons meet the crank and between the counterweights:
+Shadows are *off by default*. `shadows: true` grounds the model — note the contact shadows where the pistons meet the crank:
 
 ```example
 // hl: 3
 #grid(columns: (1fr, 1fr), gutter: 0.6em,
-  render-obj(crankshaft, ..steel, ambient: 0.4, light_dir: (2, 3, 2.5), width: 100%),
-  render-obj(crankshaft, ..steel, ambient: 0.4, light_dir: (2, 3, 2.5), shadows: true, width: 100%),
+  render-obj(crankshaft, ..steel, width: 100%),
+  render-obj(crankshaft, ..steel, shadows: true, width: 100%),
 )
 ```
 
-Sampling defaults to *per-vertex* — cheap and great on dense meshes. `per_pixel: true` samples every fragment instead, keeping shadow edges crisp on low-poly and CAD models (PNG only, ~2.5× the cost).
+Sampling is *per-vertex* by default — cheap and great on dense meshes. `per_pixel: true` samples every fragment for crisp edges on low-poly and CAD models (PNG only, ~2.5× the cost), and unlocks the softer, tinted variants below. Each panel passes a different `shadows` value on top of `..steel`:
 
-```example
-// hl: 2
-#render-obj(crankshaft, ..steel,
-  ambient: 0.4, light_dir: (2, 3, 2.5),
-  shadows: (per_pixel: true),
-  width: 44%,
+#let _shadow(extra, cap) = align(center + bottom)[
+  #render-obj(crankshaft, ..steel, ..extra, width: 100%)
+  #v(-0.4em)
+  #text(size: 8pt, fill: luma(90), raw(cap))
+]
+#grid(columns: (1fr, 1fr, 1fr), gutter: 0.8em, row-gutter: 1em,
+  _shadow((shadows: (per_pixel: true)), "shadows: (per_pixel: true)"),
+  _shadow((shadows: (per_pixel: true, light_size: 6)), "…, light_size: 6  (PCSS soft)"),
+  _shadow((shadows: (per_pixel: true, color: "#5577cc", strength: 0.7)), "…, color: \"#5577cc\", strength: 0.7"),
+  _shadow((ambient: 0.3, lights: (
+      (type: "directional", vector: (2, 3, 2.5), color: "#fff2e0", intensity: 1.4),
+      (type: "directional", vector: (-3, 1, -1), color: "#dce8ff", intensity: 0.8, cast_shadow: false)),
+    shadows: true), "fill light → cast_shadow: false"),
+  _shadow((ambient: 0.28, lights: ((type: "positional", vector: (0, 0, 250), color: "#fff", intensity: 2.2),),
+    shadows: (per_pixel: true, omni: true)), "positional inside → omni: true"),
 )
-```
 
-Add `light_size` (world units) for #link("https://en.wikipedia.org/wiki/Percentage-closer_soft_shadows")[PCSS] soft shadows — sharp where parts touch, softening with distance.
-
-```example
-// hl: 3
-#render-obj(crankshaft, ..steel,
-  ambient: 0.4, light_dir: (2, 3, 2.5),
-  shadows: (per_pixel: true, light_size: 6),
-  width: 44%,
-)
-```
-
-With `per_pixel` sampling, `color` tints the shadow instead of darkening to neutral grey — here a cool blue, softened with `strength` so it reads as coloured light rather than black.
-
-```example
-// hl: 3
-#render-obj(crankshaft, ..steel,
-  ambient: 0.4, light_dir: (2, 3, 2.5),
-  shadows: (per_pixel: true, color: "#5577cc", strength: 0.7),
-  width: 44%,
-)
-```
-
-Each light casts its own shadow. Set `cast_shadow: false` on a fill light so only the key light casts — here the warm key grounds the model while the cool blue fill stays shadow-free.
-
-```example
-// hl: 4
-#render-obj(crankshaft, ..steel, ambient: 0.3,
-  lights: (
-    (type: "directional", vector: (2, 3, 2.5), color: "#fff2e0", intensity: 1.4),
-    (type: "directional", vector: (-3, 1, -1), color: "#dce8ff", intensity: 0.8, cast_shadow: false),
-  ),
-  shadows: true,
-  width: 44%,
-)
-```
-
-A positional light *inside* the geometry needs `omni: true` — six cube-map faces so it shadows in every direction, not just toward the model centre.
-
-```example
-// hl: 4
-#render-obj(crankshaft, ..steel, ambient: 0.28,
-  lights: ((type: "positional", vector: (0, 0, 250), color: "#ffffff", intensity: 2.2),),
-  shadows: (per_pixel: true, omni: true),
-  width: 44%,
-)
-```
-
-Further tuning: `resolution` (map size, default 512), `strength` (0–1 darkness), `softness` (PCF blur radius), and `bias`/`normal_bias`/`slope_bias` (shadow-acne control).
+So `light_size` gives #link("https://en.wikipedia.org/wiki/Percentage-closer_soft_shadows")[PCSS] soft shadows (sharp where parts touch, softening with distance); `color` tints them; `cast_shadow: false` exempts a fill light so only the key casts; and `omni: true` wraps a light *inside* the model with a six-face cube map. Further tuning: `resolution` (map size, default 512), `strength` (0–1 darkness), `softness` (PCF blur radius), and `bias`/`normal_bias`/`slope_bias` (shadow-acne control).
 
 #pagebreak()
 
