@@ -335,7 +335,7 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 "fresnel": 0.3,
 // Fresnel rim lighting: intensity (0-1), or { intensity, power }
 "lights": [],
-// Array of light definitions (see Multi-Light)
+// [{ type: directional|positional|area, vector, color, intensity, cast_shadow, size }] — size = area-light radius
 "tone_mapping": "",
 // "reinhard", "aces", or { method, exposure }
 "shading": "",
@@ -383,7 +383,7 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 //   omni: false }         // cube map for point lights inside the geometry
 // Per light: (type: "positional", …, cast_shadow: false) to opt a light out.
 "clip": null,
-// Cut/cutaway: world plane (a,b,c,d), or {from|axis|normal, depth, distance, keep, cap}
+// Cut/cutaway: world plane (a,b,c,d), or {from|axis|normal, depth, distance, keep, cap, hatch}
 "explode": 0,
 // Exploded view factor
 "decimate": 0,

@@ -1,2 +1,6 @@
 target/
 harness/target
+
+# work-in-progress, kept local only
+examples/documentation.md
+scripts/
