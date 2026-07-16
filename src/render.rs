@@ -322,8 +322,9 @@ struct ShadowData {
     per_pixel: bool,
     /// Shadow tint in linear-ish sRGB u8 (None = neutral).
     tint: Option<(u8, u8, u8)>,
-    /// PCSS light size in world units (0 = uniform PCF).
-    light_size: f64,
+    /// PCSS light size in world units, per light (0 = uniform PCF). Area lights
+    /// use their own radius; other lights fall back to the global `light_size`.
+    light_sizes: Vec<f64>,
     /// Ambient light fraction — the brightness a fully shadowed pixel keeps.
     ambient_keep_base: f32,
 }
@@ -345,10 +346,11 @@ impl ShadowData {
     fn pp_factor(&self, p: Vec3, normal: Vec3) -> f32 {
         let mut sum = 0.0f32;
         let mut n = 0u32;
-        for map in &self.maps {
+        for (li, map) in self.maps.iter().enumerate() {
             if let Some(m) = map {
-                sum += if self.light_size > 0.0 {
-                    m.lit_pcss(p, normal, &self.bias, self.softness, self.light_size)
+                let ls = self.light_sizes[li];
+                sum += if ls > 0.0 {
+                    m.lit_pcss(p, normal, &self.bias, self.softness, ls)
                 } else {
                     m.lit(p, normal, &self.bias, self.softness)
                 };
@@ -432,7 +434,12 @@ fn build_shadow_data(
     };
 
     let ambient_keep_base = (config.ambient.intensity as f32).clamp(0.0, 1.0);
-    Some(ShadowData { maps, bias, strength, softness: cfg.softness, factors, per_pixel, tint, light_size: cfg.light_size, ambient_keep_base })
+    // Per-light PCSS radius: an area light uses its own `size`; every other
+    // light falls back to the global `shadows.light_size` (backward compatible).
+    let light_sizes: Vec<f64> = lights.iter()
+        .map(|l| if l.kind == LightKind::Area { l.size } else { cfg.light_size })
+        .collect();
+    Some(ShadowData { maps, bias, strength, softness: cfg.softness, factors, per_pixel, tint, light_sizes, ambient_keep_base })
 }
 
 fn project_triangles(
@@ -539,10 +546,20 @@ fn project_triangles(
         }
         v
     };
-    let lights_f32: Vec<LightF32> = lights.iter().map(|l| LightF32 {
-        kind: l.kind,
-        dx: l.vector.x as f32, dy: l.vector.y as f32, dz: l.vector.z as f32,
-        cr: l.color.0, cg: l.color.1, cb: l.color.2,
+    let lights_f32: Vec<LightF32> = lights.iter().map(|l| {
+        // Disk area light: subdue the highlight in proportion to the light's
+        // angular radius (size / distance-to-subject). A cheap stand-in for a
+        // true broadened lobe — big soft lights don't produce a tight glint.
+        let spec_scale = if l.kind == LightKind::Area && l.size > 0.0 {
+            let d = l.vector.sub(view.center).length().max(1e-3);
+            (1.0 / (1.0 + 4.0 * (l.size / d))) as f32
+        } else { 1.0 };
+        LightF32 {
+            kind: l.kind,
+            dx: l.vector.x as f32, dy: l.vector.y as f32, dz: l.vector.z as f32,
+            cr: l.color.0, cg: l.color.1, cb: l.color.2,
+            scr: l.color.0 * spec_scale, scg: l.color.1 * spec_scale, scb: l.color.2 * spec_scale,
+        }
     }).collect();
 
     // Hemisphere ambient blend: lerp sky↔ground based on normal·up
@@ -1044,7 +1061,21 @@ fn resolve_wireframe_color<'a>(config: &'a RenderConfig, is_overlay: bool) -> &'
     }
 }
 
-fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Option<(&str, f64)>, group_styles: &HashMap<u32, GroupAppearance>) {
+/// Emit the `<defs>` section-hatch pattern for clip caps. `userSpaceOnUse`
+/// keeps the lines continuous across triangulated cap faces; `rotate` sets the
+/// section angle.
+fn push_hatch_defs(svg: &mut String, hc: &crate::config::HatchConfig) {
+    svg.push_str("<defs><pattern id=\"maq-hatch\" patternUnits=\"userSpaceOnUse\" width=\"");
+    push_f2(svg, hc.spacing);
+    svg.push_str("\" height=\""); push_f2(svg, hc.spacing);
+    svg.push_str("\" patternTransform=\"rotate("); push_f2(svg, hc.angle);
+    svg.push_str(")\"><line x1=\"0\" y1=\"0\" x2=\"0\" y2=\""); push_f2(svg, hc.spacing);
+    svg.push_str("\" stroke=\""); svg.push_str(&hc.color);
+    svg.push_str("\" stroke-width=\""); push_f2(svg, hc.width);
+    svg.push_str("\"/></pattern></defs>");
+}
+
+fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Option<(&str, f64)>, group_styles: &HashMap<u32, GroupAppearance>, hatch: bool) {
     svg.push_str("<polygon points=\"");
     push_tri_points(svg, &tri.pts);
     svg.push_str("\" fill=\"");
@@ -1055,6 +1086,11 @@ fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Opti
         svg.push_str(" fill-opacity=\"");
         push_f2(svg, tri.opacity);
         svg.push('"');
+    }
+    // Debug area-light disk: clean fill, no edge strokes (would show fan spokes).
+    if tri.group_id == Some(DEBUG_DISK_GID) {
+        svg.push_str("/>");
+        return;
     }
     // Debug light octahedron faces
     if tri.group_id == Some(u32::MAX) {
@@ -1087,6 +1123,13 @@ fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Opti
         svg.push_str("\" stroke-width=\"0.5\" stroke-linejoin=\"round\"");
     }
     svg.push_str("/>");
+    // Section hatching: overlay the cap face with the hatch pattern, in paint
+    // order right after its solid fill so nearer geometry still occludes it.
+    if hatch && tri.group_id == Some(clip::CAP_GID) {
+        svg.push_str("<polygon points=\"");
+        push_tri_points(svg, &tri.pts);
+        svg.push_str("\" fill=\"url(#maq-hatch)\" stroke=\"none\"/>");
+    }
 }
 
 fn write_wireframe_polygon(svg: &mut String, tri: &ProjectedTri, color: &str, width: f64) {
@@ -1234,7 +1277,10 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
     // 2. Clipping
     if let Some(clip_cfg) = &config.clip {
         let (plane, cap) = resolve_clip(clip_cfg, bmin, bmax, config);
-        tris = clip::clip_triangles(&tris, plane, cap);
+        // Fall back to the model's base color for plain (uncolored) meshes, so the
+        // clipped surface and cap inherit `color` instead of a hardcoded gray.
+        let base = parse_hex_color(&config.color);
+        tris = clip::clip_triangles(&tris, plane, cap, base);
     }
 
     // 3. Explode
@@ -1340,6 +1386,12 @@ fn prep_cache_key(base: u64, config: &RenderConfig) -> u64 {
     for &u in &config.up { h = m(h, u.to_bits()); }
     // Clipping (geometry) + explode + decimate.
     h = clip_key(h, config);
+    // Clipping bakes the model base color into the cap/clipped vertex colors for
+    // plain meshes, so the preprocessed mesh depends on `color` when clip is on.
+    if config.clip.is_some() {
+        for &b in config.color.as_bytes() { h = m(h, b as u64); }
+        h = m(h, 0xF4);
+    }
     h = m(h, config.explode.to_bits());
     h = m(h, config.decimate.to_bits());
     h
@@ -1510,6 +1562,9 @@ fn build_single_svg_full(
     push_f2(&mut svg, w); svg.push(' '); push_f2(&mut svg, h);
     svg.push_str("\">");
 
+    let hatch = config.clip.as_ref().and_then(|c| c.hatch.as_ref());
+    if let Some(hc) = hatch { push_hatch_defs(&mut svg, hc); }
+
     // Background rect
     if !config.background.is_empty() && config.background != "none" {
         svg.push_str("<rect width=\""); push_f2(&mut svg, w);
@@ -1539,7 +1594,7 @@ fn build_single_svg_full(
             Some((config.stroke.color.as_str(), config.stroke.width))
         } else { None };
         for tri in tris {
-            write_solid_polygon(&mut svg, tri, global_stroke, group_styles);
+            write_solid_polygon(&mut svg, tri, global_stroke, group_styles, hatch.is_some());
         }
     }
 
@@ -1615,6 +1670,11 @@ fn count_unique_vertices(triangles: &[Triangle]) -> usize {
     set.len()
 }
 
+/// Reserved `group_id` for debug area-light disks — filled with the light color
+/// and (unlike the point-light octahedron, `u32::MAX`) drawn without edge strokes
+/// so the triangle fan reads as a single clean disk.
+const DEBUG_DISK_GID: u32 = u32::MAX - 2;
+
 /// Generate debug light octahedrons as projected triangles for depth-sorted rendering.
 fn make_debug_light_tris(
     config: &RenderConfig,
@@ -1641,12 +1701,53 @@ fn make_debug_light_tris(
     for light in &lights {
         let pos = match light.kind {
             LightKind::Directional => bc + light.vector.scale(br * 2.0),
-            LightKind::Positional => light.vector,
+            LightKind::Positional | LightKind::Area => light.vector,
         };
 
         let r = linear_to_srgb(light.color.0.min(1.0f32));
         let g = linear_to_srgb(light.color.1.min(1.0f32));
         let b = linear_to_srgb(light.color.2.min(1.0f32));
+
+        // Area (disk) lights render as a flat disk of the light color, sized to
+        // the light's physical radius and facing the model center — distinct from
+        // the point-light marker octahedron.
+        if light.kind == LightKind::Area && light.size > 0.0 {
+            let n = {
+                let d = bc.sub(pos);
+                if d.length() > 1e-6 { d.normalized() } else { Vec3::new(0.0, 0.0, 1.0) }
+            };
+            let a = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+            let u = n.cross(a).normalized();
+            let vv = n.cross(u);
+            const SEGS: usize = 24;
+            let mut dv = Vec::with_capacity(SEGS + 1);
+            dv.push(pos); // center
+            for i in 0..SEGS {
+                let ang = (i as f64) / (SEGS as f64) * std::f64::consts::TAU;
+                dv.push(pos.add(u.scale(light.size * ang.cos())).add(vv.scale(light.size * ang.sin())));
+            }
+            let cam: Vec<Vec3> = dv.iter().map(|v| view_mat.transform_point(*v)).collect();
+            let proj_pts: Vec<(f64, f64)> = cam.iter().map(|c| {
+                let t = [*c, *c, *c];
+                apply_projection(&proj_setup, &t)[0]
+            }).collect();
+            let cam_depths: Vec<f64> = cam.iter().map(|c| c.z).collect();
+            for i in 0..SEGS {
+                let (i1, i2) = (1 + i, 1 + (i + 1) % SEGS);
+                let depth = (cam_depths[0] + cam_depths[i1] + cam_depths[i2]) / 3.0;
+                out.push(ProjectedTri {
+                    pts: [proj_pts[0], proj_pts[i1], proj_pts[i2]],
+                    depths: [cam_depths[0], cam_depths[i1], cam_depths[i2]],
+                    depth,
+                    r, g, b,
+                    vertex_colors: None,
+                    group_id: Some(DEBUG_DISK_GID),
+                    opacity: 0.85,
+                    pp: None,
+                });
+            }
+            continue;
+        }
 
         let verts = [
             Vec3::new(pos.x + size, pos.y, pos.z),
@@ -1975,6 +2076,8 @@ fn render_grid_svg(
     let estimated = triangles.len() * 200 * views.len() + 512;
     let mut svg = String::with_capacity(estimated);
     svg_open(&mut svg, config.width, config.height, &config.background);
+    let hatch = config.clip.as_ref().and_then(|c| c.hatch.as_ref());
+    if let Some(hc) = hatch { push_hatch_defs(&mut svg, hc); }
 
     for (i, (view, label)) in views.iter().enumerate() {
         let col = i % cols;
@@ -2021,7 +2124,7 @@ fn render_grid_svg(
                 Some((config.stroke.color.as_str(), config.stroke.width))
             } else { None };
             for tri in &projected {
-                write_solid_polygon(&mut svg, tri, global_stroke, group_styles);
+                write_solid_polygon(&mut svg, tri, global_stroke, group_styles, hatch.is_some());
             }
         }
 
@@ -2398,6 +2501,35 @@ fn render_grid_png_buf(
 }
 
 /// Return JSON with model info for verbose/debug purposes.
+/// Surface area, enclosed volume, and centre of mass of a triangle mesh.
+///
+/// Surface area is exact (sum of triangle areas). Volume and centroid use the
+/// signed-tetrahedron (divergence) method: exact for a closed, consistently
+/// wound surface, and still returned — but only approximate — for open or
+/// non-manifold meshes. `volume` is reported as an absolute value so winding
+/// direction doesn't flip its sign; `fallback_centroid` (the bbox centre) is
+/// used when the mesh encloses ~no signed volume.
+fn mesh_measures(triangles: &[Triangle], fallback_centroid: Vec3) -> (f64, f64, Vec3) {
+    let mut area = 0.0;
+    let mut vol6 = 0.0; // 6 × signed volume
+    let mut cacc = Vec3::new(0.0, 0.0, 0.0); // Σ  sv · (a + b + c)
+    for t in triangles {
+        let (a, b, c) = (t.vertices[0], t.vertices[1], t.vertices[2]);
+        area += 0.5 * b.sub(a).cross(c.sub(a)).length();
+        let sv = a.dot(b.cross(c)); // 6 × signed volume of tetra (origin, a, b, c)
+        vol6 += sv;
+        cacc = cacc.add(a.add(b).add(c).scale(sv));
+    }
+    let volume = (vol6 / 6.0).abs();
+    // Centre of mass = Σ(vol_i · tetra_centroid_i) / V, with tetra_centroid = (a+b+c)/4.
+    let centroid = if vol6.abs() > 1e-9 {
+        cacc.scale(1.0 / (4.0 * vol6))
+    } else {
+        fallback_centroid
+    };
+    (area, volume, centroid)
+}
+
 pub fn get_info(triangles: &[Triangle], config: &RenderConfig) -> String {
     // Apply decimation so the reported counts match what render() produces.
     let decimated: Vec<Triangle>;
@@ -2417,15 +2549,20 @@ pub fn get_info(triangles: &[Triangle], config: &RenderConfig) -> String {
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
     let view = resolve_config_view(config, bc, br);
+    let (surface_area, volume, centroid) = mesh_measures(triangles, bc);
 
-    let mut s = String::with_capacity(256);
+    let mut s = String::with_capacity(320);
     s.push_str("{\"triangles\":"); push_usize(&mut s, triangles.len());
     s.push_str(",\"vertices\":"); push_usize(&mut s, count_unique_vertices(triangles));
     s.push_str(",\"bbox_min\":["); push_f4(&mut s, bmin.x); s.push(','); push_f4(&mut s, bmin.y); s.push(','); push_f4(&mut s, bmin.z);
     s.push_str("],\"bbox_max\":["); push_f4(&mut s, bmax.x); s.push(','); push_f4(&mut s, bmax.y); s.push(','); push_f4(&mut s, bmax.z);
     s.push_str("],\"bbox_center\":["); push_f4(&mut s, bc.x); s.push(','); push_f4(&mut s, bc.y); s.push(','); push_f4(&mut s, bc.z);
     s.push_str("],\"bbox_radius\":"); push_f4(&mut s, br);
-    s.push_str(",\"camera\":["); push_f4(&mut s, view.camera.x); s.push(','); push_f4(&mut s, view.camera.y); s.push(','); push_f4(&mut s, view.camera.z);
+    s.push_str(",\"size\":["); push_f4(&mut s, bmax.x - bmin.x); s.push(','); push_f4(&mut s, bmax.y - bmin.y); s.push(','); push_f4(&mut s, bmax.z - bmin.z);
+    s.push_str("],\"surface_area\":"); push_f4(&mut s, surface_area);
+    s.push_str(",\"volume\":"); push_f4(&mut s, volume);
+    s.push_str(",\"centroid\":["); push_f4(&mut s, centroid.x); s.push(','); push_f4(&mut s, centroid.y); s.push(','); push_f4(&mut s, centroid.z);
+    s.push_str("],\"camera\":["); push_f4(&mut s, view.camera.x); s.push(','); push_f4(&mut s, view.camera.y); s.push(','); push_f4(&mut s, view.camera.z);
     s.push_str("],\"center\":["); push_f4(&mut s, view.center.x); s.push(','); push_f4(&mut s, view.center.y); s.push(','); push_f4(&mut s, view.center.z);
     s.push_str("],\"projection\":\""); s.push_str(&config.projection);
     s.push_str("\",\"fov\":"); push_f2(&mut s, config.fov);

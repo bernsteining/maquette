@@ -310,7 +310,7 @@ pub fn build_shadow_maps(
             if !light.cast_shadow {
                 return None;
             }
-            let mut ls = if cfg.omni && light.kind == LightKind::Positional {
+            let mut ls = if cfg.omni && light.kind != LightKind::Directional {
                 LightShadow::Cube(build_cube(light.vector, br, res))
             } else {
                 LightShadow::Single(build_one(light, bc, br, up, res))

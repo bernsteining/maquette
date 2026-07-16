@@ -4,16 +4,21 @@ use crate::parser::Triangle;
 
 type Color3 = (u8, u8, u8);
 
+/// Reserved `group_id` marking a clip cap face, so downstream rendering can
+/// hatch the cross-section. `u32::MAX` is already taken by debug-light faces,
+/// so caps use `MAX - 1`; real OBJ group ids are small and never collide.
+pub const CAP_GID: u32 = u32::MAX - 1;
+
 /// Get the effective color for vertex `i` of a triangle.
-/// Prefers vertex_colors, falls back to face color, then default gray.
+/// Prefers vertex_colors, falls back to face color, then the model's base color.
 #[inline]
-fn vertex_color(tri: &Triangle, i: usize) -> Color3 {
+fn vertex_color(tri: &Triangle, i: usize, base: Color3) -> Color3 {
     if let Some(vc) = tri.vertex_colors {
         vc[i]
     } else if let Some(c) = tri.color {
         c
     } else {
-        (128, 128, 128)
+        base
     }
 }
 
@@ -28,7 +33,7 @@ struct CapEdge {
 /// Clip triangles against a plane `ax + by + cz + d = 0`.
 /// Points where `ax + by + cz + d >= 0` are kept (inside).
 /// When `cap` is true, generates cap triangles to close the cross-section.
-pub fn clip_triangles(triangles: &[Triangle], plane: [f64; 4], cap: bool) -> Vec<Triangle> {
+pub fn clip_triangles(triangles: &[Triangle], plane: [f64; 4], cap: bool, base: Color3) -> Vec<Triangle> {
     let normal = Vec3::new(plane[0], plane[1], plane[2]);
     let d = plane[3];
 
@@ -48,7 +53,7 @@ pub fn clip_triangles(triangles: &[Triangle], plane: [f64; 4], cap: bool) -> Vec
         match count_inside {
             3 => result.push(*tri),
             0 => {} // fully clipped
-            _ => clip_triangle(tri, &dists, &inside, &mut result, &mut cap_edges),
+            _ => clip_triangle(tri, &dists, &inside, &mut result, &mut cap_edges, base),
         }
     }
 
@@ -67,6 +72,7 @@ fn clip_triangle(
     inside: &[bool; 3],
     out: &mut Vec<Triangle>,
     cap_edges: &mut Vec<CapEdge>,
+    base: Color3,
 ) {
     if inside.iter().filter(|&&b| b).count() == 1 {
         // One vertex inside — produces 1 triangle
@@ -82,9 +88,9 @@ fn clip_triangle(
         let v1 = intersect_at(tri.vertices[i0], tri.vertices[i1], t1);
         let v2 = intersect_at(tri.vertices[i0], tri.vertices[i2], t2);
 
-        let c0 = vertex_color(tri, i0);
-        let c1 = lerp_color(vertex_color(tri, i0), vertex_color(tri, i1), t1);
-        let c2 = lerp_color(vertex_color(tri, i0), vertex_color(tri, i2), t2);
+        let c0 = vertex_color(tri, i0, base);
+        let c1 = lerp_color(vertex_color(tri, i0, base), vertex_color(tri, i1, base), t1);
+        let c2 = lerp_color(vertex_color(tri, i0, base), vertex_color(tri, i2, base), t2);
 
         out.push(Triangle {
             vertices: [v0, v1, v2],
@@ -107,10 +113,10 @@ fn clip_triangle(
         let a = intersect_at(tri.vertices[i0], tri.vertices[i1], t_a);
         let b = intersect_at(tri.vertices[i0], tri.vertices[i2], t_b);
 
-        let c_a = lerp_color(vertex_color(tri, i0), vertex_color(tri, i1), t_a);
-        let c_b = lerp_color(vertex_color(tri, i0), vertex_color(tri, i2), t_b);
-        let c1 = vertex_color(tri, i1);
-        let c2 = vertex_color(tri, i2);
+        let c_a = lerp_color(vertex_color(tri, i0, base), vertex_color(tri, i1, base), t_a);
+        let c_b = lerp_color(vertex_color(tri, i0, base), vertex_color(tri, i2, base), t_b);
+        let c1 = vertex_color(tri, i1, base);
+        let c2 = vertex_color(tri, i2, base);
 
         out.push(Triangle {
             vertices: [tri.vertices[i1], tri.vertices[i2], a],
@@ -144,7 +150,7 @@ fn push_cap_tri(out: &mut Vec<Triangle>, chain: &[(Vec3, Color3)], a: usize, b: 
         normal: cap_normal,
         color: None,
         vertex_colors: Some([chain[a].1, chain[b].1, chain[c].1]),
-        group_id: None,
+        group_id: Some(CAP_GID),
     });
 }
 
