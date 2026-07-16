@@ -42,10 +42,12 @@
 #let parse-hl(text) = {
   let lines = text.split("\n")
   let hl = ()
+  let cols = (1, 1) // code:result column ratio for `example` (override with `// cols: L R`)
   let code = ()
   for line in lines {
-    if line.trim().starts-with("// hl:") {
-      let spec = line.trim().slice(6).trim()
+    let t = line.trim()
+    if t.starts-with("// hl:") {
+      let spec = t.slice(6).trim()
       for part in spec.split(",") {
         let p = part.trim()
         if p.contains("-") {
@@ -53,22 +55,25 @@
           for n in range(int(bounds.at(0).trim()), int(bounds.at(1).trim()) + 1) { hl.push(n) }
         } else if p.len() > 0 { hl.push(int(p)) }
       }
+    } else if t.starts-with("// cols:") {
+      let parts = t.slice(8).trim().split(" ").filter(s => s.len() > 0)
+      cols = (float(parts.at(0)), float(parts.at(1)))
     } else { code.push(line) }
   }
-  (code.join("\n"), hl)
+  (code.join("\n"), hl, cols)
 }
 
 #show raw.where(lang: "example"): it => {
-  let (code, hl) = parse-hl(it.text)
+  let (code, hl, cols) = parse-hl(it.text)
   let eval-text = filter-eval(code)
-  grid(columns: (1fr, 1fr), gutter: 1em,
+  grid(columns: (cols.at(0) * 1fr, cols.at(1) * 1fr), gutter: 1em,
     zebraw(lang: false, numbering: false, highlight-lines: hl, raw(block: true, lang: "typst", code)),
     align(center + horizon, eval(eval-text, mode: "markup", scope: doc-scope)),
   )
 }
 
 #show raw.where(lang: "examplev"): it => {
-  let (code, hl) = parse-hl(it.text)
+  let (code, hl, ..) = parse-hl(it.text)
   let eval-text = filter-eval(code)
   zebraw(lang: false, numbering: false, highlight-lines: hl, raw(block: true, lang: "typst", code))
   align(center, eval(eval-text, mode: "markup", scope: doc-scope))
@@ -101,7 +106,7 @@
 ]
 #v(1fr)
 
-#pagebreak()
+#pagebreak(weak: true)
 
 #{
   align(center, text(size: 20pt, weight: "bold", tracking: 2pt)[CONTENTS])
@@ -118,7 +123,7 @@
   columns(2, gutter: 2em, outline(indent: 1.2em))
 }
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Introduction
 
@@ -157,13 +162,13 @@ With a show rule, you can write OBJ / STL / PLY geometry directly in fenced code
   align(center + horizon, render-obj(bytes(pyramid-obj), width: 58%)),
 )
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Config Reference
 
 All parameters are optional — pass them as named arguments or a dictionary; defaults are shown below. Setting any to `none` restores its default (for `background`, that means transparent).
 
-#text(size: 9.2pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
+#text(size: 9pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
   \"camera\": [3, 3, 3],                             // Camera position in world space (Cartesian)
   \"azimuth\": null,                                 // Spherical camera: horizontal angle in degrees
   \"elevation\": null,                               // Spherical camera: vertical angle in degrees
@@ -195,7 +200,7 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   \"fresnel\": {\"intensity\": 0.3, \"power\": 5},       // Fresnel rim lighting (or just 0.3)
   \"sss\": false,                                    // true or {intensity, power, distortion}
   \"opacity\": 1.0,                                  // Global opacity (0-1)
-  \"lights\": [],                                    // Array of light definitions (see Multi-Light)
+  \"lights\": [],                                    // [{type: directional|positional|area, vector, color, intensity, cast_shadow, size}] (size = area radius)
   \"tone_mapping\": {\"method\": \"\", \"exposure\": 1.0}, // HDR tone mapping (or just \"aces\")
   \"shading\": \"\",                                   // \"blinn-phong\" (default), \"gooch\", \"cel\", \"flat\", \"normal\"
   \"gooch_warm\": \"#ffcc44\",                         // Gooch warm tone color
@@ -216,7 +221,7 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   // ── Effects ───────────────────────────────────────────────────────
   \"ground_shadow\": false,                          // true or {opacity, color}
   \"shadows\": false,                                // Cast/self shadows: true or {per_pixel, softness, color, omni, ...}
-  \"clip\": null,                                    // Cut plane: (a,b,c,d) or {from|axis|normal, depth, keep, cap}
+  \"clip\": null,                                    // Cut plane: (a,b,c,d) or {from|axis|normal, depth, keep, cap, hatch}
   \"explode\": 0,                                    // Exploded view factor
   \"decimate\": 0,                                   // Mesh simplification 0-1 (higher = fewer triangles)
   \"point_size\": 0,                                 // Point cloud neighbor radius (0 = auto)
@@ -234,7 +239,7 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   \"debug_color\": \"#cc2222\"                         // Debug text color
 }"))
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Appearance
 
@@ -275,7 +280,7 @@ Set `background` to `none` (the string `"none"` and an empty string `""` work to
 
 The cube looks like a flat square from this angle — let's change the point of view.
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Camera Position
 
@@ -285,10 +290,9 @@ Change the camera position and where it points to using cartesian coordinates wi
 
 ```example
 // hl: 2-3
-#render-stl(cube,
-  camera: (2,3,3),
-  center: (1, 1, 1),
-  width: 64%,
+#render-obj(teapot,
+  camera: (0, 0, 10),
+  up: (0, 1, 0),
 )
 ```
 
@@ -300,42 +304,38 @@ Instead of placing the camera with Cartesian `(x, y, z)` coordinates, you can us
 // hl: 3-5
 #render-obj(teapot,
   up: (0, 1, 0),
-  azimuth: 20,
-  elevation: -20,
-  distance: 7,
-  width: 64%,
+  azimuth: 30,
+  elevation: -10,
+  distance: 10,
 )
 ```
 
 The `up` parameter defines which direction points "up" in the scene. The default is `(0, 0, 1)` (Z-up), which matches the convention used by most CAD software and STL files. OBJ files exported from Blender, game engines, or other Y-up tools typically need `up: (0, 1, 0)` to display correctly.
 
+#pagebreak(weak: true)
+
 == #link("https://en.wikipedia.org/wiki/Field_of_view")[Field of View]
 
-#grid(columns: (1fr, 1fr), column-gutter: 2em, row-gutter: 1.5em,
-  [
-    ```example
-    // hl: 3
-    #render-obj(teapot,
-      up: (0, 1, 0),
-      fov: 20,
-      width: 100%,
-    )
-    ```
-  ],
-  [
-    ```example
-    // hl: 5-6
-    #render-obj(teapot,
-      up: (0, 1, 0),
-      azimuth: 45,
-      distance: 30,
-      auto_fit: false,
-      fov: 10,
-      width: 100%,
-    )
-    ```
-  ],
+```example
+// hl: 3
+#render-obj(teapot,
+  up: (0, 1, 0),
+  fov: 20,
+  width: 60%,
 )
+```
+
+```example
+// hl: 5-6
+#render-obj(teapot,
+  up: (0, 1, 0),
+  azimuth: 45,
+  distance: 30,
+  auto_fit: false,
+  fov: 10,
+  width: 60%,
+)
+```
 
 The `fov` parameter controls the vertical field of view angle (in degrees) for perspective projection. Lower values produce a telephoto effect, higher values create wide-angle distortion. Default is 45. By default (`auto_fit: true`), Maquette scales the model to fill the viewport; set `auto_fit: false` to use raw world-space coordinates, which lets you control framing manually with `distance` and `fov`.
 
@@ -345,7 +345,7 @@ The `fov` parameter controls the vertical field of view angle (in degrees) for p
 
 #let _framing(z, p, cap) = align(center + bottom)[
   #render-obj(teapot, up: (0, 1, 0),
-    color: "#8a9099", specular: 0.5, tone_mapping: "aces",
+    specular: 0.5, tone_mapping: "aces",
     ambient: 0.35, light_dir: (2, 3, 2.5), zoom: z, pan: p, width: 100%)
   #v(-0.4em)
   #text(size: 8.5pt, fill: luma(90), raw(cap))
@@ -358,7 +358,7 @@ The `fov` parameter controls the vertical field of view angle (in degrees) for p
 
 At `zoom: 1.45` the teapot fills the frame vertically, but its spout and handle now press against both side edges; `pan: (-0.12, 0)` slides it left, tucking the handle in from the right edge. Both default to no-ops (`zoom: 1.0`, `pan: (0, 0)`), so existing renders are unaffected.
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = #link("https://en.wikipedia.org/wiki/3D_projection")[Projections]
 
@@ -456,7 +456,7 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
   ],
 )
 
-#pagebreak()
+#pagebreak(weak: true)
 
 #grid(columns: (1fr, 1fr), column-gutter: 2em, row-gutter: 1.5em,
   [
@@ -565,7 +565,7 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
   ],
 )
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Shading & Lighting
 
@@ -640,21 +640,7 @@ ambient: (intensity: 0.15, sky: "#ccd4e0", ground: "#d4ccc4")
   ],
 )
 
-#pagebreak()
-
-== #link("https://en.wikipedia.org/wiki/Silhouette")[Silhouette Outlines]
-
-Draws bold edges where front-facing and back-facing triangles meet, producing a clean silhouette contour.
-
-```example
-// hl: 4
-#render-stl(cube,
-  camera: (3, 2, 2),
-  center: (0.5, 0.5, 0.5),
-  outline: (color: "#000000", width: 5),
-  width: 70%,
-)
-```
+#pagebreak(weak: true)
 
 == #link("https://en.wikipedia.org/wiki/Gouraud_shading")[Smooth Shading]
 
@@ -707,7 +693,7 @@ Add Blinn-Phong specular highlights with the `specular` parameter (0--1). The `s
   ],
 )
 
-#pagebreak()
+#pagebreak(weak: true)
 
 == #link("https://en.wikipedia.org/wiki/Gamma_correction")[Gamma Correction]
 
@@ -769,40 +755,74 @@ Fresnel rim lighting brightens edges where the surface curves away from the came
   ],
 )
 
-#pagebreak()
+#pagebreak(weak: true)
 
 == Multi-Light <multi-light>
 
 By default, a single white directional light is used (from `light_dir`). The `lights` array lets you define multiple lights, each with a type, direction or position, color, and intensity. When `lights` is set, it overrides `light_dir`.
 
-Each light has `type`, `vector`, `color`, and `intensity`. Positional lights emit from a point in world space, creating distance-dependent shading.
+Each light has a `type`, a `vector`, a `color`, and an `intensity`. Three types share one schema, differing in what `vector` means:
+
+- *`directional`* — parallel rays; `vector` is a direction (like sunlight).
+- *`positional`* — a hard point light; `vector` is a world position, so shading is distance-dependent.
+- *`area`* — a disk light at `vector` with radius `size` (see #link(<area-lights>)[Area Lights]); `size` applies to this type only.
 
 Each light casts its own cast shadow when `shadows` is enabled (see the Cast Shadows section); the `ground_shadow` drop shadow instead uses a single direction — the first directional light, or `light_dir` as fallback.
 
 ```example
-// hl: 6-19
-#render-obj(teapot,
+// hl: 8-21
+#render-obj(bunny,
   up: (0, 1, 0),
+  azimuth: 180,
+  distance: 0.19,
   ambient: 0.05,
   specular: 0.5,
   color: "#cccccc",
   lights: (
-    (type: "positional", 
-     vector: (3, 3, 0), 
-     color: "#ff4444", 
+    (type: "positional",
+     vector: (3, 3, 0),
+     color: "#ff4444",
      intensity: 1.2),
-    (type: "positional", 
-     vector: (-3, 2, 2), 
-     color: "#44ff44", 
+    (type: "positional",
+     vector: (-3, 2, 2),
+     color: "#44ff44",
      intensity: 1.0),
-    (type: "directional", 
-     vector: (0, 1, 0), 
-     color: "#4444ff", 
+    (type: "directional",
+     vector: (0, 1, 0),
+     color: "#4444ff",
      intensity: 0.5),
   ),
   width: 100%,
 )
 ```
+
+== #link("https://en.wikipedia.org/wiki/Softbox")[Area Lights] <area-lights>
+
+Set a light's `type` to `area` and give it a `size` — its radius in world units — to make it a *disk area light* rather than an infinitesimal point. Two things follow, just like a real softbox: its shadow gains a #link("https://en.wikipedia.org/wiki/Umbra,_penumbra_and_antumbra")[penumbra] that is sharp on contact and blurs with distance, and its specular highlight broadens and dims instead of forming a hard glint. `size` only applies to `area` lights — a `positional` light is always a hard point (see #link(<multi-light>)[Multi-Light]).
+
+Soft shadows are computed with #link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCSS], so they need `shadows: (per_pixel: true)` (PNG only). The specular softening always applies.
+
+#let _area(sz, cap) = align(center + bottom)[
+  #render-obj(bunny, up: (0, 1, 0), azimuth: 180, distance: 0.19,
+    color: "#b05a3c", specular: 1.0, shininess: 80, fresnel: 0.2, tone_mapping: "aces", ambient: 0.22,
+    lights: ((type: "area", vector: (4, 7, 5), size: sz, color: "#fff", intensity: 2.4),),
+    shadows: (per_pixel: true), width: 82%)
+  #v(-0.4em)
+  #text(size: 8.5pt, fill: luma(90), raw(cap))
+]
+#grid(columns: (1fr, 1fr, 1fr), gutter: 1em,
+  _area(0, "size: 0 (hard point)"),
+  _area(1.5, "size: 1.5"),
+  _area(4, "size: 4"),
+)
+
+As `size` grows, the sharp specular glint spreads into a soft sheen and shadow edges blur into penumbra. `size` is a per-light property, so a scene can mix a small key light with a large, soft fill:
+
+#text(size: 8.5pt)[```typ
+lights: ((type: "area", vector: (4, 7, 5), size: 1.5,
+          color: "#fff", intensity: 2.4),),
+shadows: (per_pixel: true),
+```]
 
 == #link("https://en.wikipedia.org/wiki/Tone_mapping")[Tone Mapping]
 
@@ -834,21 +854,34 @@ When multiple bright lights, strong specular, or fresnel push color values above
   ],
 )
 
-#pagebreak()
-
 == Shading Models
 
-The `shading` parameter selects the lighting model, independently of the render mode (solid, wireframe, etc.).
+The `shading` parameter selects the lighting model.
 
-#grid(columns: (1fr, 1fr), gutter: 16pt,
-  [
-    === #link("https://en.wikipedia.org/wiki/Blinn%E2%80%93Phong_reflection_model")[Blinn-Phong] (default)
+=== #link("https://en.wikipedia.org/wiki/Blinn%E2%80%93Phong_reflection_model")[Blinn-Phong] (default)
     Photorealistic diffuse + specular.
+    ```example
+    // hl: 5
     #render-obj(bunny, (
       up: (0, 1, 0),
       azimuth: 180, distance: 0.25,
       specular: 0.4,
-    ), width: 100%)
+      shading: "blinn-phong"
+    ))
+    ```
+
+#pagebreak()
+
+#grid(columns: (1fr, 1fr), gutter: 16pt,
+  [
+    == #link("https://en.wikipedia.org/wiki/Normal_mapping")[Normal Mapping]
+    Maps surface normals to RGB.
+    #render-obj(bunny,
+      up: (0, 1, 0),
+      azimuth: 180, distance: 0.25,
+      shading: "normal",
+      width: 100%,
+    )
   ],
   [
     === #link("https://en.wikipedia.org/wiki/Shading#Flat_shading")[Flat]
@@ -885,7 +918,7 @@ The `shading` parameter selects the lighting model, independently of the render 
   ]
 )
 
-#pagebreak()
+#pagebreak(weak: true)
 
 == #link("https://en.wikipedia.org/wiki/Subsurface_scattering")[Subsurface Scattering]
 
@@ -927,7 +960,7 @@ Fake view-dependent subsurface scattering simulates light passing through thin g
 )
 ```
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Color Mapping <color-mapping>
 
@@ -985,7 +1018,7 @@ Faces steeper than `overhang_angle` (relative to vertical) are highlighted in re
 )
 ```
 
-#pagebreak()
+#pagebreak(weak: true)
 
 == Scalar Function
 
@@ -1049,7 +1082,7 @@ Some examples:
 )
 ```
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = File Formats & Coloring
 
@@ -1202,7 +1235,7 @@ render-obj(crankshaft,
 ))
 ```
 
-#pagebreak()
+#pagebreak(weak: true)
 
 === Per-group appearance
 
@@ -1237,6 +1270,7 @@ Pass `annotations: true` to label all groups with default styling, or pass an ob
 
 ```example
 // hl: 5-16
+// cols: 1 1.6
 #render-obj(crankshaft,
   camera: (-100, -100, 500),
   up: (0, -1, 0),
@@ -1249,15 +1283,15 @@ Pass `annotations: true` to label all groups with default styling, or pass an ob
        "Model__Piston_D", 
        "Model__Piston_E", 
        "Model__Piston_F"),
-    color: "#bb2222",
+    color: "#ffffff",
     font_size: 12,
     offset: 45,
   ),
-  width: 100%,
+  background: "#222222"
 )
 ```
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Render Modes <render-modes>
 
@@ -1305,7 +1339,7 @@ Our previous skull model now unveils its inner brain!
 
 Useful when the model has no groups to distinguish.
 
-#pagebreak()
+#pagebreak(weak: true)
 
 == #link("https://en.wikipedia.org/wiki/Wire-frame_model")[Wireframe]
 
@@ -1344,7 +1378,7 @@ Here ```typst antialias: 4``` should be set, wireframe's strokes benefit from an
 )
 ```
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Shadows
 
@@ -1406,24 +1440,26 @@ Sampling is *per-vertex* by default — cheap and great on dense meshes. `per_pi
   #v(-0.4em)
   #text(size: 8pt, fill: luma(90), raw(cap))
 ]
+#let _fill(cast) = (ambient: 0.3, lights: (
+    (type: "directional", vector: (2, 3, 2.5), color: "#fff2e0", intensity: 1.4),
+    (type: "directional", vector: (-4, 0.5, 0), color: "#dce8ff", intensity: 1.2, cast_shadow: cast)),
+  shadows: (per_pixel: true))
 #grid(columns: (1fr, 1fr, 1fr), gutter: 0.8em, row-gutter: 1em,
   _shadow((shadows: (per_pixel: true)), "shadows: (per_pixel: true)"),
   _shadow((shadows: (per_pixel: true, light_size: 6)), "…, light_size: 6  (soft)"),
   _shadow((shadows: (per_pixel: true, color: "#5577cc", strength: 0.7)), "…, color: \"#5577cc\", strength: 0.7"),
-  _shadow((ambient: 0.3, lights: (
-      (type: "directional", vector: (2, 3, 2.5), color: "#fff2e0", intensity: 1.4),
-      (type: "directional", vector: (-3, 1, -1), color: "#dce8ff", intensity: 0.8, cast_shadow: false)),
-    shadows: true), "cast_shadow: false  (on the fill light)"),
-  _shadow((ambient: 0.28, lights: ((type: "positional", vector: (0, 0, 250), color: "#fff", intensity: 2.2),),
+  _shadow(_fill(true), "fill casts too → 2 shadow sets"),
+  _shadow(_fill(false), "cast_shadow: false → 1 clean set"),
+  _shadow((lights: ((type: "positional", vector: (-40, 40, 270), color: "#fff", intensity: 2.8),),
     shadows: (per_pixel: true, omni: true)), "positional inside → omni: true"),
 )
 
-Two of these need `per_pixel`: #link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCSS] (percentage-closer soft shadows), turned on by `light_size` — sharp where parts touch, blurring with distance — and coloured shadows via `color`. The per-light panel uses a #link("https://en.wikipedia.org/wiki/Key_light")[key light] (the main light) plus a softer #link("https://en.wikipedia.org/wiki/Fill_light")[fill light], with `cast_shadow: false` on the fill so only the key casts; `omni: true` builds a #link("https://en.wikipedia.org/wiki/Cube_mapping")[cube map] so a light *inside* the model casts in every direction. Passing `shadows: true` uses the defaults; pass a dictionary to set any of these:
+Two need `per_pixel`: #link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCSS] (percentage-closer soft shadows), enabled by `light_size` — sharp where parts touch, blurring with distance — and coloured shadows via `color`. The middle pair is one two-light rig — a warm #link("https://en.wikipedia.org/wiki/Key_light")[key light] and a cooler #link("https://en.wikipedia.org/wiki/Fill_light")[fill light] from the opposite side — differing in one flag: *every light casts its own shadow by default*, so the fill adds a second, competing set that muddies the pistons (left), while `cast_shadow: false` keeps its light but drops its shadows (right). `omni: true` builds a #link("https://en.wikipedia.org/wiki/Cube_mapping")[cube map] so a light *inside* the model casts in every direction. Pass `shadows: true` for defaults, or a dictionary to set any of these:
 
 #table(
   columns: (auto, auto, 1fr),
   align: (left + horizon, left + horizon, left + horizon),
-  inset: (x: 7pt, y: 3.6pt),
+  inset: (x: 7pt, y: 2.9pt),
   stroke: none,
   fill: (_, y) => if y == 0 { luma(235) } else if calc.odd(y) { luma(248) },
   table.header([*Option*], [*Default*], [*What it does*]),
@@ -1441,7 +1477,7 @@ Two of these need `per_pixel`: #link("https://en.wikipedia.org/wiki/Shadow_mappi
 
 `per_pixel`, `light_size`, and `color` require PNG output. Note that `cast_shadow` is *not* a `shadows` option but a per-light one, set inside the `lights` array (see #link(<multi-light>)[Multi-Light]): `cast_shadow: false` exempts that light from casting, so only the remaining lights do.
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Post-Processing
 
@@ -1499,42 +1535,49 @@ As a rule of thumb, FXAA does the job for most renders. Turn `antialias: 4` when
   ],
 )
 
-#pagebreak()
+#pagebreak(weak: true)
 
-== #link("https://en.wikipedia.org/wiki/Ambient_occlusion")[Ambient Occlusion]
+== #link("https://en.wikipedia.org/wiki/Silhouette")[Silhouette Outlines]
 
-Ambient Occlusion adds realistic contact shadows (⚠️ at the cost of increased processing time) in crevices and areas where surfaces are close together, simulating how indirect light is blocked in tight spaces. SSAO computes occlusion by sampling the depth buffer after rasterization. Configure with `ssao: true` for defaults, or customize:
-```typst
-#render-obj(crankshaft,
-  ssao: (samples: 16, radius: 0.5, bias: 0.025, strength: 1.0),
+Draws bold edges where front-facing and back-facing triangles meet, producing a clean silhouette contour.
+
+```example
+// hl: 2
+#render-obj(bunny,
+  outline: (color: "#000000", width: 5),
+  up: (0, 1, 0),
+  azimuth: 180,
+  distance: 0.25,
 )
 ```
 
+== #link("https://en.wikipedia.org/wiki/Unsharp_masking")[Sharpening]
+
+Sharpening enhances edge contrast using a 3×3 unsharp mask. Pass `sharpen: true` for default strength (0.5), or customize with `sharpen: (strength: N)`. Higher values produce a more pronounced effect.
+
 #grid(columns: (1fr, 1fr), gutter: 1em,
   align(center)[
-    *Without SSAO*
-    #render-obj(crankshaft, (
-      camera: (-100, -100, 500),
-      up: (0, -1, 0),
-      zoom: 1.25, pan: (0, 0.08),
-      specular: 0.5,
-      color: "#777777",
-      width: 400,
-      height: 400,
+    *Without*
+    #render-obj(bunny, (
+      up: (0, 1, 0),
+      azimuth: 180,
+      distance: 0.25,
+      specular: 0.4,
     ), width: 95%)
   ],
   align(center)[
-    *With SSAO*
-    #render-obj(crankshaft, (
-      camera: (-100, -100, 500),
-      up: (0, -1, 0),
-      zoom: 1.25, pan: (0, 0.08),
-      ssao: (samples: 16, radius: 0.5, strength: 1),
-      antialias: 4,
-      color: "#777777",
+    *Sharpen (strength: 2)*
+    #render-obj(bunny, (
+      up: (0, 1, 0),
+      azimuth: 180,
+      distance: 0.25,
+      specular: 0.4,
+      sharpen: (strength: 2),
     ), width: 95%)
   ],
 )
+
+#pagebreak(weak: true)
 
 == #link("https://en.wikipedia.org/wiki/Bloom_(shader_effect)")[Bloom] & Glow
 
@@ -1572,33 +1615,42 @@ glow: (color: "#ffffff", intensity: 0.5, radius: 15)
   ],
 )
 
-#pagebreak()
+== #link("https://en.wikipedia.org/wiki/Ambient_occlusion")[Ambient Occlusion]
 
-== #link("https://en.wikipedia.org/wiki/Unsharp_masking")[Sharpening]
-
-Sharpening enhances edge contrast using a 3×3 unsharp mask. Pass `sharpen: true` for default strength (0.5), or customize with `sharpen: (strength: N)`. Higher values produce a more pronounced effect.
+Ambient Occlusion adds realistic contact shadows (⚠️ at the cost of increased processing time) in crevices and areas where surfaces are close together, simulating how indirect light is blocked in tight spaces. SSAO computes occlusion by sampling the depth buffer after rasterization. Configure with `ssao: true` for defaults, or customize:
+```typst
+#render-obj(crankshaft,
+  ssao: (samples: 16, radius: 0.5, bias: 0.025, strength: 1.0),
+)
+```
 
 #grid(columns: (1fr, 1fr), gutter: 1em,
   align(center)[
-    *Without*
-    #render-obj(bunny, (
-      up: (0, 1, 0),
-      azimuth: 180,
-      distance: 0.25,
-      specular: 0.4,
+    *Without SSAO*
+    #render-obj(crankshaft, (
+      camera: (-100, -100, 500),
+      up: (0, -1, 0),
+      zoom: 1.25, pan: (0, 0.08),
+      specular: 0.5,
+      color: "#777777",
+      width: 400,
+      height: 400,
     ), width: 95%)
   ],
   align(center)[
-    *Sharpen (strength: 2)*
-    #render-obj(bunny, (
-      up: (0, 1, 0),
-      azimuth: 180,
-      distance: 0.25,
-      specular: 0.4,
-      sharpen: (strength: 2),
+    *With SSAO*
+    #render-obj(crankshaft, (
+      camera: (-100, -100, 500),
+      up: (0, -1, 0),
+      zoom: 1.25, pan: (0, 0.08),
+      ssao: (samples: 16, radius: 0.5, strength: 1),
+      antialias: 4,
+      color: "#777777",
     ), width: 95%)
   ],
 )
+
+#pagebreak(weak: true)
 
 = Effects
 
@@ -1612,22 +1664,25 @@ Wrapping the plane in a dict lets you add `cap: false`, which leaves the cross-s
 // hl: 4-5
 #render-obj(skull-brain,
   azimuth: 220, up: (0, 1, 0), distance: 200,
-  highlight: ("Skull": (color: "#e8e8e8"), "Brain": (color: "#ff69b4")),
+  highlight: 
+    ("Skull": (color: "#e8e8e8"), 
+     "Brain": (color: "#ff69b4")),
   clip: (plane: (2, -1, 0, 1), cap: false),
   cull_backface: false,
-  width: 72%,
+  width: 75%,
 )
 ```
 
-The handiest form is a *camera cutaway*: `from: "camera"` squares the plane to the view direction and `depth` (`0` = near face, `1` = far) sets how deep to cut, so the slice always faces the viewer whatever the angle. Here `cap: false` leaves the cut open — paired with `cull_backface: false` it reveals the hollow interior:
+The handiest form is a *camera cutaway*: `from: "camera"` squares the plane to the view direction and `depth` (`0` = near face, `1` = far) sets how deep to cut, so the slice always faces the viewer whatever the angle. The cut face can be *hatched* with section lines for an engineering-style cross-section — `hatch: true` uses the defaults, or pass a dictionary of `angle`, `spacing`, `width`, and `color`. Hatching draws into the cut cap, so it needs a closed cap (`cap: true`, the default) on a watertight mesh, and it renders in the vector output (`format: "svg"`):
 
 ```example
-// hl: 3-4
-#render-obj(bunny,
-  up: (0, 1, 0), azimuth: 180, color: "#4488cc",
-  clip: (from: "camera", depth: 0.5, cap: false),
-  cull_backface: false,
-  width: 60%,
+// hl: 4
+#render-stl(cube,
+  camera: (3, 2, 2),
+  color: "#bcd6ef",
+  clip: (from: "camera", depth: 0.45, hatch: true),
+  format: "svg",
+  width: 54%,
 )
 ```
 
@@ -1648,9 +1703,10 @@ The plane's normal comes from one of `from`/`axis`/`normal` (or a raw `(a,b,c,d)
   [`distance`], [—], [Cut position in world units from the near side; overrides `depth` when set.],
   [`keep`], [`"far"`], [Which side to keep, `"far"` or `"near"`.],
   [`cap`], [`true`], [Close the cut cross-section with a flat face; `false` reveals hollow interiors.],
+  [`hatch`], [`false`], [Section-line hatching over the cap (SVG output). `true` for defaults, or a dict: `angle` (45°), `spacing` (6), `width` (0.6), `color` ("#333").],
 )
 
-#pagebreak()
+#pagebreak(weak: true)
 
 == #link("https://en.wikipedia.org/wiki/Exploded-view_drawing")[Exploded View]
 
@@ -1681,7 +1737,7 @@ This is the case for this exploded teapot.
 )
 ```
 
-#pagebreak()
+#pagebreak(weak: true)
 
 == #link("https://en.wikipedia.org/wiki/Decimation_(signal_processing)")[Decimation]
 
@@ -1721,7 +1777,7 @@ The `decimate` strength runs from `0` (off, default) to `1` (most aggressive): a
 
 Fewer triangles means faster rendering, and the default smooth shading re-derives vertex normals afterward, so moderate decimation stays visually clean.
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Multi-View
 
@@ -1734,7 +1790,7 @@ Render multiple named views in a single image, similar to an engineering drawing
 #render-obj(teapot,
   views: ("front", "right", "top", "isometric"),
   grid_labels: true,
-  width: 100%,
+  cull_backface: false,
 )
 ```
 
@@ -1747,51 +1803,53 @@ Automatically generates a grid of views evenly spaced around the model at a fixe
 #render-obj(teapot,
   turntable: (iterations: 6, elevation: 40),
   grid_labels: true,
-  width: 100%,
+  cull_backface: false,
 )
 ```
 
-#pagebreak()
+#pagebreak(weak: true)
 
 = Debug
 
 `debug: true` overlays model metadata (triangle count, bounding box, camera position) directly on its canvas.
 
-It also renders lights as octahedrons of the color they emit, to allow placing lights seamlessly around your model.
+It also renders lights as octahedrons of the color they emit, to allow placing lights seamlessly around your model. Area lights (those with a `size`) are drawn instead as a disk of that radius, facing the model, so you can gauge their extent.
 
 ```example
 // hl: 2
 #render-obj(teapot,
   debug: true,
   lights: (
-    (type: "positional", vector: (2, 4, 0), color: "#ff4444", intensity: 1.2),
+    (type: "area", vector: (2, 4, 0), size: 1.2, color: "#ff4444", intensity: 1.2),
     (type: "positional", vector: (-1, 2, 2), color: "#44ff44", intensity: 1.0),
     (type: "directional", vector: (0, 1, 0), color: "#4444ff", intensity: 0.5),
   ),
-  width: 100%,
 )
 ```
 
-== #link("https://en.wikipedia.org/wiki/Normal_mapping")[Normal Mapping]
-   Maps surface normals to RGB. Useful for debugging geometry and inspecting mesh quality.
+= Model Info & Measurements
 
-   ```example
-   // hl: 4
-   #render-obj(bunny,
-     up: (0, 1, 0),
-     azimuth: 180, distance: 0.25,
-     shading: "normal",
-     width: 100%,
-   )
-   ```
+`get-stl-info`, `get-obj-info`, and `get-ply-info` return a dictionary of the model's metadata and geometric measurements, all in the file's own units. Alongside `triangles`, `vertices`, the bounding box (`bbox_min`/`bbox_max`/`bbox_center`/`bbox_radius`), and the resolved `camera`/`center`/`projection`/`fov`, it reports:
 
-== More functions
+#table(
+  columns: (auto, 1fr),
+  align: (left + horizon, left + horizon),
+  inset: (x: 7pt, y: 3.6pt),
+  stroke: none,
+  fill: (_, y) => if y == 0 { luma(235) } else if calc.odd(y) { luma(248) },
+  table.header([*Field*], [*What it is*]),
+  [`size`], [Bounding-box dimensions `(dx, dy, dz)`.],
+  [`surface_area`], [Total triangle area (exact).],
+  [`volume`], [Enclosed volume — exact for a closed, consistently-wound mesh; approximate for open or non-manifold ones.],
+  [`centroid`], [Centre of mass `(x, y, z)` (volume-weighted).],
+)
 
-The `get-stl-info`, `get-obj-info`, and `get-ply-info` functions are used to output the model's metadata and are available in the plugin.
+Because it's a plain dictionary, you can drive labels, callouts, or camera framing from real geometry. Here it is run on the bunny:
 
-```typst
-#let info = get-obj-info(teapot)
-#for (key, val) in info.pairs() [*#key:* #repr(val)]
+```examplev
+#let info = get-obj-info(bunny)
+#grid(columns: 2, column-gutter: 1em, row-gutter: 0.3em, align: (right, left),
+  ..for (key, val) in info.pairs() { (strong(key), repr(val)) })
 ```
 
 #pagebreak()
