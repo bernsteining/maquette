@@ -18,13 +18,21 @@ pub(crate) struct ResolvedLight {
     pub(crate) vector: Vec3,
     pub(crate) color: (f32, f32, f32),
     pub(crate) cast_shadow: bool,
+    /// Disk-area-light radius in world units (0 = hard light).
+    pub(crate) size: f64,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct LightF32 {
     pub(crate) kind: LightKind,
     pub(crate) dx: f32, pub(crate) dy: f32, pub(crate) dz: f32,
+    /// Diffuse light color.
     pub(crate) cr: f32, pub(crate) cg: f32, pub(crate) cb: f32,
+    /// Specular light color = diffuse color × spec_scale, where spec_scale is
+    /// 1 for a sharp point/dir light and < 1 for an area light (subdues the
+    /// highlight in proportion to its angular size — a cheap area-light approx).
+    /// Precomputed so the hot shading loop skips a per-batch scale.
+    pub(crate) scr: f32, pub(crate) scg: f32, pub(crate) scb: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -38,6 +46,7 @@ pub(crate) fn resolve_lights(config: &RenderConfig) -> Vec<ResolvedLight> {
             vector: Vec3::new(config.light_dir[0], config.light_dir[1], config.light_dir[2]).normalized(),
             color: (1.0f32, 1.0f32, 1.0f32),
             cast_shadow: true,
+            size: 0.0,
         }]
     } else {
         let lights = &config.lights;
@@ -52,6 +61,7 @@ pub(crate) fn resolve_lights(config: &RenderConfig) -> Vec<ResolvedLight> {
                 },
                 color: (l.color.0 * intensity, l.color.1 * intensity, l.color.2 * intensity),
                 cast_shadow: l.cast_shadow,
+                size: l.size,
             }
         }).collect()
     }
@@ -347,9 +357,10 @@ pub(crate) fn shade_batch_4(
                 v128_bitselect(one, zero, f32x4_gt(spec_raw, half))
             } else { spec_raw };
             let spec_val = if let Some(sf) = sf { f32x4_mul(spec_val, sf) } else { spec_val };
-            spec_r = f32x4_add(spec_r, f32x4_mul(f32x4_splat(light.cr), spec_val));
-            spec_g = f32x4_add(spec_g, f32x4_mul(f32x4_splat(light.cg), spec_val));
-            spec_b = f32x4_add(spec_b, f32x4_mul(f32x4_splat(light.cb), spec_val));
+            // Area-light softening is baked into the specular color (scr/scg/scb).
+            spec_r = f32x4_add(spec_r, f32x4_mul(f32x4_splat(light.scr), spec_val));
+            spec_g = f32x4_add(spec_g, f32x4_mul(f32x4_splat(light.scg), spec_val));
+            spec_b = f32x4_add(spec_b, f32x4_mul(f32x4_splat(light.scb), spec_val));
         }
 
         // SSS

@@ -349,11 +349,32 @@ pub struct ClipConfig {
     pub keep_far: bool,
     /// Close the cut cross-section with cap faces.
     pub cap: bool,
+    /// Hatch the cut cross-section with section lines (SVG output). None = off.
+    pub hatch: Option<HatchConfig>,
 }
 
 impl Default for ClipConfig {
     fn default() -> Self {
-        Self { source: ClipSource::Camera, depth: 0.5, distance: None, keep_far: true, cap: true }
+        Self { source: ClipSource::Camera, depth: 0.5, distance: None, keep_far: true, cap: true, hatch: None }
+    }
+}
+
+/// Section-line hatching for a clip cap (engineering cross-section style).
+#[derive(Clone)]
+pub struct HatchConfig {
+    /// Line angle in degrees (0 = horizontal). Default 45.
+    pub angle: f64,
+    /// Spacing between lines, in output pixels. Default 6.
+    pub spacing: f64,
+    /// Line width, in output pixels. Default 0.6.
+    pub width: f64,
+    /// Line colour (hex). Default "#333333".
+    pub color: String,
+}
+
+impl Default for HatchConfig {
+    fn default() -> Self {
+        Self { angle: 45.0, spacing: 6.0, width: 0.6, color: "#333333".into() }
     }
 }
 
@@ -531,8 +552,13 @@ impl GroupStyle {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum LightKind {
+    /// Parallel rays; `vector` is a direction. No position.
     Directional,
+    /// Hard point light; `vector` is a world position. `size` is ignored.
     Positional,
+    /// Disk area light; `vector` is a world position and `size` is its radius,
+    /// which softens the shadow penumbra (PCSS) and broadens/dims the highlight.
+    Area,
 }
 
 #[derive(Clone)]
@@ -543,6 +569,10 @@ pub struct LightDef {
     pub intensity: f64,
     /// Whether this light casts shadows (when `shadows` is enabled).
     pub cast_shadow: bool,
+    /// Disk-area-light radius in world units. 0 = a hard point/directional light.
+    /// A positive value softens this light's shadow penumbra (PCSS, per-pixel
+    /// shadows only) and subdues its specular highlight.
+    pub size: f64,
 }
 
 impl Default for LightDef {
@@ -553,6 +583,7 @@ impl Default for LightDef {
             color: (1.0f32, 1.0f32, 1.0f32),
             intensity: 1.0,
             cast_shadow: true,
+            size: 0.0,
         }
     }
 }
@@ -704,6 +735,33 @@ fn axis_index(s: &str) -> u8 {
 /// Parse the `clip` value: `null` (off), a 4-array world plane, or an object
 /// selecting a clip mode (`from`/`axis`/`plane`/`normal`, `depth`, `distance`,
 /// `keep`, `cap`).
+/// Parse the `hatch` value inside a clip dict: `true`/`false` or an object
+/// (`angle`, `spacing`, `width`, `color`).
+fn parse_hatch(p: &mut JsonParser) -> Result<Option<HatchConfig>, String> {
+    p.skip_ws();
+    match p.peek() {
+        b'{' => {
+            let mut h = HatchConfig::default();
+            p.expect(b'{')?; p.skip_ws();
+            while p.peek() != b'}' {
+                let k = p.parse_str()?; p.expect(b':')?;
+                match k {
+                    "angle" => h.angle = p.parse_f64()?,
+                    "spacing" => h.spacing = p.parse_f64()?,
+                    "width" => h.width = p.parse_f64()?,
+                    "color" => h.color = p.parse_string()?,
+                    _ => p.skip_value()?,
+                }
+                p.eat_comma_or(b'}');
+            }
+            p.expect(b'}')?;
+            Ok(Some(h))
+        }
+        b't' | b'f' => Ok(if p.parse_bool()? { Some(HatchConfig::default()) } else { None }),
+        _ => { p.skip_value()?; Ok(None) }
+    }
+}
+
 fn parse_clip(p: &mut JsonParser) -> Result<Option<ClipConfig>, String> {
     p.skip_ws();
     if p.is_null() { return Ok(None); }
@@ -724,6 +782,7 @@ fn parse_clip(p: &mut JsonParser) -> Result<Option<ClipConfig>, String> {
                 "distance" => c.distance = Some(p.parse_f64()?),
                 "keep" => c.keep_far = p.parse_string()? != "near",
                 "cap" => c.cap = p.parse_bool()?,
+                "hatch" => c.hatch = parse_hatch(p)?,
                 _ => p.skip_value()?,
             }
             p.eat_comma_or(b'}');
@@ -799,13 +858,16 @@ fn parse_light_def(p: &mut JsonParser) -> Result<LightDef, String> {
             match key {
                 "type" => {
                     let s = p.parse_str()?;
-                    light.kind = if s == "positional" || s == "point" {
-                        LightKind::Positional
-                    } else {
-                        LightKind::Directional
+                    // `area` shares the positional lighting/shadow path (its
+                    // `vector` is a position) but adds size-driven softening.
+                    light.kind = match s {
+                        "positional" | "point" => LightKind::Positional,
+                        "area" => LightKind::Area,
+                        _ => LightKind::Directional, // "directional", "sun", …
                     };
                 }
                 "vector" => light.vector = p.parse_f64_3()?,
+                "size" => light.size = p.parse_f64()?,
                 "color" => {
                     let hex = p.parse_str()?;
                     let (r, g, b) = parse_hex_color(hex);
