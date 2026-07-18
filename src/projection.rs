@@ -165,6 +165,24 @@ impl ProjectionSetup {
             TinyPlanet { f, hw, hh } => TinyPlanet { f, hw: hw + dx, hh: hh + dy },
         }
     }
+
+    /// Multiply the projection magnification by `z` — used to apply `zoom`.
+    /// Scales only the magnification field (`s`/`sx,sy`/`f`/`d`), leaving the
+    /// screen origin (`hw`/`hh`) and shape params (`k`/`aspect`/shear) untouched.
+    fn magnified(self, z: f64) -> Self {
+        use ProjectionSetup::*;
+        match self {
+            Ortho { s, hw, hh } => Ortho { s: s * z, hw, hh },
+            Perspective { sx, sy, hw, hh } => Perspective { sx: sx * z, sy: sy * z, hw, hh },
+            Cabinet { s, hw, hh, fc, fs, cd } => Cabinet { s: s * z, hw, hh, fc, fs, cd },
+            Fisheye { f, hw, hh } => Fisheye { f: f * z, hw, hh },
+            Stereographic { f, hw, hh } => Stereographic { f: f * z, hw, hh },
+            Curvilinear { d, k, aspect, hw, hh } => Curvilinear { d: d * z, k, aspect, hw, hh },
+            Cylindrical { f, hw, hh } => Cylindrical { f: f * z, hw, hh },
+            Pannini { f, hw, hh } => Pannini { f: f * z, hw, hh },
+            TinyPlanet { f, hw, hh } => TinyPlanet { f: f * z, hw, hh },
+        }
+    }
 }
 
 /// Focal length for equidistant projections (fisheye, cylindrical).
@@ -194,12 +212,14 @@ fn focal_stereographic(config: &RenderConfig, view: &ViewParams, hw: f64, hh: f6
 pub(crate) fn setup_projection(proj: Projection, config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64) -> ProjectionSetup {
     let hw = vw / 2.0;
     let hh = vh / 2.0;
-    // `zoom` scales the auto-fit result: every fit formula divides by the bounding
-    // radius, so a smaller effective radius enlarges the model within the frame.
-    let br = br / config.zoom.max(1e-6);
+    // `zoom` magnifies the projected image: applied as a direct multiplier on the
+    // projection scale *after* the fit is computed, so it enlarges the model even
+    // when auto-fit has already clamped it to the field of view. (Folding zoom into
+    // the bounding radius did nothing once the perspective fit hit the FOV clamp.)
+    let setup = setup_projection_inner(proj, config, view, vw, vh, br, hw, hh)
+        .magnified(config.zoom.max(1e-6));
     // `pan` recentres the model in screen space: [right, up] as a fraction of the
     // viewport, applied to the stored screen origin after scale is computed.
-    let setup = setup_projection_inner(proj, config, view, vw, vh, br, hw, hh);
     setup.panned(config.pan[0] * vw, -config.pan[1] * vh)
 }
 
