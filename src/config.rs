@@ -294,7 +294,12 @@ impl Default for SharpenConfig {
     }
 }
 
-/// Fake subsurface scattering configuration.
+/// Approximate ("fake") subsurface scattering configuration.
+///
+/// Uses the cheap view-dependent translucency hack from Barré-Brisebois &
+/// Bouchard, "Approximating Translucency for a Fast, Cheap and Convincing
+/// Subsurface-Scattering Look" (GDC 2011) — not real volumetric transport,
+/// and no thickness sampling.
 #[derive(Clone)]
 pub struct SssConfig {
     pub intensity: f64,
@@ -349,7 +354,7 @@ pub struct ClipConfig {
     pub keep_far: bool,
     /// Close the cut cross-section with cap faces.
     pub cap: bool,
-    /// Hatch the cut cross-section with section lines (SVG output). None = off.
+    /// Hatch the cut cross-section with section lines (SVG and PNG). None = off.
     pub hatch: Option<HatchConfig>,
 }
 
@@ -357,6 +362,17 @@ impl Default for ClipConfig {
     fn default() -> Self {
         Self { source: ClipSource::Camera, depth: 0.5, distance: None, keep_far: true, cap: true, hatch: None }
     }
+}
+
+/// Hatch pattern style for a clip cap.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum HatchStyle {
+    /// A single family of parallel section lines (default).
+    Lines,
+    /// Two perpendicular families of lines — a cross-hatch grid.
+    Cross,
+    /// Discrete `+` marks on a grid (cross-hatch reduced to plus signs).
+    Crosses,
 }
 
 /// Section-line hatching for a clip cap (engineering cross-section style).
@@ -370,11 +386,22 @@ pub struct HatchConfig {
     pub width: f64,
     /// Line colour (hex). Default "#333333".
     pub color: String,
+    /// Pattern style: parallel lines, cross-hatch, or plus marks. Default Lines.
+    pub style: HatchStyle,
 }
 
 impl Default for HatchConfig {
     fn default() -> Self {
-        Self { angle: 45.0, spacing: 6.0, width: 0.6, color: "#333333".into() }
+        Self { angle: 45.0, spacing: 6.0, width: 0.6, color: "#333333".into(), style: HatchStyle::Lines }
+    }
+}
+
+/// Map a `style` string to a [`HatchStyle`]; unknown values fall back to Lines.
+pub fn parse_hatch_style(s: &str) -> HatchStyle {
+    match s {
+        "cross" | "crosshatch" | "cross-hatch" | "grid" => HatchStyle::Cross,
+        "crosses" | "plus" | "plusses" | "pluses" => HatchStyle::Crosses,
+        _ => HatchStyle::Lines,
     }
 }
 
@@ -750,6 +777,7 @@ fn parse_hatch(p: &mut JsonParser) -> Result<Option<HatchConfig>, String> {
                     "spacing" => h.spacing = p.parse_f64()?,
                     "width" => h.width = p.parse_f64()?,
                     "color" => h.color = p.parse_string()?,
+                    "style" | "pattern" => h.style = parse_hatch_style(&p.parse_string()?),
                     _ => p.skip_value()?,
                 }
                 p.eat_comma_or(b'}');
