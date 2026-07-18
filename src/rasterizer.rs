@@ -219,6 +219,115 @@ impl PixelBuffer {
         }
     }
 
+    /// Overlay engineering-style section hatching onto a triangle (clip caps in
+    /// PNG output — the SVG path uses a `<pattern>` fill instead). Draws parallel
+    /// lines in screen space so they stay continuous across the triangulated cap,
+    /// clipped to the triangle's covered pixels and gated by the z-buffer so only
+    /// visible cap fragments are hatched. Lines are anti-aliased by coverage, so
+    /// they read cleanly even without supersampling. `spacing`/`half_width` are in
+    /// buffer pixels (output units × the antialias factor); `(cos_a, sin_a)` is
+    /// the line-angle direction. Colour is blended over the existing cap fill.
+    /// `style`: 0 = parallel lines, 1 = cross-hatch, 2 = plus marks. `arm` is the
+    /// half-length (buffer px) of a plus mark's arms (used only for style 2).
+    #[allow(clippy::too_many_arguments)]
+    pub fn hatch_triangle(
+        &mut self,
+        pts: &[(f64, f64); 3],
+        depths: &[f64; 3],
+        spacing: f64,
+        half_width: f64,
+        cos_a: f64,
+        sin_a: f64,
+        style: u8,
+        arm: f64,
+        color: (u8, u8, u8),
+    ) {
+        let setup = match TriSetup::new(pts, self.width, self.height) {
+            Some(s) => s,
+            None => return,
+        };
+        let width = self.width;
+        let zbuf = &self.zbuf;
+        let pixels = &mut self.pixels;
+        let (hr, hg, hb) = (color.0 as f64, color.1 as f64, color.2 as f64);
+        let inv_spacing = 1.0 / spacing;
+
+        let d0 = depths[0] as f32;
+        let d1 = depths[1] as f32;
+        let d2 = depths[2] as f32;
+
+        // Distance (buffer px) from `x` to the nearest hatch line (integer
+        // multiples of spacing) or the nearest cell centre (half-integer
+        // multiples) — for the line styles and the plus-mark style respectively.
+        let dist_line = |x: f64| { let r = x * inv_spacing; (r - r.round()).abs() * spacing };
+        let dist_center = |x: f64| { let r = x * inv_spacing - 0.5; (r - r.round()).abs() * spacing };
+        let feather = |d: f64| (half_width + 0.5 - d).clamp(0.0, 1.0);
+
+        let mut row_w0 = setup.row_w0;
+        let mut row_w1 = setup.row_w1;
+        let mut row_w2 = setup.row_w2;
+
+        unsafe {
+            for py in setup.min_y..=setup.max_y {
+                if let Some((xl, xr)) = setup.scanline(row_w0, row_w1, row_w2) {
+                    let offset = (xl - setup.min_x) as f64;
+                    let mut w0s = (row_w0 + offset * setup.dw0_dx) as f32;
+                    let mut w1s = (row_w1 + offset * setup.dw1_dx) as f32;
+                    let mut w2s = (row_w2 + offset * setup.dw2_dx) as f32;
+                    let dw0 = setup.dw0_dx as f32;
+                    let dw1 = setup.dw1_dx as f32;
+                    let dw2 = setup.dw2_dx as f32;
+                    let row_base = py * width;
+                    // Pattern coordinates: u along the lines' normal, v perpendicular.
+                    // u = px*cos + py*sin (+cos per px); v = -px*sin + py*cos (-sin per px).
+                    let mut u = (xl as f64) * cos_a + (py as f64) * sin_a;
+                    let mut v = -(xl as f64) * sin_a + (py as f64) * cos_a;
+                    let mut px = xl;
+                    while px <= xr {
+                        if w0s >= 0.0 && w1s >= 0.0 && w2s >= 0.0 {
+                            let depth = w0s * d0 + w1s * d1 + w2s * d2;
+                            let idx = row_base + px;
+                            let zb = *zbuf.get_unchecked(idx);
+                            // Visible cap fragment? (the cap fill wrote this depth;
+                            // a nearer occluder would have a larger zbuf value).
+                            if depth >= zb - (zb.abs() * 1e-3 + 1e-2) {
+                                let cov = match style {
+                                    // Cross-hatch: nearer of the two perpendicular families.
+                                    1 => feather(dist_line(u)).max(feather(dist_line(v))),
+                                    // Plus marks: each arm is a line segment clipped to `arm`.
+                                    2 => {
+                                        let (du, dv) = (dist_center(u), dist_center(v));
+                                        let cv = if dv <= arm { feather(du) } else { 0.0 };
+                                        let ch = if du <= arm { feather(dv) } else { 0.0 };
+                                        cv.max(ch)
+                                    }
+                                    // Parallel lines.
+                                    _ => feather(dist_line(u)),
+                                };
+                                if cov > 0.0 {
+                                    let inv = 1.0 - cov;
+                                    let p = pixels.as_mut_ptr().add(idx * 3);
+                                    *p = (*p as f64 * inv + hr * cov) as u8;
+                                    *p.add(1) = (*p.add(1) as f64 * inv + hg * cov) as u8;
+                                    *p.add(2) = (*p.add(2) as f64 * inv + hb * cov) as u8;
+                                }
+                            }
+                        }
+                        w0s += dw0;
+                        w1s += dw1;
+                        w2s += dw2;
+                        u += cos_a;
+                        v -= sin_a;
+                        px += 1;
+                    }
+                }
+                row_w0 += setup.dw0_dy;
+                row_w1 += setup.dw1_dy;
+                row_w2 += setup.dw2_dy;
+            }
+        }
+    }
+
     /// Rasterize a triangle into a boolean shadow mask (no depth test).
     /// Uses scanline clipping + f32x4 SIMD (4 pixels per iteration).
     pub fn rasterize_shadow_mask(

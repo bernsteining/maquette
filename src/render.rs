@@ -1064,15 +1064,49 @@ fn resolve_wireframe_color<'a>(config: &'a RenderConfig, is_overlay: bool) -> &'
 /// Emit the `<defs>` section-hatch pattern for clip caps. `userSpaceOnUse`
 /// keeps the lines continuous across triangulated cap faces; `rotate` sets the
 /// section angle.
+/// Half-length of a `crosses` plus-mark arm, as a fraction of the hatch spacing
+/// (shared by the SVG and PNG paths so the two stay identical).
+const HATCH_CROSS_ARM: f64 = 0.4;
+
+/// Numeric style code passed to the rasterizer's hatch pass (0/1/2).
+fn hatch_style_code(style: crate::config::HatchStyle) -> u8 {
+    use crate::config::HatchStyle;
+    match style { HatchStyle::Lines => 0, HatchStyle::Cross => 1, HatchStyle::Crosses => 2 }
+}
+
 fn push_hatch_defs(svg: &mut String, hc: &crate::config::HatchConfig) {
+    use crate::config::HatchStyle;
+    let s = hc.spacing;
     svg.push_str("<defs><pattern id=\"maq-hatch\" patternUnits=\"userSpaceOnUse\" width=\"");
-    push_f2(svg, hc.spacing);
-    svg.push_str("\" height=\""); push_f2(svg, hc.spacing);
+    push_f2(svg, s);
+    svg.push_str("\" height=\""); push_f2(svg, s);
     svg.push_str("\" patternTransform=\"rotate("); push_f2(svg, hc.angle);
-    svg.push_str(")\"><line x1=\"0\" y1=\"0\" x2=\"0\" y2=\""); push_f2(svg, hc.spacing);
-    svg.push_str("\" stroke=\""); svg.push_str(&hc.color);
-    svg.push_str("\" stroke-width=\""); push_f2(svg, hc.width);
-    svg.push_str("\"/></pattern></defs>");
+    svg.push_str(")\">");
+    let mut push_line = |x1: f64, y1: f64, x2: f64, y2: f64| {
+        svg.push_str("<line x1=\""); push_f2(svg, x1);
+        svg.push_str("\" y1=\""); push_f2(svg, y1);
+        svg.push_str("\" x2=\""); push_f2(svg, x2);
+        svg.push_str("\" y2=\""); push_f2(svg, y2);
+        svg.push_str("\" stroke=\""); svg.push_str(&hc.color);
+        svg.push_str("\" stroke-width=\""); push_f2(svg, hc.width);
+        svg.push_str("\"/>");
+    };
+    match hc.style {
+        // A single family of vertical lines (tiled → parallel section lines).
+        HatchStyle::Lines => push_line(0.0, 0.0, 0.0, s),
+        // Vertical + horizontal lines → a cross-hatch grid.
+        HatchStyle::Cross => {
+            push_line(0.0, 0.0, 0.0, s);
+            push_line(0.0, 0.0, s, 0.0);
+        }
+        // A `+` mark centred in each cell → a grid of plus signs.
+        HatchStyle::Crosses => {
+            let (c, arm) = (s * 0.5, s * HATCH_CROSS_ARM);
+            push_line(c, c - arm, c, c + arm);
+            push_line(c - arm, c, c + arm, c);
+        }
+    }
+    svg.push_str("</pattern></defs>");
 }
 
 fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Option<(&str, f64)>, group_styles: &HashMap<u32, GroupAppearance>, hatch: bool) {
@@ -2295,6 +2329,26 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
         }
     }
 
+    // Section hatching over clip caps (PNG). The SVG path fills the cap with a
+    // <pattern>; here we overlay anti-aliased section lines on the visible cap
+    // fragments so cross-sections read the same in PNG output.
+    if !is_wireframe {
+        if let Some(hc) = config.clip.as_ref().and_then(|c| c.hatch.as_ref()) {
+            let color = parse_hex_color(&hc.color);
+            let ang = hc.angle.to_radians();
+            let (cos_a, sin_a) = (ang.cos(), ang.sin());
+            let spacing = (hc.spacing * aa as f64).max(0.5);
+            let half_w = hc.width * aa as f64 * 0.5;
+            let style = hatch_style_code(hc.style);
+            let arm = spacing * HATCH_CROSS_ARM;
+            for tri in &projected {
+                if tri.group_id == Some(clip::CAP_GID) && tri.opacity >= 1.0 {
+                    buf.hatch_triangle(&tri.pts, &tri.depths, spacing, half_w, cos_a, sin_a, style, arm, color);
+                }
+            }
+        }
+    }
+
     // Per-triangle stroke (global config.stroke or per-group overrides) for PNG
     if !is_wireframe {
         let global_has_stroke = config.stroke.color != "none" && config.stroke.width > 0.0;
@@ -2493,6 +2547,27 @@ fn render_grid_png_buf(
                 if buf.hiz_can_skip(&pts_off, max_d) { continue; }
                 buf.rasterize_triangle_offset(&tri.pts, &tri.depths, tri.r, tri.g, tri.b, ox, oy);
                 buf.hiz_update(&pts_off);
+            }
+            // Section hatching over clip caps (matches the SVG grid <pattern>).
+            if let Some(hc) = config.clip.as_ref().and_then(|c| c.hatch.as_ref()) {
+                let color = parse_hex_color(&hc.color);
+                let ang = hc.angle.to_radians();
+                let (cos_a, sin_a) = (ang.cos(), ang.sin());
+                let aa = (w / (config.width as usize).max(1)).max(1) as f64;
+                let spacing = (hc.spacing * aa).max(0.5);
+                let half_w = hc.width * aa * 0.5;
+                let style = hatch_style_code(hc.style);
+                let arm = spacing * HATCH_CROSS_ARM;
+                for tri in &projected {
+                    if tri.group_id == Some(clip::CAP_GID) && tri.opacity >= 1.0 {
+                        let pts_off = [
+                            (tri.pts[0].0 + ox, tri.pts[0].1 + oy),
+                            (tri.pts[1].0 + ox, tri.pts[1].1 + oy),
+                            (tri.pts[2].0 + ox, tri.pts[2].1 + oy),
+                        ];
+                        buf.hatch_triangle(&pts_off, &tri.depths, spacing, half_w, cos_a, sin_a, style, arm, color);
+                    }
+                }
             }
         }
     }
