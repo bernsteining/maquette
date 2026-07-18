@@ -2443,11 +2443,12 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
         buf.apply_sharpen(sharpen.strength as f32);
     }
 
-    // FXAA post-process (when not using SSAA; antialias:0 disables all AA).
-    // Skipped for transparent output: FXAA blends edges in RGB only, which would
-    // fringe against the white fill while alpha stays hard — use SSAA for smooth
-    // transparent edges instead.
-    if config.fxaa && aa <= 1 && config.antialias != 0 && !transparent {
+    // FXAA post-process. `antialias` is the single AA control: 0 = none,
+    // 1 = FXAA, 2/4 = SSAA (aa > 1, handled by the supersample downsample), so
+    // FXAA runs only at antialias == 1. Skipped for transparent output: FXAA
+    // blends edges in RGB only, which would fringe against the white fill while
+    // alpha stays hard — use SSAA for smooth transparent edges instead.
+    if config.antialias == 1 && !transparent {
         crate::fxaa::apply_fxaa(&mut buf.pixels, buf.width, buf.height);
     }
 
