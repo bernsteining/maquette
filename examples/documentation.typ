@@ -145,7 +145,7 @@ Import a render function, read a model file, and call it. That's it.
 #render-stl(cube)
 ```
 
-Every configuration parameter is passed as a *named argument* (shown throughout), or bundled in a dictionary passed positionally — `render-stl(cube, (color: "#c0ffee"))` — for reuse; both are equivalent. The `width`/`height`/`format` arguments are handled by the wrapper: `width`/`height` size the `image()` for *display*, distinct from the config's pixel-resolution `width`/`height` (set those via a dictionary). The default output is PNG; pass `format: "svg"` for vector output:
+The default output is PNG; pass `format: "svg"` for vector output:
 
 ```typst
 #render-stl(cube, format: "svg")
@@ -172,7 +172,7 @@ With a show rule, you can write OBJ / STL / PLY geometry directly in fenced code
 
 All parameters are optional — pass them as named arguments or a dictionary; defaults are shown below. Setting any to `none` restores its default (for `background`, that means transparent).
 
-#text(size: 9pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
+#text(size: 9.3pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
   \"camera\": [3, 3, 3],                             // Camera position in world space (Cartesian)
   \"azimuth\": null,                                 // Spherical camera: horizontal angle in degrees
   \"elevation\": null,                               // Spherical camera: vertical angle in degrees
@@ -204,7 +204,7 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   \"fresnel\": {\"intensity\": 0.3, \"power\": 5},       // Fresnel rim lighting (or just 0.3)
   \"sss\": false,                                    // true or {intensity, power, distortion}
   \"opacity\": 1.0,                                  // Global opacity (0-1)
-  \"lights\": [],                                    // [{type: directional|positional|area, vector, color, intensity, cast_shadow, size}] (size = area radius)
+  \"lights\": [],                                    // [{type: directional|positional|area, vector, color, ...]
   \"tone_mapping\": {\"method\": \"\", \"exposure\": 1.0}, // HDR tone mapping (or just \"aces\")
   \"shading\": \"\",                                   // \"blinn-phong\" (default), \"gooch\", \"cel\", \"flat\", \"normal\"
   \"gooch_warm\": \"#ffcc44\",                         // Gooch warm tone color
@@ -282,7 +282,7 @@ Set `background` to `none` (the string `"none"` and an empty string `""` work to
 )
 ```
 
-The cube looks like a flat square from this angle — let's change the point of view.
+The cube looks like a flat square from this angle — let's learn how to change the point of view.
 
 #pagebreak(weak: true)
 
