@@ -20,12 +20,16 @@
 #let rubi = read("data/rubi_blender.ply", encoding: none)
 #let rubi_scan = read("data/rubi_scan.ply", encoding: none)
 
+// Inline tag marking features that only apply to PNG (raster) output.
+#let png-only = box(fill: luma(225), inset: (x: 4pt, y: 1.5pt), radius: 3pt, baseline: 0.15em,
+  text(size: 7pt, fill: luma(85), weight: "bold", tracking: 0.4pt)[PNG ONLY])
+
 // Realistic brushed-steel material shared across the Cast Shadows examples.
 #let settings = (
   camera: (-100, -100, 500), up: (0, -1, 0),
   zoom: 1.25, pan: (0, 0.08),
   color: "#7d8590", specular: 0.6, shininess: 48,
-  fresnel: 0.3, tone_mapping: "aces",
+  fresnel: 0.3,
   ambient: 0.4, light_dir: (2, 3, 2.5),
 )
 
@@ -225,7 +229,7 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   \"explode\": 0,                                    // Exploded view factor
   \"decimate\": 0,                                   // Mesh simplification 0-1 (higher = fewer triangles)
   \"point_size\": 0,                                 // Point cloud neighbor radius (0 = auto)
-  \"antialias\": 1,                                  // 0: no antialias, 1:FXAA, 2:SSAA, 3-4:SSAAx2
+  \"antialias\": 1,                                  // 0: off, 1: FXAA, 2: SSAA, 3-4: SSAA x2
   \"ssao\": false,                                   // true or {samples, radius, bias, strength}
   \"bloom\": false,                                  // true or {threshold, intensity, radius}
   \"glow\": false,                                   // true or {color, intensity, radius}
@@ -1379,14 +1383,13 @@ Here ```typst antialias: 4``` should be set, wireframe's strokes benefit from an
   mode: "solid+wireframe",
   wireframe: (width: 0.3),
   width: 80%,
+  zoom: 1.2,
 )
 ```
 
 #pagebreak(weak: true)
 
 = Shadows
-
-Maquette offers two kinds of shadow, from cheapest to most physically accurate: a projected *ground shadow* that drops the model's silhouette onto the floor plane, and true *cast shadows* computed with a depth map per light, where every part of the model can shadow every other.
 
 == Ground Shadow
 
@@ -1404,58 +1407,7 @@ A ground shadow is cast by projecting every triangle onto the ground plane along
 
 == #link("https://en.wikipedia.org/wiki/Shadow_mapping")[Cast Shadows]
 
-Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *self-shadowing* — every part occluding every other, computed with a depth map per light. Every render below shares one brushed-steel `settings`, so the code stays focused on the `shadows` option:
-
-```typ
-#let settings = (
-  camera: (-100, -100, 500), up: (0, -1, 0), zoom: 1.25, pan: (0, 0.08),
-  color: "#7d8590", specular: 0.6, shininess: 48, fresnel: 0.3,
-  tone_mapping: "aces", ambient: 0.4, light_dir: (2, 3, 2.5),
-)
-```
-
-Shadows are *off by default*. `shadows: true` grounds the model — note the contact shadows where the pistons meet the crank:
-
-```typ
-#render-obj(crankshaft, ..settings)                 // shadows off
-#render-obj(crankshaft, ..settings, shadows: true)  // shadows on
-```
-
-#grid(columns: (1fr, 1fr), column-gutter: 1.2em,
-  align(center)[
-    #render-obj(crankshaft, ..settings, width: 100%)
-    #v(-0.3em)
-    #text(size: 8pt, fill: luma(90), raw("shadows: false (default)"))
-  ],
-  align(center)[
-    #render-obj(crankshaft, ..settings, shadows: true, width: 100%)
-    #v(-0.3em)
-    #text(size: 8pt, fill: luma(90), raw("shadows: true"))
-  ],
-)
-
-Sampling is *per-vertex* by default — cheap and great on dense meshes. `per_pixel: true` samples every fragment for crisp edges on low-poly and CAD models (PNG only, ~2.5× the cost), and unlocks the softer, tinted variants below. Each panel passes a different `shadows` value on top of `..settings`:
-
-#let _shadow(extra, cap) = align(center + bottom)[
-  #render-obj(crankshaft, ..settings, ..extra, width: 100%)
-  #v(-0.4em)
-  #text(size: 8pt, fill: luma(90), raw(cap))
-]
-#let _fill(cast) = (ambient: 0.3, lights: (
-    (type: "directional", vector: (2, 3, 2.5), color: "#fff2e0", intensity: 1.4),
-    (type: "directional", vector: (-4, 0.5, 0), color: "#dce8ff", intensity: 1.2, cast_shadow: cast)),
-  shadows: (per_pixel: true))
-#grid(columns: (1fr, 1fr, 1fr), gutter: 0.8em, row-gutter: 1em,
-  _shadow((shadows: (per_pixel: true)), "shadows: (per_pixel: true)"),
-  _shadow((shadows: (per_pixel: true, light_size: 6)), "…, light_size: 6  (soft)"),
-  _shadow((shadows: (per_pixel: true, color: "#5577cc", strength: 0.7)), "…, color: \"#5577cc\", strength: 0.7"),
-  _shadow(_fill(true), "fill casts too → 2 shadow sets"),
-  _shadow(_fill(false), "cast_shadow: false → 1 clean set"),
-  _shadow((lights: ((type: "positional", vector: (-40, 40, 270), color: "#fff", intensity: 2.8),),
-    shadows: (per_pixel: true, omni: true)), "positional inside → omni: true"),
-)
-
-Two need `per_pixel`: #link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCSS] (percentage-closer soft shadows), enabled by `light_size` — sharp where parts touch, blurring with distance — and coloured shadows via `color`. The middle pair is one two-light rig — a warm #link("https://en.wikipedia.org/wiki/Key_light")[key light] and a cooler #link("https://en.wikipedia.org/wiki/Fill_light")[fill light] from the opposite side — differing in one flag: *every light casts its own shadow by default*, so the fill adds a second, competing set that muddies the pistons (left), while `cast_shadow: false` keeps its light but drops its shadows (right). `omni: true` builds a #link("https://en.wikipedia.org/wiki/Cube_mapping")[cube map] so a light *inside* the model casts in every direction. Pass `shadows: true` for defaults, or a dictionary to set any of these:
+#png-only #h(0.4em) `shadows` renders true *self-shadowing* — every part occluding every other, computed with a depth map per light.
 
 #table(
   columns: (auto, auto, 1fr),
@@ -1465,7 +1417,7 @@ Two need `per_pixel`: #link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCSS
   fill: (_, y) => if y == 0 { luma(235) } else if calc.odd(y) { luma(248) },
   table.header([*Option*], [*Default*], [*What it does*]),
   [`per_pixel`], [`false`], [Sample shadows per fragment instead of per vertex — crisp edges on low-poly and CAD models. PNG only, \~2.5× the cost, and required by `light_size` and `color` below.],
-  [`light_size`], [`0`], [Light radius in world units. Any value `> 0` enables the PCSS soft shadows described above — sharp where parts touch, blurring with distance.],
+  [`light_size`], [`0`], [Light radius in world units. Any value `> 0` enables the #link("https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf")[PCSS] soft shadows described above — sharp where parts touch, blurring with distance.],
   [`color`], [`""`], [Hex tint for the shadowed regions instead of darkening toward neutral grey (e.g. a cool blue).],
   [`strength`], [`1.0`], [How dark shadows go, from `0` (none) to `1` (removes all direct light).],
   [`softness`], [`1`], [#link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCF] (percentage-closer filtering) blur radius, in #link("https://en.wikipedia.org/wiki/Texel_(graphics)")[texels]: `0` = hard edges, `1` = 3×3, higher = softer everywhere.],
@@ -1476,7 +1428,20 @@ Two need `per_pixel`: #link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCSS
   [`slope_bias`], [`1.0`], [Adds extra bias on surfaces lit at a grazing angle, where acne is worst.],
 )
 
-`per_pixel`, `light_size`, and `color` require PNG output. Note that `cast_shadow` is *not* a `shadows` option but a per-light one, set inside the `lights` array (see #link(<multi-light>)[Multi-Light]): `cast_shadow: false` exempts that light from casting, so only the remaining lights do.
+`cast_shadow` is a per-light option, set inside the `lights` array (see #link(<multi-light>)[Multi-Light]), not a `shadows` one.
+
+#grid(columns: (1fr, 1fr), column-gutter: 1.2em,
+  align(center)[
+    #render-obj(crankshaft, ..settings, width: 100%)
+    #v(-0.3em)
+    #text(size: 8pt, fill: luma(90), raw("shadows: false (default)"))
+  ],
+  align(center)[
+    #render-obj(crankshaft, ..settings, shadows: (per_pixel: true, light_size: 8, softness: 2, resolution: 1024), width: 100%)
+    #v(-0.3em)
+    #text(size: 8pt, fill: luma(90), raw("shadows: (per_pixel: true, light_size: 8, …)"))
+  ],
+)
 
 #pagebreak(weak: true)
 
@@ -1484,11 +1449,9 @@ Two need `per_pixel`: #link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCSS
 
 == #link("https://en.wikipedia.org/wiki/Spatial_anti-aliasing")[Antialiasing]
 
-The `antialias` parameter controls supersampling for PNG output. A value of `1` (default) means no supersampling; `2` renders at 2×2 the resolution and downsamples for smoother edges; `4` gives the highest quality. Values of `3` and `4` are equivalent (both render at 4× internally).
+#png-only #h(0.4em) The `antialias` parameter is the single antialiasing control for PNG output — SVG is vector, so it needs none. `0` turns it off; `1` (the default) runs a fast *FXAA* edge-smoothing pass with no supersampling; `2` renders at 2×2 the resolution and downsamples for smoother edges; `4` gives the highest quality (`3` and `4` are equivalent — both render at 4× internally).
 
-This only affects PNG — SVG output is resolution-independent.
-
-As a rule of thumb, FXAA does the job for most renders. Turn `antialias: 4` when using wireframe or stroke, straight lines benefit from antialiasing strongly.
+As a rule of thumb FXAA (`antialias: 1`) is enough for most renders — reach for `antialias: 4` with wireframe or stroke, where straight edges benefit most.
 
 #grid(columns: (1fr, 1fr), gutter: 1em,
   align(center)[
@@ -1500,7 +1463,7 @@ As a rule of thumb, FXAA does the job for most renders. Turn `antialias: 4` when
       width: 300,
       height: 300,
       antialias: 0,
-    ), width: 100%)
+    ))
   ],
   align(center)[
     *FXAA (`antialias: 1`, default)*
@@ -1511,7 +1474,7 @@ As a rule of thumb, FXAA does the job for most renders. Turn `antialias: 4` when
       width: 300,
       height: 300,
       antialias: 1,
-    ), width: 100%)
+    ))
   ],align(center)[
     *SSAA (`antialias: 2`)*
     #render-obj(teapot, (
@@ -1521,7 +1484,7 @@ As a rule of thumb, FXAA does the job for most renders. Turn `antialias: 4` when
       width: 300,
       height: 300,
       antialias: 2,
-    ), width: 100%)
+    ))
   ],
   align(center)[
     *4× supersampling (`antialias: 4`)*
@@ -1532,7 +1495,7 @@ As a rule of thumb, FXAA does the job for most renders. Turn `antialias: 4` when
       width: 300,
       height: 300,
       antialias: 4,
-    ), width: 100%)
+    ))
   ],
 )
 
@@ -1545,7 +1508,7 @@ Draws bold edges where front-facing and back-facing triangles meet, producing a 
 ```example
 // hl: 2
 #render-obj(bunny,
-  outline: (color: "#000000", width: 3),
+  outline: (color: "#000000", width: 5),
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
@@ -1554,7 +1517,7 @@ Draws bold edges where front-facing and back-facing triangles meet, producing a 
 
 == #link("https://en.wikipedia.org/wiki/Unsharp_masking")[Sharpening]
 
-Sharpening enhances edge contrast using a 3×3 unsharp mask. Pass `sharpen: true` for default strength (0.5), or customize with `sharpen: (strength: N)`. Higher values produce a more pronounced effect.
+#png-only #h(0.4em) Sharpening enhances edge contrast using a 3×3 unsharp mask. Pass `sharpen: true` for default strength (0.5), or customize with `sharpen: (strength: N)`. Higher values produce a more pronounced effect.
 
 #grid(columns: (1fr, 1fr), gutter: 1em,
   align(center)[
@@ -1582,7 +1545,7 @@ Sharpening enhances edge contrast using a 3×3 unsharp mask. Pass `sharpen: true
 
 == #link("https://en.wikipedia.org/wiki/Bloom_(shader_effect)")[Bloom] & Glow
 
-Bloom makes bright areas bleed light outward. Glow creates a uniform aura around the model's silhouette. Both are PNG-only post-processing effects. Use `bloom: true` / `glow: true` for defaults, or customize:
+#png-only #h(0.4em) Bloom makes bright areas bleed light outward. Glow creates a uniform aura around the model's silhouette. Use `bloom: true` / `glow: true` for defaults, or customize:
 ```typst
 bloom: (threshold: 0.8, intensity: 0.3, radius: 10)
 glow: (color: "#ffffff", intensity: 0.5, radius: 15)
@@ -1618,7 +1581,7 @@ glow: (color: "#ffffff", intensity: 0.5, radius: 15)
 
 == #link("https://en.wikipedia.org/wiki/Ambient_occlusion")[Ambient Occlusion]
 
-Ambient Occlusion adds realistic contact shadows (⚠️ at the cost of increased processing time) in crevices and areas where surfaces are close together, simulating how indirect light is blocked in tight spaces. SSAO computes occlusion by sampling the depth buffer after rasterization. Configure with `ssao: true` for defaults, or customize:
+#png-only #h(0.4em) Ambient Occlusion adds realistic contact shadows (⚠️ at the cost of increased processing time) in crevices and areas where surfaces are close together, simulating how indirect light is blocked in tight spaces. SSAO computes occlusion by sampling the depth buffer after rasterization. Configure with `ssao: true` for defaults, or customize:
 ```typst
 #render-obj(crankshaft,
   ssao: (samples: 16, radius: 0.5, bias: 0.025, strength: 1.0),
@@ -1859,10 +1822,6 @@ Because it's a plain dictionary, you can drive labels, callouts, or camera frami
 
 #pagebreak()
 
-= Contributing
-
-Bug reports, feature requests, issues, new feature ideas are welcome on #link("https://github.com/bernsteining/maquette")[GitHub].
-
 = Models Credits
 
 - #link("https://graphics.stanford.edu/courses/cs148-10-summer/as3/code/as3/teapot.obj")[Utah teapot] — Stanford
@@ -1870,4 +1829,8 @@ Bug reports, feature requests, issues, new feature ideas are welcome on #link("h
 - #link("https://www.cgtrader.com/free-3d-models/vehicle/vehicle-part/crankshaft-with-pistons-3783b2997aa60fea365daf96a6754cf6")[Crankshaft with pistons] — CGTrader
 - #link("https://sketchfab.com/3d-models/the-brain-007847f9d2b5481a882d8996c0fd1847")[Low-poly brain] — Sketchfab
 - #link("https://www.printables.com/model/1047493-low-poly-skull/files")[Low-poly skull] — Printables
-- Rubik's cubes: Blender generated & LiDAR scanned
+- Rubik's cubes: Blender generated & LiDAR scanned by myself
+
+= Contributing
+
+Bug reports, feature requests, issues, new feature ideas are welcome on #link("https://github.com/bernsteining/maquette")[GitHub].
