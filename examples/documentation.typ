@@ -21,7 +21,7 @@
 #let rubi_scan = read("data/rubi_scan.ply", encoding: none)
 
 // Realistic brushed-steel material shared across the Cast Shadows examples.
-#let steel = (
+#let settings = (
   camera: (-100, -100, 500), up: (0, -1, 0),
   zoom: 1.25, pan: (0, 0.08),
   color: "#7d8590", specular: 0.6, shininess: 48,
@@ -32,7 +32,7 @@
 #let doc-scope = (
   render-stl: render-stl, render-obj: render-obj, render-ply: render-ply,
   get-stl-info: get-stl-info, get-obj-info: get-obj-info, get-ply-info: get-ply-info,
-  cube: cube, colored: colored, steel: steel,
+  cube: cube, colored: colored, settings: settings,
   obj-cube: obj-cube, teapot: teapot, crankshaft: crankshaft, bunny:bunny, skull-brain: skull-brain, rubi: rubi, rubi_scan: rubi_scan
 )
 #let filter-eval(text) = text.split("\n").filter(l =>
@@ -296,6 +296,9 @@ Change the camera position and where it points to using cartesian coordinates wi
 )
 ```
 
+The `up` parameter defines which direction points "up" in the scene. The default is `(0, 0, 1)` (Z-up), which matches the convention used by most CAD software and STL files. OBJ files exported from Blender, game engines, or other Y-up tools typically need `up: (0, 1, 0)` to display correctly.
+
+
 == #link("https://en.wikipedia.org/wiki/Spherical_coordinate_system")[Spherical coordinates]
 
 Instead of placing the camera with Cartesian `(x, y, z)` coordinates, you can use `azimuth` (horizontal angle) and `elevation` (vertical angle) in degrees. This makes it much easier to orbit around a model — just change the angles. When either is set, they override the `camera` field. The `distance` is auto-computed from the bounding box unless specified.
@@ -309,8 +312,6 @@ Instead of placing the camera with Cartesian `(x, y, z)` coordinates, you can us
   distance: 10,
 )
 ```
-
-The `up` parameter defines which direction points "up" in the scene. The default is `(0, 0, 1)` (Z-up), which matches the convention used by most CAD software and STL files. OBJ files exported from Blender, game engines, or other Y-up tools typically need `up: (0, 1, 0)` to display correctly.
 
 #pagebreak(weak: true)
 
@@ -579,27 +580,30 @@ The `ambient` parameter (0--1) controls how much light reaches surfaces regardle
     #render-obj(teapot, (
       up: (0, 1, 0),
       ambient: 0.05,
+      zoom: 1.5,
       width: 300,
       height: 300,
-    ), width: 100%)
+    ))
   ],
   align(center)[
     *`ambient: 0.3`*
     #render-obj(teapot, (
       up: (0, 1, 0),
       ambient: 0.3,
+      zoom: 1.5,
       width: 300,
       height: 300,
-    ), width: 100%)
+    ))
   ],
   align(center)[
     *`ambient: 0.6`*
     #render-obj(teapot, (
       up: (0, 1, 0),
       ambient: 0.6,
+      zoom: 1.5,
       width: 300,
       height: 300,
-    ), width: 100%)
+    ))
   ],
 )
 
@@ -651,18 +655,20 @@ Smooth shading is enabled by default. Vertex normals are averaged across adjacen
     *Smooth (default)*
     #render-obj(teapot, (
       up: (0, 1, 0),
+      zoom: 1.5,
       width: 400,
       height: 400,
-    ), width: 100%)
+    ))
   ],
   align(center)[
     *Flat (`smooth: false`)*
     #render-obj(teapot, (
       up: (0, 1, 0),
+      zoom: 1.5,
       width: 400,
       height: 400,
       smooth: false,
-    ), width: 100%)
+    ))
   ],
 )
 
@@ -675,21 +681,23 @@ Add Blinn-Phong specular highlights with the `specular` parameter (0--1). The `s
     *Diffuse only*
     #render-obj(teapot, (
       up: (0, 1, 0),
+      zoom: 1.5,
       width: 400,
       height: 400,
       light_dir: (1,6,-7),
-    ), width: 100%)
+    ))
   ],
   align(center)[
     *Specular (`specular: 0.6, shininess: 32`)*
     #render-obj(teapot, (
       up: (0, 1, 0),
+      zoom: 1.5,
       specular: 0.6,
       light_dir: (1,6,-7),
       shininess: 32,
       width: 400,
       height: 400,
-    ), width: 100%)
+    ))
   ],
 )
 
@@ -709,7 +717,8 @@ By default (`gamma_correction: true`), colors are converted to linear space befo
       gamma_correction: false,
       width: 400,
       height: 400,
-    ), width: 100%)
+      zoom: 1.5,
+    ))
   ],
   align(center)[
     *With (default)*
@@ -719,7 +728,8 @@ By default (`gamma_correction: true`), colors are converted to linear space befo
       shininess: 32,
       width: 400,
       height: 400,
-    ), width: 100%)
+      zoom: 1.5,
+    ))
   ],
 )
 
@@ -738,7 +748,7 @@ Fresnel rim lighting brightens edges where the surface curves away from the came
       background: "#1a1a2e",
       width: 400,
       height: 400,
-    ), width: 100%)
+    ))
   ],
   align(center)[
     *With (`fresnel: 0.6`)*
@@ -751,7 +761,7 @@ Fresnel rim lighting brightens edges where the surface curves away from the came
       background: "#1a1a2e",
       width: 400,
       height: 400,
-    ), width: 100%)
+    ))
   ],
 )
 
@@ -791,8 +801,7 @@ Each light casts its own cast shadow when `shadows` is enabled (see the Cast Sha
      vector: (0, 1, 0),
      color: "#4444ff",
      intensity: 0.5),
-  ),
-  width: 100%,
+  )
 )
 ```
 
@@ -842,21 +851,21 @@ When multiple bright lights, strong specular, or fresnel push color values above
 #grid(columns: (1fr, 1fr, 1fr), gutter: 0.8em,
   align(center)[
     *No tone mapping*
-    #render-obj(bunny, tm-base, width: 100%)
+    #render-obj(bunny, tm-base)
   ],
   align(center)[
     *Reinhard*
-    #render-obj(bunny, tm-base + (tone_mapping: "reinhard"), width: 100%)
+    #render-obj(bunny, tm-base + (tone_mapping: "reinhard"))
   ],
   align(center)[
     *ACES*
-    #render-obj(bunny, tm-base + (tone_mapping: "aces"), width: 100%)
+    #render-obj(bunny, tm-base + (tone_mapping: "aces"))
   ],
 )
 
 == Shading Models
 
-The `shading` parameter selects the lighting model.
+The `shading` parameter selects the lighting model, to configure the lights behaviour in the scene.
 
 === #link("https://en.wikipedia.org/wiki/Blinn%E2%80%93Phong_reflection_model")[Blinn-Phong] (default)
     Photorealistic diffuse + specular.
@@ -880,7 +889,6 @@ The `shading` parameter selects the lighting model.
       up: (0, 1, 0),
       azimuth: 180, distance: 0.25,
       shading: "normal",
-      width: 100%,
     )
   ],
   [
@@ -890,7 +898,7 @@ The `shading` parameter selects the lighting model.
       up: (0, 1, 0),
       azimuth: 180, distance: 0.25,
       shading: "flat",
-    ), width: 100%)
+    ))
   ],
   [
     === #link("https://en.wikipedia.org/wiki/Cel_shading")[Cel]
@@ -902,7 +910,7 @@ The `shading` parameter selects the lighting model.
       azimuth: 180, distance: 0.25,
       specular: 0.4,
       shading: "cel", fresnel: 0.6, outline: (width: 2.0),
-    ), width: 100%)
+    ))
   ],
   [
     === #link("https://en.wikipedia.org/wiki/Gooch_shading")[Gooch]
@@ -914,7 +922,7 @@ The `shading` parameter selects the lighting model.
       azimuth: 180, distance: 0.25,
       specular: 0.4,
       shading: "gooch", gooch_warm: "#ffcc44", gooch_cool: "#2255ff",
-    ), width: 100%)
+    ))
   ]
 )
 
@@ -922,11 +930,12 @@ The `shading` parameter selects the lighting model.
 
 == #link("https://en.wikipedia.org/wiki/Subsurface_scattering")[Subsurface Scattering]
 
-Fake view-dependent subsurface scattering simulates light passing through thin geometry (wax, skin, marble, leaves). Back-lit areas glow with a color derived from the light and the model's base color. Works with any shading model.
+Maquette approximates subsurface scattering with a cheap, view-dependent hack rather than true volumetric light transport: the #link("https://colinbarrebrisebois.com/2011/03/07/gdc-2011-approximating-translucency-for-a-fast-cheap-and-convincing-subsurface-scattering-look/")[_Approximating Translucency_] technique (Barré-Brisebois & Bouchard, GDC 2011) — a single dot product between the view direction and the back-facing light. It gives the warm glow of light passing through thin geometry (wax, skin, marble, leaves); back-lit areas glow with a color derived from the light and the model's base color. There's no real thickness sampling, so the glow is uniform rather than thickness-driven. Works with any shading model.
 
 === Without Subsurface Scattering
 
 ```example
+// cols: 1 1.4
 #render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
@@ -937,7 +946,6 @@ Fake view-dependent subsurface scattering simulates light passing through thin g
      color: "#ff0000", 
      intensity: 3.0),
   ),
-  width: 100%,
 )
 ```
 
@@ -945,6 +953,7 @@ Fake view-dependent subsurface scattering simulates light passing through thin g
 
 ```example
 // hl: 11
+// cols: 1 1.4
 #render-obj(bunny,
   up: (0, 1, 0),
   azimuth: 180,
@@ -956,7 +965,6 @@ Fake view-dependent subsurface scattering simulates light passing through thin g
      intensity: 3.0),
   ),
   sss: (intensity: 4, power: 3.5, distortion: 0.2),
-  width: 100%,
 )
 ```
 
@@ -1110,7 +1118,7 @@ Maquette handles PLY files in ASCII and binary (little/big-endian) formats — a
 #render-ply(rubi,
   azimuth: 45,
   elevation: 25,
-  distance: 10,
+  distance: 9,
   width: 65%,
 )
 ```
@@ -1126,7 +1134,7 @@ PLY files can also contain clouds of points. 3D scanning apps usually allow to e
 #render-ply(rubi_scan,
   up: (0,1,0),
   elevation: 25,
-  distance: 0.8,
+  distance: 0.75,
   auto_fit: false,
   width: 65%,
 )
@@ -1184,20 +1192,18 @@ Groups not listed keep their default appearance.
 
 #grid(columns: (59%, auto), gutter:1em, [
   When using the full object syntax, all attributes are optional:
-  #text(size: 9pt, raw(block: true, lang: "json", "{
-  \"highlight\": {
-    \"GroupName\": \"#hexcolor\",  // Simple: just a color string
-    \"AnotherGroup\": {          // Advanced: full appearance object
-      \"color\": \"#ff0000\",      // Hex color (overrides global color)
-      \"specular\": 0.8,         // Specular intensity 0-1 (overrides global)
-      \"shininess\": 64,         // Specular exponent (overrides global)
-      \"ambient\": 0.3,          // Ambient light 0-1 (overrides global)
-      \"stroke\": \"#000000\",     // Triangle edge stroke color
-      \"stroke_width\": 1.0,     // Triangle edge stroke width
-      \"opacity\": 0.5           // Transparency 0-1 (0=invisible, 1=opaque)
-    }
-  }
-}"))
+  #text(size: 9pt, raw(block: true, lang: "json", "\"highlight\": (
+  \"GroupName\": \"#c0ffee\",    // Simple: just a color string
+  \"AnotherGroup\": (          // Advanced: full appearance object
+    \"color\": \"#ff0000\",      // Hex color (overrides global color)
+    \"specular\": 0.8,         // Specular intensity 0-1 (overrides global)
+    \"shininess\": 64,         // Specular exponent (overrides global)
+    \"ambient\": 0.3,          // Ambient light 0-1 (overrides global)
+    \"stroke\": \"#000000\",     // Triangle edge stroke color
+    \"stroke_width\": 1.0,     // Triangle edge stroke width
+    \"opacity\": 0.5,          // Transparency 0-1 (0=invisible, 1=opaque)
+    )
+)"))
 ], [We can list the groups as follows:
 
 #text(size: 8.4pt, raw(block: true, lang: "sh", "$ grep \"g \" crankshaft.obj
@@ -1242,7 +1248,8 @@ render-obj(crankshaft,
 Instead of a plain color, pass a dictionary with specific appearance overrides to selectively change parts appearance.
 
 ```example
-// hl: 6-13
+// hl: 7-15
+// cols: 1 1.3
 #render-obj(crankshaft,
   camera: (-100, -100, 500),
   up: (0, -1, 0),
@@ -1258,7 +1265,6 @@ Instead of a plain color, pass a dictionary with specific appearance overrides t
     Model__Piston_C: (color: "#88ccff", opacity: 0.3),
     Model__Piston_D: (color: "#88ccff", opacity: 0.3),
   ),
-  width: 100%,
 )
 ```
 
@@ -1270,9 +1276,9 @@ Pass `annotations: true` to label all groups with default styling, or pass an ob
 
 ```example
 // hl: 5-16
-// cols: 1 1.6
+// cols: 1 1.3
 #render-obj(crankshaft,
-  camera: (-100, -100, 500),
+  camera: (-110, -90, 380),
   up: (0, -1, 0),
   color: "#777777",
   annotations: (
@@ -1307,7 +1313,6 @@ Nothing new, since it's the default mode we saw earlier, but it allows me to int
   up: (0,1,0),
   distance: 200,
   color: "#e8e8e8",
-  width: 100%,
 )
 ```
 
@@ -1333,7 +1338,6 @@ Our previous skull model now unveils its inner brain!
   ),
   xray_opacity: 0.3,
   mode: "x-ray",
-  width: 100%,
 )
 ```
 
@@ -1356,8 +1360,8 @@ It's a great occasion to showcase SVG output, no rasterization artifacts and kin
   background: "#ffffff",
   wireframe: (color: "#cc3333", width: 0.1),
   mode: "wireframe",
-  width: 55%,
   format: "svg",
+  width: 55%,
 )
 ```
 
@@ -1387,9 +1391,6 @@ Maquette offers two kinds of shadow, from cheapest to most physically accurate: 
 == Ground Shadow
 
 A ground shadow is cast by projecting every triangle onto the ground plane along the light direction. Pass `ground_shadow: true` for defaults, or customize:
-```typst
-ground_shadow: (opacity: 0.3, color: "#000000")
-```
 
 ```example
 // hl: 4
@@ -1397,16 +1398,16 @@ ground_shadow: (opacity: 0.3, color: "#000000")
   camera: (3, 2, 2),
   light_dir: (1, -1, 3),
   ground_shadow: (opacity: 0.35, color: "#2244aa"),
-  width: 44%,
+  width: 50%,
 )
 ```
 
 == #link("https://en.wikipedia.org/wiki/Shadow_mapping")[Cast Shadows]
 
-Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *self-shadowing* — every part occluding every other, computed with a depth map per light. Every render below shares one brushed-steel setup, so the code stays focused on the `shadows` option:
+Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *self-shadowing* — every part occluding every other, computed with a depth map per light. Every render below shares one brushed-steel `settings`, so the code stays focused on the `shadows` option:
 
 ```typ
-#let steel = (
+#let settings = (
   camera: (-100, -100, 500), up: (0, -1, 0), zoom: 1.25, pan: (0, 0.08),
   color: "#7d8590", specular: 0.6, shininess: 48, fresnel: 0.3,
   tone_mapping: "aces", ambient: 0.4, light_dir: (2, 3, 2.5),
@@ -1416,27 +1417,27 @@ Where `ground_shadow` drops a silhouette on the floor, `shadows` renders true *s
 Shadows are *off by default*. `shadows: true` grounds the model — note the contact shadows where the pistons meet the crank:
 
 ```typ
-#render-obj(crankshaft, ..steel)                 // shadows off
-#render-obj(crankshaft, ..steel, shadows: true)  // shadows on
+#render-obj(crankshaft, ..settings)                 // shadows off
+#render-obj(crankshaft, ..settings, shadows: true)  // shadows on
 ```
 
 #grid(columns: (1fr, 1fr), column-gutter: 1.2em,
   align(center)[
-    #render-obj(crankshaft, ..steel, width: 100%)
+    #render-obj(crankshaft, ..settings, width: 100%)
     #v(-0.3em)
     #text(size: 8pt, fill: luma(90), raw("shadows: false (default)"))
   ],
   align(center)[
-    #render-obj(crankshaft, ..steel, shadows: true, width: 100%)
+    #render-obj(crankshaft, ..settings, shadows: true, width: 100%)
     #v(-0.3em)
     #text(size: 8pt, fill: luma(90), raw("shadows: true"))
   ],
 )
 
-Sampling is *per-vertex* by default — cheap and great on dense meshes. `per_pixel: true` samples every fragment for crisp edges on low-poly and CAD models (PNG only, ~2.5× the cost), and unlocks the softer, tinted variants below. Each panel passes a different `shadows` value on top of `..steel`:
+Sampling is *per-vertex* by default — cheap and great on dense meshes. `per_pixel: true` samples every fragment for crisp edges on low-poly and CAD models (PNG only, ~2.5× the cost), and unlocks the softer, tinted variants below. Each panel passes a different `shadows` value on top of `..settings`:
 
 #let _shadow(extra, cap) = align(center + bottom)[
-  #render-obj(crankshaft, ..steel, ..extra, width: 100%)
+  #render-obj(crankshaft, ..settings, ..extra, width: 100%)
   #v(-0.4em)
   #text(size: 8pt, fill: luma(90), raw(cap))
 ]
@@ -1544,7 +1545,7 @@ Draws bold edges where front-facing and back-facing triangles meet, producing a 
 ```example
 // hl: 2
 #render-obj(bunny,
-  outline: (color: "#000000", width: 5),
+  outline: (color: "#000000", width: 3),
   up: (0, 1, 0),
   azimuth: 180,
   distance: 0.25,
@@ -1661,50 +1662,43 @@ Slice the model with a plane to cut part of it away — for section drawings or 
 Wrapping the plane in a dict lets you add `cap: false`, which leaves the cross-section open so you can see inside — here an explicit plane opens the skull to reveal the brain:
 
 ```example
-// hl: 4-5
+// hl: 8-9
+// cols: 1 1.4
 #render-obj(skull-brain,
-  azimuth: 220, up: (0, 1, 0), distance: 200,
+  azimuth: 220, 
+  up: (0, 1, 0), 
+  distance: 180,
   highlight: 
     ("Skull": (color: "#e8e8e8"), 
      "Brain": (color: "#ff69b4")),
   clip: (plane: (2, -1, 0, 1), cap: false),
   cull_backface: false,
-  width: 75%,
 )
 ```
 
-The handiest form is a *camera cutaway*: `from: "camera"` squares the plane to the view direction and `depth` (`0` = near face, `1` = far) sets how deep to cut, so the slice always faces the viewer whatever the angle. The cut face can be *hatched* with section lines for an engineering-style cross-section — `hatch: true` uses the defaults, or pass a dictionary of `angle`, `spacing`, `width`, and `color`. Hatching draws into the cut cap, so it needs a closed cap (`cap: true`, the default) on a watertight mesh, and it renders in the vector output (`format: "svg"`):
+Cap it instead (the default) and the cut face can be *hatched* for an engineering-style section view. Three patterns — parallel `"lines"`, a `"cross"` grid, and discrete `"crosses"` — each honour `angle`, `spacing`, `width`, and `color` (the whole pattern rotates with `angle`), in SVG and PNG alike:
 
-```example
-// hl: 4
-#render-stl(cube,
-  camera: (3, 2, 2),
-  color: "#bcd6ef",
-  clip: (from: "camera", depth: 0.45, hatch: true),
-  format: "svg",
-  width: 54%,
+#let _hatch-demo(style, col, ang) = align(center)[
+  #render-stl(cube, camera: (3, 2, 2), color: "#bcd6ef",
+    clip: (from: "camera", depth: 0.45,
+      hatch: (style: style, angle: ang, spacing: 12, width: 1.6, color: col)),
+    width: 80%)
+  #v(-0.4em)
+  #text(size: 8.5pt, fill: luma(90))[#raw("style: \"" + style + "\", angle: " + str(ang))]
+]
+#grid(columns: (1fr, 1fr, 1fr), gutter: 1.2em,
+  _hatch-demo("lines", "#26323f", 45),
+  _hatch-demo("cross", "#3c2731", 30),
+  _hatch-demo("crosses", "#26323f", 0),
 )
-```
 
-The plane's normal comes from one of `from`/`axis`/`normal` (or a raw `(a,b,c,d)` array), positioned along the model by `depth` or `distance`:
+The dict form positions the plane and controls the cut:
 
-#table(
-  columns: (auto, auto, 1fr),
-  align: (left + horizon, left + horizon, left + horizon),
-  inset: (x: 7pt, y: 3.6pt),
-  stroke: none,
-  fill: (_, y) => if y == 0 { luma(235) } else if calc.odd(y) { luma(248) },
-  table.header([*Key*], [*Default*], [*What it does*]),
-  [`(a, b, c, d)`], [—], [Explicit world-space plane (array form); keeps the `ax+by+cz+d >= 0` side.],
-  [`from: "camera"`], [—], [Plane perpendicular to the view direction — a depth-wise cutaway that always faces the viewer.],
-  [`axis: "x"/"y"/"z"`], [—], [Axis-aligned plane.],
-  [`normal: (x, y, z)`], [—], [Explicit world-space normal.],
-  [`depth`], [`0.5`], [Cut position as a fraction `0`–`1` of the model along the normal (`0` = near side, `1` = far).],
-  [`distance`], [—], [Cut position in world units from the near side; overrides `depth` when set.],
-  [`keep`], [`"far"`], [Which side to keep, `"far"` or `"near"`.],
-  [`cap`], [`true`], [Close the cut cross-section with a flat face; `false` reveals hollow interiors.],
-  [`hatch`], [`false`], [Section-line hatching over the cap (SVG output). `true` for defaults, or a dict: `angle` (45°), `spacing` (6), `width` (0.6), `color` ("#333").],
-)
+- *`from: "camera"`* squares the plane to the view direction, so the slice always faces the viewer whatever the angle (or use `axis: "x"/"y"/"z"`, `normal: (x, y, z)`, or a raw `(a, b, c, d)` plane).
+- *`depth`* sets how deep to cut — `0` (near face) to `1` (far); `distance` sets it in world units instead.
+- *`keep`* chooses which half to keep — `"far"` (default) or `"near"`.
+- *`cap`* closes the cross-section with a flat face (default `true`); `false` reveals hollow interiors, as in the skull above.
+- *`hatch`* draws section lines over the cap — `true` for defaults, or a dict of `style` (`"lines"`/`"cross"`/`"crosses"`), `angle`, `spacing`, `width`, and `color`. Needs `cap: true`.
 
 #pagebreak(weak: true)
 
@@ -1817,12 +1811,23 @@ It also renders lights as octahedrons of the color they emit, to allow placing l
 
 ```example
 // hl: 2
+// cols: 1 1.5
 #render-obj(teapot,
   debug: true,
   lights: (
-    (type: "area", vector: (2, 4, 0), size: 1.2, color: "#ff4444", intensity: 1.2),
-    (type: "positional", vector: (-1, 2, 2), color: "#44ff44", intensity: 1.0),
-    (type: "directional", vector: (0, 1, 0), color: "#4444ff", intensity: 0.5),
+    (type: "area", 
+     vector: (2, 4, 0), 
+     size: 1.2, 
+     color: "#ff4444", 
+     intensity: 1.2),
+    (type: "positional", 
+     vector: (-1, 2, 2), 
+     color: "#44ff44", 
+     intensity: 1.0),
+    (type: "directional", 
+     vector: (0, 1, 0), 
+     color: "#4444ff", 
+     intensity: 0.5),
   ),
 )
 ```
