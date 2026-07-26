@@ -143,9 +143,9 @@ make demo
 ### `render-stl` / `render-obj` / `render-ply`
 
 ```typst
-#render-stl(stl-data, ..config, width: auto, height: auto, format: "png")
+#render-stl(read("model.stl", encoding: none), ..config, width: auto, height: auto, format: "png")
 #render-obj(obj-data, ..config, width: auto, height: auto, format: "png")
-#render-ply(ply-data, ..config, width: auto, height: auto, format: "png")
+#render-ply(read("model.ply", encoding: none), ..config, width: auto, height: auto, format: "png")
 ```
 
 Renders a 3D model. Data must be read with `encoding: none` (required for binary STL/PLY, optional for OBJ). Configuration parameters are passed as named arguments (e.g. `color: "#c0ffee"`), or bundled into a single dictionary passed positionally (`render-stl(data, (color: "#c0ffee"))`) — both are equivalent. Any parameter set to `none` falls back to its default. `width`/`height`/`format` control display sizing and output format; set `format: "svg"` for vector output.
