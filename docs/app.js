@@ -211,10 +211,6 @@ const SCHEMA = [
     { k: "debug", label: "Debug overlay", t: "bool", def: false },
     { k: "debug_color", label: "Debug color", t: "col", def: "#cc2222", when: s => s.debug },
   ]},
-
-  { s: "Advanced (raw JSON, merged last)", fields: [
-    { k: "_raw", label: "", t: "raw", def: "" },
-  ]},
 ];
 
 // Tooltips (hover a label) — keyed by field key. Covers top-level fields and
@@ -263,7 +259,6 @@ const HELP = {
   materials: "Map OBJ material names to colors.", highlight: "Recolor named OBJ groups.",
   annotations: "Label OBJ groups on the render.", debug: "Overlay model metadata and light gizmos.",
   debug_color: "Debug overlay text color.",
-  _raw: "Raw JSON merged over the form config — for anything not exposed above.",
 };
 
 // State→DOM sync closures (per top-level control) for programmatic updates
@@ -335,13 +330,11 @@ function buildConfig() {
       case "palette": if (state[f.k].length) c[f.k] = state[f.k].slice(); break;
       case "lights": if (state.lights.length) c.lights = state.lights.map(l => ({ ...l })); break;
       case "map": if (state[f.k].length) c[f.k] = Object.fromEntries(state[f.k].filter(r => r[0])); break;
-      case "raw": break;
       default: c[f.k] = state[f.k];
     }
   }
   c.ambient = ambientCfg();          // number, or hemisphere {intensity,sky,ground}
   c.background = bgCfg();             // color, or "none" (transparent)
-  if (state._raw.trim()) { try { Object.assign(c, JSON.parse(state._raw)); } catch {} } // raw wins
   return c;
 }
 
@@ -373,10 +366,10 @@ function buildTypst() {
       case "palette": if (state[f.k].length) push(f.k, fmtT(state[f.k])); break;
       case "lights": if (state.lights.length) push("lights", fmtT(state.lights)); break;
       case "map": { const rows = state[f.k].filter(r => r[0]); if (rows.length) push(f.k, `(${rows.map(([n,v]) => `"${n}": ${fmtT(v)}`).join(", ")})`); break; }
-      case "raw": break;
       default: if (!eq(state[f.k], f.def)) push(f.k, fmtT(state[f.k]));
     }
   }
+  if (outputFormat === "svg") P.push('format: "svg"');
   const body = P.length ? `#${fn}(model,\n  ${P.join(",\n  ")},\n)` : `#${fn}(model)`;
   return `#import "@preview/maquette:0.1.1": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
 }
@@ -573,12 +566,6 @@ function viewsNode(f) {
   return box;
 }
 
-function rawNode(f) {
-  const ta = document.createElement("textarea"); ta.placeholder = '{ "color": "#ff0000" }';
-  ta.value = state._raw; ta.oninput = () => { state._raw = ta.value; onChange(); };
-  return ta;
-}
-
 function fieldText(f) {
   let t = (f.label || "") + " " + f.k;
   if (f.fields) for (const s of f.fields) t += " " + (s.label || "") + " " + s.k;
@@ -599,7 +586,6 @@ function buildForm() {
       else if (f.t === "palette") node = labelWrap(f, paletteNode(f));
       else if (f.t === "map") node = labelWrap(f, mapNode(f));
       else if (f.t === "views") node = labelWrap(f, viewsNode(f));
-      else if (f.t === "raw") node = rawNode(f);
       else node = ctl(f, state, state);
       body.append(node);
       searchItems.push({ node, section: d, text: fieldText(f) });
@@ -646,10 +632,12 @@ function onChange() {
 }
 
 let lastUrl = null;
-const RFN = { obj: "render_obj_png", stl: "render_stl_png", ply: "render_ply_png" };
+let outputFormat = "png";   // "png" | "svg" — chosen via the stage toolbar toggle
+const RFN_PNG = { obj: "render_obj_png", stl: "render_stl_png", ply: "render_ply_png" };
+const RFN_SVG = { obj: "render_obj", stl: "render_stl", ply: "render_ply" };
 function render() {
   if (!instance || !model.bytes) return;
-  const fn = RFN[ext(model.name)];
+  const fn = (outputFormat === "svg" ? RFN_SVG : RFN_PNG)[ext(model.name)];
   if (!fn) return showErr(`unsupported file type: .${ext(model.name)}`);
   try {
     const t0 = performance.now();
@@ -789,6 +777,15 @@ $("btn-reset").onclick = () => {
 };
 
 $("search").addEventListener("input", () => filterForm($("search").value));
+
+// PNG / SVG output toggle
+document.querySelectorAll("#fmt button").forEach((b) => {
+  b.onclick = () => {
+    outputFormat = b.dataset.fmt;
+    document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x === b));
+    onChange();
+  };
+});
 
 ["dragenter","dragover"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); $("stage").classList.add("drag"); }));
 ["dragleave","drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev==="dragleave" && e.relatedTarget) return; $("stage").classList.remove("drag"); }));
