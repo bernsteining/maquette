@@ -1,0 +1,100 @@
+name: Deploy demo (GitHub Pages)
+
+# Rebuilds maquette.wasm from source and deploys docs/ to Pages, so the live
+# demo's WASM always matches the plugin source — no manual copy, no drift.
+#
+# The build runs inside a pinned rust:1.94.1 container (matching local rustc)
+# and uses binaryen v128 (matching local wasm-opt), so CI tooling == local.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  BINARYEN_VERSION: version_128 # matches local wasm-opt v128
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Steps execute inside this pinned image (rustc 1.94.1 baked in). Debian-based
+    # (glibc) so GitHub's injected Node runs the JS actions below — do NOT use an
+    # Alpine/musl image here, it breaks actions/checkout & upload-pages-artifact.
+    container: rust:1.94.1-slim-bookworm
+    steps:
+      - name: System deps (git for checkout, curl for binaryen, make for the build)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates make
+
+      - uses: actions/checkout@v4
+
+      - name: Ensure wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo & target
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/cargo/registry
+            /usr/local/cargo/git
+            target
+          key: ${{ runner.os }}-wasm-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-wasm-
+
+      - name: Install binaryen ${{ env.BINARYEN_VERSION }} (match local wasm-opt)
+        run: |
+          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar -xz
+          echo "$PWD/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Versions (should match local)
+        run: rustc --version && wasm-opt --version
+
+      - name: Build WASM (via Makefile — identical build to local)
+        # `make wasm` is the single source of truth for the cargo + wasm-opt flags.
+        # REMAP overrides the Makefile's default ($HOME) with the container's paths
+        # so nothing (registry, toolchain, workspace) leaks into the artifact.
+        run: |
+          make wasm REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
+          cp maquette/maquette.wasm docs/maquette.wasm
+          ls -la docs/maquette.wasm
+
+      - name: Verify no build paths leaked
+        run: |
+          if grep -aE '/(home|root|Users)/[A-Za-z0-9._-]' docs/maquette.wasm; then
+            echo "::error::build path leaked into maquette.wasm"; exit 1
+          fi
+          echo "no path leaks ✓"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest # deploy runs on the plain runner (needs OIDC token; no container)
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
