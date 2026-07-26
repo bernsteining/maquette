@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>maquette — 3D models in Typst</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #e7e8ec; --ink: #1a1c22; --ink-soft: #40434d;
+    --muted: #8a909c; --accent: #4f46e5; --accent-soft: #eef0fe;
+    --code-bg: #fbfbfd; --err: #dc2626; --shadow: 0 1px 2px rgba(20,22,30,.05), 0 8px 24px -12px rgba(20,22,30,.14);
+    --s-dir: #7c3aed; --s-str: #0e9f6e; --s-num: #d97706; --s-key: #2563eb; --s-kw: #db2777; --s-punct: #9aa0ac;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e0f13; --panel: #16181e; --line: #262932; --ink: #e8e9ec; --ink-soft: #b9bdc7;
+      --muted: #767c88; --accent: #818cf8; --accent-soft: #1c1e2e;
+      --code-bg: #121319; --err: #f87171; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.6);
+      --s-dir: #c792ea; --s-str: #9ece6a; --s-num: #ff9e64; --s-key: #7aa2f7; --s-kw: #f7768e; --s-punct: #565f7a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; -webkit-font-smoothing: antialiased;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 14.5px; font-weight: 700; margin: 0; letter-spacing: -.2px; }
+  header .badge { font-size: 9.5px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase;
+    color: var(--accent); background: var(--accent-soft); padding: 2px 6px; border-radius: 5px; }
+  header .tag { color: var(--muted); font-size: 12px; }
+  header .links { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+  header .links a { color: var(--muted); text-decoration: none; font-size: 12px; font-weight: 500; display: flex; align-items: center; transition: color .12s; }
+  header .links a:hover { color: var(--accent); }
+  header .links a.icon { color: var(--ink-soft); }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  @media (max-width: 840px) { main { flex-direction: column; } }
+
+  #panel {
+    width: 328px; flex: none; border-right: 1px solid var(--line);
+    overflow-y: auto; background: var(--panel); scrollbar-width: thin;
+  }
+  @media (max-width: 840px) { #panel { width: auto; border-right: none; border-bottom: 1px solid var(--line); max-height: 46vh; } }
+
+  .file-row {
+    display: flex; align-items: center; gap: 7px; padding: 10px 13px;
+    font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: var(--panel); z-index: 3;
+  }
+  .file-row b { color: var(--ink); font-weight: 600; }
+  .file-row button {
+    margin-left: auto; font: inherit; font-size: 11.5px; font-weight: 500;
+    border: 1px solid var(--line); background: transparent; color: var(--ink-soft);
+    padding: 3px 10px; border-radius: 7px; cursor: pointer; transition: .12s;
+  }
+  .file-row button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  /* sections */
+  details { border-bottom: 1px solid var(--line); }
+  details > summary {
+    cursor: pointer; list-style: none; padding: 8px 13px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--muted); font-weight: 700; user-select: none;
+    display: flex; align-items: center; gap: 7px; transition: .12s;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "›"; font-size: 13px; transition: transform .15s; display: inline-block; }
+  details[open] > summary::before { transform: rotate(90deg); }
+  details > summary:hover { color: var(--ink); background: color-mix(in srgb, var(--accent) 4%, transparent); }
+  .body { padding: 3px 13px 11px; }
+
+  /* controls */
+  .ctl { margin-bottom: 8px; }
+  .ctl > label {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11.5px; color: var(--muted); margin-bottom: 3px; gap: 8px;
+  }
+  .ctl > label .val { color: var(--ink); font-variant-numeric: tabular-nums; font-size: 11px;
+    background: var(--bg); padding: 0 5px; border-radius: 4px; }
+  select, input[type=text], input[type=number] {
+    width: 100%; font: inherit; font-size: 12px; padding: 5px 7px;
+    border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--ink); transition: .12s;
+  }
+  select:focus, input[type=text]:focus, input[type=number]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  input[type=range] { width: 100%; accent-color: var(--accent); height: 18px; }
+  input[type=color] { width: 100%; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: none; cursor: pointer; }
+  input[type=color]::-webkit-color-swatch { border: none; border-radius: 6px; }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
+  input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
+  .row { display: flex; gap: 6px; }
+  .row > * { flex: 1; min-width: 0; }
+  .chk { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink); cursor: pointer; }
+
+  .group { border: 1px solid var(--line); border-radius: 9px; padding: 8px 9px; margin-bottom: 9px; transition: .12s; }
+  .group:not(.off) { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 3%, transparent); }
+  .group > .head { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .group > .sub { margin-top: 8px; }
+  .group.off > .sub { display: none; }
+
+  .mini-btn { font: inherit; font-size: 11px; font-weight: 500; border: 1px dashed var(--line);
+    background: transparent; color: var(--accent); padding: 3px 9px; border-radius: 7px; cursor: pointer; transition: .12s; }
+  .mini-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .rm { color: var(--err); border: none; background: none; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; opacity: .7; }
+  .rm:hover { opacity: 1; }
+  .item { border: 1px solid var(--line); border-radius: 8px; padding: 7px; margin-bottom: 7px; background: var(--panel); }
+  textarea { width: 100%; font: 11.5px/1.5 ui-monospace, Menlo, monospace; padding: 7px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); color: var(--ink); resize: vertical; min-height: 54px; }
+
+  /* code editor card */
+  #code-sec { padding: 12px 13px 18px; }
+  .editor { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); background: var(--code-bg); }
+  .editor-bar { display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+    border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--code-bg) 60%, var(--panel)); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.r { background: #ff5f57; } .dot.y { background: #febc2e; } .dot.g { background: #28c840; }
+  .editor-title { font: 11px ui-monospace, Menlo, monospace; color: var(--muted); margin-left: 5px; }
+  #copy { margin-left: auto; font: inherit; font-size: 11px; font-weight: 500;
+    border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+    padding: 2px 9px; border-radius: 6px; cursor: pointer; transition: .12s; }
+  #copy:hover { color: var(--accent); border-color: var(--accent); }
+  .editor-body { padding: 9px 0; overflow-x: auto; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; scrollbar-width: thin; }
+  .cline { display: flex; }
+  .gutter { flex: 0 0 auto; width: 2.4em; text-align: right; padding: 0 11px 0 4px;
+    color: var(--muted); opacity: .5; user-select: none; position: sticky; left: 0; background: var(--code-bg); }
+  .src { white-space: pre; padding-right: 14px; }
+  .t-directive { color: var(--s-dir); font-weight: 600; }
+  .t-string { color: var(--s-str); }
+  .t-number { color: var(--s-num); }
+  .t-key { color: var(--s-key); }
+  .t-kw { color: var(--s-kw); }
+  .t-punct { color: var(--s-punct); }
+
+  .sec-title { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
+
+  /* render stage */
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 28px; min-height: 0; position: relative;
+    background:
+      radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 70%); }
+  #stage.drag::after {
+    content: "Drop model to load"; position: absolute; inset: 14px;
+    display: flex; align-items: center; justify-content: center;
+    border: 2px dashed var(--accent); border-radius: 14px; color: var(--accent);
+    font-size: 15px; font-weight: 500; background: color-mix(in srgb, var(--accent) 8%, transparent); backdrop-filter: blur(1px); }
+  #out { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: var(--shadow); }
+  #hint { position: absolute; bottom: 16px; color: var(--muted); font-size: 12px; }
+  #err { position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    color: var(--err); font-size: 12.5px; background: var(--panel);
+    border: 1px solid var(--err); border-radius: 9px; padding: 7px 13px; max-width: 82%; box-shadow: var(--shadow); display: none; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>maquette</h1>
+    <span class="badge">demo</span>
+    <nav class="links">
+      <a href="https://github.com/bernsteining/maquette/blob/master/examples/documentation.pdf" target="_blank" rel="noopener">Docs</a>
+      <a class="icon" href="https://github.com/bernsteining/maquette" target="_blank" rel="noopener" aria-label="maquette on GitHub" title="View on GitHub">
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.02-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+        </svg>
+      </a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="panel">
+      <div class="file-row">
+        model: <b id="fname">bunny.obj</b>
+        <button id="browse">Load file…</button>
+        <input id="file" type="file" accept=".obj,.stl,.ply" hidden>
+      </div>
+      <div id="form"><!-- generated from SCHEMA --></div>
+      <div id="code-sec">
+        <div class="sec-title">Typst code</div>
+        <div class="editor">
+          <div class="editor-bar">
+            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+            <span class="editor-title">preview.typ</span>
+            <button id="copy">Copy</button>
+          </div>
+          <div id="code" class="editor-body"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="stage">
+      <img id="out" alt="render">
+      <div id="err"></div>
+      <div id="hint">drop a .obj / .stl / .ply anywhere, or load a file</div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
