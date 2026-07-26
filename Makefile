@@ -2,14 +2,30 @@ WASM_TARGET = target/wasm32-unknown-unknown/release/maquette.wasm
 WASM_OUT = maquette/maquette.wasm
 WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette/0.1.0/maquette.wasm
 
-build:
-	cargo build --target wasm32-unknown-unknown --release
+# Path remaps so no build-machine paths (home, cargo registry, rustup toolchain)
+# leak into the wasm. Overridable — CI passes its container-specific prefixes.
+# Locally, cargo/rustup/project all live under $HOME, so one remap covers them.
+REMAP ?= --remap-path-prefix=$(HOME)=~
+
+# RUSTFLAGS overrides .cargo/config.toml, so re-declare the SIMD target-features
+# here (must match config), then append the path remaps.
+RUSTFLAGS_WASM = -Ctarget-feature=+simd128,+bulk-memory,+sign-ext,+nontrapping-fptoint,+mutable-globals,+multivalue $(REMAP)
+
+# Build + optimize the wasm into $(WASM_OUT). Single source of truth for the
+# build — used by local `build` and by CI (docs/ demo + Pages).
+wasm:
+	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release
 	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(WASM_TARGET) -o $(WASM_OUT)
-	cp $(WASM_OUT) $(WASM_PKG)
 	@ls -lh $(WASM_OUT)
+
+# Local: build + install into the typst local package dir.
+build: wasm
+	cp $(WASM_OUT) $(WASM_PKG)
 
 harness:
 	cargo build --release --manifest-path harness/Cargo.toml
 
 doc: build
 	typst compile examples/documentation.typ examples/documentation.pdf --root .
+
+.PHONY: wasm build harness doc
