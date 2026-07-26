@@ -43,7 +43,7 @@
   @media (max-width: 840px) { main { flex-direction: column; } }
 
   #panel {
-    width: 340px; flex: none; border-right: 1px solid var(--line);
+    width: clamp(400px, 34vw, 500px); flex: none; border-right: 1px solid var(--line);
     overflow-y: auto; background: var(--panel); scrollbar-width: thin;
   }
   @media (max-width: 840px) { #panel { width: auto; border-right: none; border-bottom: 1px solid var(--line); max-height: 46vh; } }
@@ -126,8 +126,6 @@
     border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); color: var(--ink); resize: vertical; min-height: 54px; }
 
   /* code editor card */
-  #code-sec { padding: 12px 13px 16px; border-bottom: 1px solid var(--line); }
-  .sec-title { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); font-weight: 700; margin-bottom: 8px; }
   .editor { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); background: var(--code-bg); }
   .editor-bar { display: flex; align-items: center; gap: 6px; padding: 7px 10px;
     border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--code-bg) 60%, var(--panel)); }
@@ -154,10 +152,15 @@
     border: 2px dashed var(--accent); border-radius: 14px; color: var(--accent);
     font-size: 15px; font-weight: 500; background: color-mix(in srgb, var(--accent) 8%, transparent); backdrop-filter: blur(1px); }
   #out { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: var(--shadow); user-select: none; -webkit-user-drag: none; }
-  #tools { position: absolute; top: 14px; right: 14px; display: flex; gap: 6px; }
+  #tools { position: absolute; top: 14px; right: 14px; display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
   #tools button { font: inherit; font-size: 11.5px; font-weight: 500; border: 1px solid var(--line);
     background: var(--panel); color: var(--ink-soft); padding: 4px 10px; border-radius: 7px; cursor: pointer; box-shadow: var(--shadow); transition: .12s; }
   #tools button:hover { color: var(--accent); border-color: var(--accent); }
+  #tools .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; box-shadow: var(--shadow); }
+  #tools .seg button { flex: 1; border: none; border-radius: 0; box-shadow: none; padding: 4px 11px; }
+  #tools .seg button + button { border-left: 1px solid var(--line); }
+  #tools .seg button.on { background: var(--accent); color: #fff; }
+  #tools .seg button.on:hover { color: #fff; border-color: transparent; }
   #rtime { position: absolute; bottom: 14px; right: 16px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
     background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; opacity: 0; transition: opacity .2s; }
   #rtime.show { opacity: 1; }
@@ -173,6 +176,12 @@
     <span class="badge">demo</span>
     <nav class="links">
       <a href="https://github.com/bernsteining/maquette/blob/master/examples/documentation.pdf" target="_blank" rel="noopener">Docs</a>
+      <a class="icon" href="https://typst.app/universe/package/maquette" target="_blank" rel="noopener" aria-label="maquette on Typst Universe" title="Typst Universe">
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+          <rect width="24" height="24" rx="6" fill="#239dad"></rect>
+          <text x="12" y="12.5" font-size="15" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-family="Georgia, 'Times New Roman', serif">t</text>
+        </svg>
+      </a>
       <a class="icon" href="https://github.com/bernsteining/maquette" target="_blank" rel="noopener" aria-label="maquette on GitHub" title="View on GitHub">
         <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true">
           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.02-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"></path>
@@ -191,23 +200,29 @@
         </div>
         <div class="search-row"><input id="search" type="search" placeholder="Search settings…" autocomplete="off"></div>
       </div>
-      <div id="code-sec">
-        <div class="sec-title">Typst code</div>
-        <div class="editor">
-          <div class="editor-bar">
-            <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-            <span class="editor-title">preview.typ</span>
-            <button id="copy">Copy</button>
+      <details id="code-sec" open>
+        <summary>Typst code</summary>
+        <div class="body">
+          <div class="editor">
+            <div class="editor-bar">
+              <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+              <span class="editor-title">preview.typ</span>
+              <button id="copy">Copy</button>
+            </div>
+            <div id="code" class="editor-body"></div>
           </div>
-          <div id="code" class="editor-body"></div>
         </div>
-      </div>
+      </details>
       <div id="form"><!-- generated from SCHEMA --></div>
       <div id="measure"></div>
     </section>
 
     <section id="stage">
       <div id="tools">
+        <div class="seg" id="fmt" title="Output format">
+          <button data-fmt="png" class="on">PNG</button>
+          <button data-fmt="svg">SVG</button>
+        </div>
         <button id="btn-reset" title="Reset all settings to defaults">Reset</button>
         <button id="btn-download" title="Download the current render">Download</button>
         <button id="btn-share" title="Copy a shareable link with this configuration">Share</button>
@@ -219,6 +234,6 @@
     </section>
   </main>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
