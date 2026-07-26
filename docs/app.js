@@ -32,7 +32,7 @@ const PROJ = ["perspective","orthographic","isometric","dimetric","trimetric","m
   "cabinet","cavalier","fisheye","stereographic","curvilinear","cylindrical","pannini","tiny-planet"];
 
 const SCHEMA = [
-  { s: "Camera & viewport", open: true, fields: [
+  { s: "Camera & viewport", fields: [
     // `init` = starting value (a good view of the default bunny); `def` = maquette's
     // real default, used as the export baseline so the snippet stays faithful.
     { k: "_cam", label: "Camera mode", t: "sel", def: "cartesian", init: "spherical", opts: [["cartesian","Cartesian (x,y,z)"],["spherical","Spherical"]] },
