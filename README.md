@@ -10,7 +10,7 @@ Maquette takes STL, OBJ, and PLY files and turns them into SVG or PNG images at 
 
 Everything runs as a single WASM plugin (~485 KB), with focus on speed.
 
-**[Try it live in your browser →](https://bernsteining.github.io/maquette/)** — drag to orbit, tweak every setting, and copy the generated Typst code. It runs the exact same WASM as the plugin, fully client-side.
+**[Try it live in your browser →](https://bernsteining.github.io/maquette/)** — drag to orbit, tweak every setting, and copy the generated Typst code. It runs the exact same WASM as the plugin, fully client-side. Because your browser JIT-compiles the WASM (Typst runs it in an interpreter), the demo is dramatically faster to iterate on — the quickest way to dial in a camera angle and lighting before pasting the code into your document, with no recompile between tweaks.
 
 Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.1/examples/documentation.pdf) to see examples of all the features.
 
@@ -24,7 +24,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 
 ```typst
 #import "@preview/maquette:0.1.1": render-obj
-#let bunny = read("examples/data/bunny.obj")
+#let bunny = read("examples/data/bunny.obj", encoding: none)
 
 #render-obj(bunny,
   up: (0, 1, 0),
@@ -46,6 +46,8 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 </td>
 </tr>
 </table>
+
+> **Read models with `encoding: none`.** This hands maquette the raw file bytes. Binary STL/PLY — and any file with non-UTF-8 bytes — otherwise fail Typst's default UTF-8 `read()` with a *"file is not valid UTF-8"* error. `encoding: none` avoids that and works for every format (OBJ included), so it's the pattern to use everywhere.
 
 ## Gallery
 

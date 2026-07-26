@@ -93,7 +93,7 @@
   #v(0.3em)
   #text(size: 14pt, fill: gray)[Render 3D models in Typst]
   #v(1.5em)
-  #text(size:12pt, blue)[#link("https://github.com/bernsteining/maquette")[github.com/bernsteining/maquette ] · #link("https://typst.app/universe/package/maquette")[typst.app/universe/package/maquette]]
+  #text(size:12pt, blue)[#link("https://github.com/bernsteining/maquette")[github.com/bernsteining/maquette ] · #link("https://typst.app/universe/package/maquette")[typst.app/universe/package/maquette] · #link("https://bernsteining.github.io/maquette")[bernsteining.github.io/maquette]]
   #render-obj(teapot, (
     camera: (0, 2, 5),
     up: (0, 1, 0),
@@ -138,12 +138,15 @@ Under the hood, Maquette is a small rasterizer with a real lighting pipeline: mu
 = Quickstart
 
 Import a render function, read a model file, and call it. That's it.
-```example
-#import "@preview/maquette:0.1.1": render-stl
 
-#let cube = read("data/cube.stl")
-#render-stl(cube)
-```
+#grid(columns: (1fr, 1fr), column-gutter: 1.5em,
+  [
+    #raw(block: true, lang: "typ", "#import \"@preview/maquette:0.1.1\": render-stl\n\n#let cube = read(\"data/cube.stl\", encoding: none)\n#render-stl(cube)")
+    #v(0.7em)
+    #text(size: 9pt)[*For STL & PLY: Always read with `encoding: none`.* Without it, Typst's `read()` defaults to UTF-8 text and _binary STL/PLY files_ — or any file containing non-UTF-8 bytes — fail with a _"file is not valid UTF-8"_ error before maquette even runs. For OBJ, it shouldn't be necessary.]
+  ],
+  align(horizon, render-stl(cube, width: 100%)),
+)
 
 The default output is PNG; pass `format: "svg"` for vector output:
 
@@ -290,7 +293,7 @@ The cube looks like a flat square from this angle — let's learn how to change 
 
 == #link("https://en.wikipedia.org/wiki/Cartesian_coordinate_system")[Cartesian coordinates]
 
-Change the camera position and where it points to using cartesian coordinates with `camera:(x,y,z)` and `center:(x,y,z)`. As you may have noticed with previous examples, Maquette finds the model's bounding box automatically by computing its center. So most of the time, no `center` needed.
+Change the camera position and where it points to using cartesian coordinates with `camera:(x,y,z)` and `center:(x,y,z)`. As you may have noticed with previous examples, Maquette finds the model's bounding box automatically and points the camera at its centre — that is `auto_center: true`, the default — so most of the time no `center` is needed. Set `auto_center: false` to aim at the explicit `center` you provide instead.
 
 ```example
 // hl: 2-3
@@ -307,15 +310,14 @@ The `up` parameter defines which direction points "up" in the scene. The default
 
 Instead of placing the camera with Cartesian `(x, y, z)` coordinates, you can use `azimuth` (horizontal angle) and `elevation` (vertical angle) in degrees. This makes it much easier to orbit around a model — just change the angles. When either is set, they override the `camera` field. The `distance` is auto-computed from the bounding box unless specified.
 
-```example
-// hl: 3-5
-#render-obj(teapot,
-  up: (0, 1, 0),
-  azimuth: 30,
-  elevation: -10,
-  distance: 10,
+#grid(columns: (1fr, 1fr), column-gutter: 1.5em,
+  [
+    #raw(block: true, lang: "typ", "#render-obj(teapot,\n  up: (0, 1, 0),\n  azimuth: 30,\n  elevation: -10,\n  distance: 10,\n)")
+    #v(0.7em)
+    #text(size: 9pt)[🎥 *Placing the camera, fast.* Hunting for the right angles by editing numbers and recompiling is slow. The #link("https://bernsteining.github.io/maquette/")[live browser demo (https://bernsteining.github.io/maquette/)] runs the identical WASM but your browser _JIT-compiles_ it to native code, so it iterates far faster: drag to orbit, scroll to zoom, then paste the generated snippet straight into your document!]
+  ],
+  align(horizon, render-obj(teapot, up: (0, 1, 0), azimuth: 30, elevation: -10, distance: 10, width: 100%)),
 )
-```
 
 #pagebreak(weak: true)
 
@@ -955,22 +957,16 @@ Maquette approximates subsurface scattering with a cheap, view-dependent hack ra
 
 === Subsurface Scattering (back-lit bunny)
 
-```example
-// hl: 11
-// cols: 1 1.4
-#render-obj(bunny,
-  up: (0, 1, 0),
-  azimuth: 180,
-  distance: 0.25,
-  lights: (
-    (type: "positional", 
-     vector: (-0.1, 0.14, -0.04), 
-     color: "#ff0000", 
-     intensity: 3.0),
-  ),
-  sss: (intensity: 4, power: 3.5, distortion: 0.2),
+#grid(columns: (1fr, 1.4fr), column-gutter: 1.5em,
+  [
+    #raw(block: true, lang: "typ", "#render-obj(bunny,\n  up: (0, 1, 0),\n  azimuth: 180,\n  distance: 0.25,\n  lights: (\n    (type: \"positional\",\n     vector: (-0.1, 0.14, -0.04),\n     color: \"#ff0000\",\n     intensity: 3.0),\n  ),\n  sss: (intensity: 4,\n    power: 3.5,\n    distortion: 0.2),\n)")
+    #v(0.7em)
+    #text(size: 9pt)[The `sss` dictionary has three knobs: *`intensity`* scales the overall glow; *`power`* sharpens its falloff — higher values let light show through only the thinnest parts (the ears here); and *`distortion`* wraps the transmitted light around the surface normal for a softer, broader spread.]
+  ],
+  align(horizon, render-obj(bunny, up: (0, 1, 0), azimuth: 180, distance: 0.25,
+    lights: ((type: "positional", vector: (-0.1, 0.14, -0.04), color: "#ff0000", intensity: 3.0),),
+    sss: (intensity: 4, power: 3.5, distortion: 0.2), width: 100%)),
 )
-```
 
 #pagebreak(weak: true)
 
@@ -1132,7 +1128,7 @@ Maquette handles PLY files in ASCII and binary (little/big-endian) formats — a
 PLY files can also contain clouds of points. 3D scanning apps usually allow to export in such a format.  Enjoy my Rubik's cube scanned with the help of my iPad's LiDAR! Point clouds rendering are configurable with `point_size`, which will define the distance for points to be considered as neighbors for our #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN] to reconstruct the model. Auto-computed if zero.
 
 ```example
-// hl: 1
+// hl: 8
 #let rubi_scan = read("data/rubi_scan.ply", encoding: none)
 
 #render-ply(rubi_scan,
@@ -1140,6 +1136,7 @@ PLY files can also contain clouds of points. 3D scanning apps usually allow to e
   elevation: 25,
   distance: 0.75,
   auto_fit: false,
+  point_size: 0.03,
   width: 65%,
 )
 ```
@@ -1768,7 +1765,7 @@ Automatically generates a grid of views evenly spaced around the model at a fixe
 
 = Debug
 
-`debug: true` overlays model metadata (triangle count, bounding box, camera position) directly on its canvas.
+`debug: true` overlays model metadata (triangle count, bounding box, camera position) directly on its canvas. The overlay text is drawn in `debug_color` (default `#cc2222`) — set it to keep the labels legible against your model or background.
 
 It also renders lights as octahedrons of the color they emit, to allow placing lights seamlessly around your model. Area lights (those with a `size`) are drawn instead as a disk of that radius, facing the model, so you can gauge their extent.
 
