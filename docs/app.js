@@ -632,6 +632,7 @@ function onChange() {
 }
 
 let lastUrl = null;
+let renderToken = 0;   // invalidates a pending async overlay draw when a newer render starts
 let outputFormat = "png";   // "png" | "svg" — chosen via the stage toolbar toggle
 const RFN_PNG = { obj: "render_obj_png", stl: "render_stl_png", ply: "render_ply_png" };
 const RFN_SVG = { obj: "render_obj", stl: "render_stl", ply: "render_ply" };
@@ -640,20 +641,32 @@ function render() {
   const fn = (outputFormat === "svg" ? RFN_SVG : RFN_PNG)[ext(model.name)];
   if (!fn) return showErr(`unsupported file type: .${ext(model.name)}`);
   try {
+    const token = ++renderToken;
     const t0 = performance.now();
     const out = callPlugin(fn, model.bytes, ENC.encode(JSON.stringify(buildConfig())));
     const ms = performance.now() - t0;
-    // The raster path returns a raw RGBA blob ([0x00][w u32 LE][h u32 LE][rgba8…]);
-    // grid / turntable / debug / annotations (and vector mode) return SVG (0x3C).
-    if (out[0] === 0x00) {
-      // Blit straight to a canvas — no PNG encode (plugin) or decode (browser).
+    // Raster output is raw RGBA ([0x00][w][h][rgba8…]); grid / turntable / debug /
+    // annotations add a transparent vector overlay ([0x02][w][h][rgba8 w*h*4][svg…]).
+    // Vector mode returns SVG (0x3C).
+    if (out[0] === 0x00 || out[0] === 0x02) {
+      // Blit the pixels straight to the canvas — no PNG encode (plugin) or decode.
       const w = out[1] | out[2] << 8 | out[3] << 16 | out[4] << 24;
       const h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
-      const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, w * h * 4);
+      const n = w * h * 4;
+      const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, n);
       elOutc.width = w; elOutc.height = h;
-      elOutc.getContext("2d").putImageData(new ImageData(px, w, h), 0, 0);
+      const ctx = elOutc.getContext("2d");
+      ctx.putImageData(new ImageData(px, w, h), 0, 0);
       elOutc.style.display = ""; elOut.style.display = "none";
       lastRender = { kind: "raw" };
+      if (out[0] === 0x02) {
+        // Layer the transparent SVG overlay onto the same canvas (labels, grid
+        // lines, annotations, debug text). Async; guarded against a newer render.
+        const url = URL.createObjectURL(new Blob([out.subarray(9 + n)], { type: "image/svg+xml" }));
+        const svgImg = new Image();
+        svgImg.onload = () => { if (token === renderToken) ctx.drawImage(svgImg, 0, 0, w, h); URL.revokeObjectURL(url); };
+        svgImg.src = url;
+      }
     } else {
       const url = URL.createObjectURL(new Blob([out], { type: "image/svg+xml" }));
       elOut.src = url; elOut.style.display = ""; elOutc.style.display = "none";
