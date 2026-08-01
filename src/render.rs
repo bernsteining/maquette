@@ -2178,7 +2178,53 @@ fn render_grid_svg(
 // PNG rendering
 // ---------------------------------------------------------------------------
 
-pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>) -> Result<Vec<u8>, String> {
+/// Raw raster blob: `[0x00][width u32 LE][height u32 LE][rgba8…]`. The leading
+/// 0x00 distinguishes it from SVG output (which starts with '<' = 0x3C); the
+/// Typst entrypoint slices off the 9-byte header and embeds the pixels via
+/// `image(px, format: (encoding: "rgba8", width, height))`.
+fn raw_blob(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(9 + rgba.len());
+    out.push(0x00);
+    out.extend_from_slice(&w.to_le_bytes());
+    out.extend_from_slice(&h.to_le_bytes());
+    out.extend_from_slice(rgba);
+    out
+}
+
+/// Encode a finished PixelBuffer to PNG (opaque RGB, or transparent RGBA using
+/// z-buffer coverage). Used by the SVG-wrapping paths (annotations, debug,
+/// labelled grids), which must embed a real image format.
+fn encode_raster_png(buf: &PixelBuffer, aa: usize, transparent: bool) -> Result<Vec<u8>, String> {
+    if transparent {
+        buf.encode_png_transparent(aa)
+    } else if aa > 1 {
+        buf.downsample(aa).encode_png()
+    } else {
+        buf.encode_png()
+    }
+}
+
+/// Terminal for a plain (non-wrapped) raster: raw RGBA when `raw`, else PNG.
+/// The pixel content is identical either way — only the container differs.
+fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool, raw: bool) -> Result<Vec<u8>, String> {
+    if !raw {
+        return encode_raster_png(buf, aa, transparent);
+    }
+    let (w, h, rgba) = if transparent {
+        buf.to_rgba8_transparent(aa)
+    } else if aa > 1 {
+        buf.downsample(aa).to_rgba8()
+    } else {
+        buf.to_rgba8()
+    };
+    Ok(raw_blob(w, h, &rgba))
+}
+
+/// Rasterize to a bitmap. With `raw`, plain images are returned as a raw RGBA
+/// blob (see [`raw_blob`]); with `raw == false` they are PNG-encoded. Either
+/// way, the annotation/debug/labelled-grid variants are wrapped in SVG with an
+/// embedded PNG (they need a real image format).
+pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>, raw: bool) -> Result<Vec<u8>, String> {
     let aa = config.antialias.max(1).next_power_of_two();
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
@@ -2197,7 +2243,7 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
 
     if triangles.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return if transparent { buf.encode_png_transparent(1) } else { buf.encode_png() };
+        return finish_raster(&buf, 1, transparent, raw);
     }
 
     // Preprocessing pipeline (cached when the mesh geometry/colors are unchanged)
@@ -2205,7 +2251,7 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
     let (tris, bmin, bmax) = cached_preprocess(triangles, config, prep_key, &mut prep_owned);
     if tris.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return if transparent { buf.encode_png_transparent(1) } else { buf.encode_png() };
+        return finish_raster(&buf, 1, transparent, raw);
     }
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
@@ -2219,12 +2265,11 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
             views.push((turntable_view(bc, br, azimuth, config.turntable.elevation), labels[i].clone()));
         }
         let buf = render_grid_png_buf(&tris, config, &views, br, bmin.z, w, h, bg, group_styles);
-        let png = if transparent { buf.encode_png_transparent(aa)? }
-                  else if aa > 1 { buf.downsample(aa).encode_png()? } else { buf.encode_png()? };
         return if config.grid_labels {
+            let png = encode_raster_png(&buf, aa, transparent)?;
             Ok(wrap_png_with_grid_labels(&png, config.width, config.height, &views))
         } else {
-            Ok(png)
+            finish_raster(&buf, aa, transparent, raw)
         };
     }
 
@@ -2233,12 +2278,11 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
         if !views.is_empty() {
             let resolved: Vec<_> = views.iter().map(|n| (named_view(n, bc, br), capitalize(n))).collect();
             let buf = render_grid_png_buf(&tris, config, &resolved, br, bmin.z, w, h, bg, group_styles);
-            let png = if transparent { buf.encode_png_transparent(aa)? }
-                      else if aa > 1 { buf.downsample(aa).encode_png()? } else { buf.encode_png()? };
             return if config.grid_labels {
+                let png = encode_raster_png(&buf, aa, transparent)?;
                 Ok(wrap_png_with_grid_labels(&png, config.width, config.height, &resolved))
             } else {
-                Ok(png)
+                finish_raster(&buf, aa, transparent, raw)
             };
         }
     }
@@ -2452,14 +2496,8 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
         crate::fxaa::apply_fxaa(&mut buf.pixels, buf.width, buf.height);
     }
 
-    let png_bytes = if transparent {
-        buf.encode_png_transparent(aa)?
-    } else {
-        let final_buf = if aa > 1 { buf.downsample(aa) } else { buf };
-        final_buf.encode_png()?
-    };
-
     if let Some(ref ann_cfg) = config.annotations {
+        let png_bytes = encode_raster_png(&buf, aa, transparent)?;
         // Scale centroids from supersampled space to output space
         let scale = 1.0 / aa as f64;
         let centroids: FxHashMap<u32, (f64, f64)> = compute_group_centroids(&projected)
@@ -2470,6 +2508,7 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
             &png_bytes, config.width, config.height, &centroids, group_styles, ann_cfg,
         ))
     } else if config.debug {
+        let png_bytes = encode_raster_png(&buf, aa, transparent)?;
         Ok(wrap_png_with_debug(
             &png_bytes,
             config.width,
@@ -2481,7 +2520,7 @@ pub fn render_png(triangles: &[Triangle], config: &RenderConfig, group_styles: &
             config,
         ))
     } else {
-        Ok(png_bytes)
+        finish_raster(&buf, aa, transparent, raw)
     }
 }
 

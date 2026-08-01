@@ -2,11 +2,6 @@
 
 #let maquette-plugin = plugin("maquette.wasm")
 
-// Auto-detect output format: PNG starts with 0x89, SVG starts with '<' (0x3C).
-#let _detect-format(data) = {
-  if data.at(0) == 0x3C { "svg" } else { "png" }
-}
-
 #let _parse-args(args) = {
   // Extract display args (not part of render config)
   let named = args.named()
@@ -39,7 +34,22 @@
   let a = _parse-args(args)
   if a.format == "png" {
     let result = png-fn(data, a.cfg)
-    image(result, format: _detect-format(result), width: a.width, height: a.height)
+    if result.at(0) == 0x3C {
+      // SVG-wrapped raster (annotations, debug overlay, or a labelled grid).
+      image(result, format: "svg", width: a.width, height: a.height)
+    } else {
+      // Raw RGBA blob: [0x00][width u32 LE][height u32 LE][rgba8…]. Embedding
+      // the pixels directly skips PNG encode (in the plugin) and decode (in
+      // Typst) — and avoids re-compressing for the PDF.
+      let w = result.at(1) + result.at(2) * 256 + result.at(3) * 65536 + result.at(4) * 16777216
+      let h = result.at(5) + result.at(6) * 256 + result.at(7) * 65536 + result.at(8) * 16777216
+      image(
+        result.slice(9),
+        format: (encoding: "rgba8", width: w, height: h),
+        width: a.width,
+        height: a.height,
+      )
+    }
   } else {
     image(svg-fn(data, a.cfg), format: "svg", width: a.width, height: a.height)
   }

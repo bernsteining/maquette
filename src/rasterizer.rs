@@ -1744,13 +1744,27 @@ impl PixelBuffer {
         ))
     }
 
-    /// Encode as a transparent RGBA PNG, using the z-buffer as model coverage.
-    /// Background pixels (depth still −∞, never rasterized) become fully
-    /// transparent; covered pixels are opaque. With supersampling (`factor` > 1)
-    /// alpha is the covered fraction of the block and colour is averaged over the
-    /// covered subpixels only — so anti-aliased edges fade out with no
-    /// background-colour fringe (straight, non-premultiplied alpha).
-    pub fn encode_png_transparent(&self, factor: usize) -> Result<Vec<u8>, String> {
+    /// Expand the opaque RGB buffer to straight RGBA8 (alpha = 255).
+    /// Returns `(width, height, rgba)`. Backs the raw output path.
+    pub fn to_rgba8(&self) -> (u32, u32, Vec<u8>) {
+        let n = self.width * self.height;
+        let mut rgba = vec![0u8; n * 4];
+        for i in 0..n {
+            rgba[i * 4] = self.pixels[i * 3];
+            rgba[i * 4 + 1] = self.pixels[i * 3 + 1];
+            rgba[i * 4 + 2] = self.pixels[i * 3 + 2];
+            rgba[i * 4 + 3] = 255;
+        }
+        (self.width as u32, self.height as u32, rgba)
+    }
+
+    /// Downsample + composite into straight (non-premultiplied) RGBA8 using the
+    /// z-buffer as model coverage. Background pixels (depth still −∞, never
+    /// rasterized) become fully transparent; covered pixels are opaque. With
+    /// supersampling (`factor` > 1) alpha is the covered fraction of the block and
+    /// colour is averaged over the covered subpixels only — so anti-aliased edges
+    /// fade out with no background-colour fringe. Returns `(width, height, rgba)`.
+    pub fn to_rgba8_transparent(&self, factor: usize) -> (u32, u32, Vec<u8>) {
         let f = factor.max(1);
         let nw = self.width / f;
         let nh = self.height / f;
@@ -1782,7 +1796,13 @@ impl PixelBuffer {
                 // else leaves (0,0,0,0) — fully transparent
             }
         }
-        Ok(crate::png_encoder::encode_png_rgba8(nw as u32, nh as u32, &rgba))
+        (nw as u32, nh as u32, rgba)
+    }
+
+    /// Encode as a transparent RGBA PNG (see [`Self::to_rgba8_transparent`]).
+    pub fn encode_png_transparent(&self, factor: usize) -> Result<Vec<u8>, String> {
+        let (w, h, rgba) = self.to_rgba8_transparent(factor);
+        Ok(crate::png_encoder::encode_png_rgba8(w, h, &rgba))
     }
 }
 
