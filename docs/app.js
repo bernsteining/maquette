@@ -266,7 +266,7 @@ const HELP = {
 const controlRefs = {};
 const searchItems = [];   // {node, section, text}
 const searchSections = []; // {el, open}
-let lastRender = null;    // {bytes, type, ext} of the most recent render
+let lastRender = null;    // {kind:"raw"} or {kind:"svg", bytes} of the most recent render
 let rafPending = false;
 
 // ──────────────────────────── state (nested) ──────────────────────────────
@@ -413,7 +413,7 @@ const conds = []; // {node, when, local} for visibility refresh
 
 // Reused singletons + cached hot DOM nodes (avoid per-call allocation / lookup).
 const ENC = new TextEncoder(), DEC = new TextDecoder();
-const elCode = $("code"), elErr = $("err"), elOut = $("out"), elRtime = $("rtime"), elMeasure = $("measure");
+const elCode = $("code"), elErr = $("err"), elOut = $("out"), elOutc = $("outc"), elRtime = $("rtime"), elMeasure = $("measure");
 
 // The two polymorphic config values, shared by buildConfig and buildTypst.
 const ambientCfg = () => state._hemi.__on
@@ -643,13 +643,23 @@ function render() {
     const t0 = performance.now();
     const out = callPlugin(fn, model.bytes, ENC.encode(JSON.stringify(buildConfig())));
     const ms = performance.now() - t0;
-    // grid / turntable / debug / annotations wrap the render as SVG (text overlays);
-    // everything else is a PNG. Sniff the magic and set the blob type accordingly.
-    const isPng = out[0] === 0x89 && out[1] === 0x50;
-    lastRender = { bytes: out, type: isPng ? "image/png" : "image/svg+xml", ext: isPng ? "png" : "svg" };
-    const url = URL.createObjectURL(new Blob([out], { type: lastRender.type }));
-    elOut.src = url; elOut.style.display = "";
-    if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = url;
+    // The raster path returns a raw RGBA blob ([0x00][w u32 LE][h u32 LE][rgba8…]);
+    // grid / turntable / debug / annotations (and vector mode) return SVG (0x3C).
+    if (out[0] === 0x00) {
+      // Blit straight to a canvas — no PNG encode (plugin) or decode (browser).
+      const w = out[1] | out[2] << 8 | out[3] << 16 | out[4] << 24;
+      const h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
+      const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, w * h * 4);
+      elOutc.width = w; elOutc.height = h;
+      elOutc.getContext("2d").putImageData(new ImageData(px, w, h), 0, 0);
+      elOutc.style.display = ""; elOut.style.display = "none";
+      lastRender = { kind: "raw" };
+    } else {
+      const url = URL.createObjectURL(new Blob([out], { type: "image/svg+xml" }));
+      elOut.src = url; elOut.style.display = ""; elOutc.style.display = "none";
+      if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = url;
+      lastRender = { kind: "svg", bytes: out };
+    }
     elRtime.textContent = `rendered in ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`; elRtime.classList.add("show");
     showErr(null);
   } catch (e) { showErr(e.message); }
@@ -741,10 +751,20 @@ function ensureSpherical() {
 // ── download / share / reset ───────────────────────────────────────────────
 $("btn-download").onclick = () => {
   if (!lastRender) return;
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([lastRender.bytes], { type: lastRender.type }));
-  a.download = model.name.replace(/\.[^.]+$/, "") + "." + lastRender.ext;
-  a.click(); URL.revokeObjectURL(a.href);
+  const base = model.name.replace(/\.[^.]+$/, "");
+  const save = (blob, ext) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = base + "." + ext;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  if (lastRender.kind === "raw") {
+    // The plugin no longer emits PNG; encode it here (browser-native) on demand.
+    elOutc.toBlob((blob) => save(blob, "png"), "image/png");
+  } else {
+    save(new Blob([lastRender.bytes], { type: "image/svg+xml" }), "svg");
+  }
 };
 
 // Encode the config (diff vs defaults) into the URL hash — shareable & compact.
