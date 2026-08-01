@@ -1943,19 +1943,7 @@ fn render_debug_overlay(
     emit_row(svg, "size", &buf);
 }
 
-/// Build SVG opening + image element for PNG-in-SVG wrappers.
-fn svg_xlink_image_open(w: f64, h: f64, b64: &str) -> String {
-    let mut svg = String::with_capacity(b64.len() + 256);
-    svg.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" viewBox=\"0 0 ");
-    push_f2(&mut svg, w); svg.push(' '); push_f2(&mut svg, h);
-    svg.push_str("\"><image width=\""); push_f2(&mut svg, w);
-    svg.push_str("\" height=\""); push_f2(&mut svg, h);
-    svg.push_str("\" href=\"data:image/png;base64,"); svg.push_str(b64);
-    svg.push_str("\"/>");
-    svg
-}
-
-/// Write grid lines (shared by SVG grid and PNG grid label wrapper).
+/// Write grid lines (shared by SVG grid and grid-label overlay).
 fn write_grid_lines(svg: &mut String, cols: usize, rows: usize, cell_w: f64, cell_h: f64, w: f64, h: f64) {
     for c in 1..cols {
         let x = c as f64 * cell_w;
@@ -1973,52 +1961,25 @@ fn write_grid_lines(svg: &mut String, cols: usize, rows: usize, cell_w: f64, cel
     }
 }
 
-fn base64_encode(data: &[u8]) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
-        out.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 {
-            out.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
-        } else {
-            out.push('=');
-        }
-        if chunk.len() > 2 {
-            out.push(CHARS[(triple & 0x3F) as usize] as char);
-        } else {
-            out.push('=');
-        }
-    }
-    out
-}
-
-/// Wrap PNG bytes in an SVG with annotation overlays.
-fn wrap_png_with_annotations(
-    png_bytes: &[u8],
+/// Transparent SVG overlay with annotation leaders + labels.
+fn overlay_annotations(
     w: f64,
     h: f64,
     centroids: &FxHashMap<u32, (f64, f64)>,
     group_styles: &HashMap<u32, GroupAppearance>,
     ann_cfg: &crate::config::AnnotationConfig,
-) -> Vec<u8> {
-    let b64 = base64_encode(png_bytes);
-    let mut svg = svg_xlink_image_open(w, h, &b64);
+) -> String {
+    let mut svg = svg_overlay_open(w, h);
     let anns = annotations::compute_annotations(
         centroids, group_styles, ann_cfg, (w / 2.0, h / 2.0), w, h,
     );
     annotations::write_annotations_svg(&mut svg, &anns, ann_cfg);
     svg.push_str("</svg>");
-    svg.into_bytes()
+    svg
 }
 
-/// Wrap PNG bytes in an SVG with a debug text overlay.
-fn wrap_png_with_debug(
-    png_bytes: &[u8],
+/// Transparent SVG overlay with the debug light lines + text.
+fn overlay_debug(
     w: f64,
     h: f64,
     triangles: &[Triangle],
@@ -2026,24 +1987,21 @@ fn wrap_png_with_debug(
     bmax: Vec3,
     view: &ViewParams,
     config: &RenderConfig,
-) -> Vec<u8> {
-    let b64 = base64_encode(png_bytes);
-    let mut svg = svg_xlink_image_open(w, h, &b64);
+) -> String {
+    let mut svg = svg_overlay_open(w, h);
     render_debug_light_lines(&mut svg, config, view, bmin, bmax, w, h);
     render_debug_overlay(&mut svg, w, h, triangles, bmin, bmax, view, config, "PNG");
     svg.push_str("</svg>");
-    svg.into_bytes()
+    svg
 }
 
-/// Wrap a grid PNG in SVG with text labels and grid lines (same technique as debug overlay).
-fn wrap_png_with_grid_labels(
-    png_bytes: &[u8],
+/// Transparent SVG overlay with the grid's view labels + grid lines.
+fn overlay_grid_labels(
     w: f64,
     h: f64,
     views: &[(ViewParams, String)],
-) -> Vec<u8> {
-    let b64 = base64_encode(png_bytes);
-    let mut svg = svg_xlink_image_open(w, h, &b64);
+) -> String {
+    let mut svg = svg_overlay_open(w, h);
 
     let (cols, rows) = grid_layout(views.len());
     let cell_w = w / cols as f64;
@@ -2068,7 +2026,7 @@ fn wrap_png_with_grid_labels(
     }
 
     svg.push_str("</svg>");
-    svg.into_bytes()
+    svg
 }
 
 fn build_empty_svg(config: &RenderConfig) -> String {
@@ -2178,53 +2136,71 @@ fn render_grid_svg(
 // PNG rendering
 // ---------------------------------------------------------------------------
 
-/// Raw raster blob: `[0x00][width u32 LE][height u32 LE][rgba8…]`. The leading
-/// 0x00 distinguishes it from SVG output (which starts with '<' = 0x3C); the
-/// Typst entrypoint slices off the 9-byte header and embeds the pixels via
-/// `image(px, format: (encoding: "rgba8", width, height))`.
-fn raw_blob(w: u32, h: u32, rgba: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(9 + rgba.len());
-    out.push(0x00);
-    out.extend_from_slice(&w.to_le_bytes());
-    out.extend_from_slice(&h.to_le_bytes());
-    out.extend_from_slice(rgba);
-    out
-}
-
-/// Encode a finished PixelBuffer to PNG (opaque RGB, or transparent RGBA using
-/// z-buffer coverage). Used by the SVG-wrapping paths (annotations, debug,
-/// labelled grids), which must embed a real image format.
-fn encode_raster_png(buf: &PixelBuffer, aa: usize, transparent: bool) -> Result<Vec<u8>, String> {
+/// The raw RGBA producer shared by both plain and overlay outputs: downsamples
+/// (opaque SSAA) or composites z-buffer coverage (transparent) into straight
+/// RGBA8 at output resolution. Returns `(width, height, rgba)`.
+fn raster_rgba(buf: &PixelBuffer, aa: usize, transparent: bool) -> (u32, u32, Vec<u8>) {
     if transparent {
-        buf.encode_png_transparent(aa)
-    } else if aa > 1 {
-        buf.downsample(aa).encode_png()
-    } else {
-        buf.encode_png()
-    }
-}
-
-/// Terminal for a plain (non-wrapped) raster: raw RGBA when `raw`, else PNG.
-/// The pixel content is identical either way — only the container differs.
-fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool, raw: bool) -> Result<Vec<u8>, String> {
-    if !raw {
-        return encode_raster_png(buf, aa, transparent);
-    }
-    let (w, h, rgba) = if transparent {
         buf.to_rgba8_transparent(aa)
     } else if aa > 1 {
         buf.downsample(aa).to_rgba8()
     } else {
         buf.to_rgba8()
-    };
-    Ok(raw_blob(w, h, &rgba))
+    }
 }
 
-/// Rasterize to a bitmap. With `raw`, plain images are returned as a raw RGBA
-/// blob (see [`raw_blob`]); with `raw == false` they are PNG-encoded. Either
-/// way, the annotation/debug/labelled-grid variants are wrapped in SVG with an
-/// embedded PNG (they need a real image format).
-pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>, raw: bool) -> Result<Vec<u8>, String> {
+/// Plain raster blob: `[0x00][width u32 LE][height u32 LE][rgba8…]`. The leading
+/// 0x00 distinguishes it from SVG output ('<' = 0x3C) and a raster+overlay blob
+/// (0x02); the host slices the 9-byte header and embeds the pixels via
+/// `image(px, format: (encoding: "rgba8", width, height))`.
+fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool) -> Result<Vec<u8>, String> {
+    let (w, h, rgba) = raster_rgba(buf, aa, transparent);
+    let mut out = Vec::with_capacity(9 + rgba.len());
+    out.push(0x00);
+    out.extend_from_slice(&w.to_le_bytes());
+    out.extend_from_slice(&h.to_le_bytes());
+    out.extend_from_slice(&rgba);
+    Ok(out)
+}
+
+/// Raster + vector overlay blob: `[0x02][w u32 LE][h u32 LE][rgba8 w*h*4][svg…]`.
+/// The raster is drawn as raw pixels and the transparent SVG (labels, grid
+/// lines, annotations, debug text) is layered on top by the host — no image
+/// encoding, so the plugin needs no PNG. The overlay's coordinates share the
+/// raster's pixel space (`viewBox = 0 0 w h`).
+fn pack_raster_overlay(buf: &PixelBuffer, aa: usize, transparent: bool, overlay: &str) -> Vec<u8> {
+    let (w, h, rgba) = raster_rgba(buf, aa, transparent);
+    let mut out = Vec::with_capacity(9 + rgba.len() + overlay.len());
+    out.push(0x02);
+    out.extend_from_slice(&w.to_le_bytes());
+    out.extend_from_slice(&h.to_le_bytes());
+    out.extend_from_slice(&rgba);
+    out.extend_from_slice(overlay.as_bytes());
+    out
+}
+
+/// Open a transparent overlay SVG sized to the raster's pixel space. Emits
+/// explicit `width`/`height` (not just `viewBox`) so browsers give it an
+/// intrinsic size — canvas `drawImage()` needs that to rasterize the SVG.
+fn svg_overlay_open(w: f64, h: f64) -> String {
+    let mut svg = String::with_capacity(256);
+    svg.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"");
+    push_f2(&mut svg, w);
+    svg.push_str("\" height=\"");
+    push_f2(&mut svg, h);
+    svg.push_str("\" viewBox=\"0 0 ");
+    push_f2(&mut svg, w);
+    svg.push(' ');
+    push_f2(&mut svg, h);
+    svg.push_str("\">");
+    svg
+}
+
+/// Rasterize to a bitmap. Plain images are a raw RGBA blob (see
+/// [`finish_raster`]); the annotation/debug/labelled-grid variants return a
+/// raster+overlay blob (see [`pack_raster_overlay`]) so the host layers vector
+/// text over raw pixels — the plugin never encodes an image format.
+pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>) -> Result<Vec<u8>, String> {
     let aa = config.antialias.max(1).next_power_of_two();
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
@@ -2243,7 +2219,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     if triangles.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return finish_raster(&buf, 1, transparent, raw);
+        return finish_raster(&buf, 1, transparent);
     }
 
     // Preprocessing pipeline (cached when the mesh geometry/colors are unchanged)
@@ -2251,7 +2227,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     let (tris, bmin, bmax) = cached_preprocess(triangles, config, prep_key, &mut prep_owned);
     if tris.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return finish_raster(&buf, 1, transparent, raw);
+        return finish_raster(&buf, 1, transparent);
     }
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
@@ -2266,10 +2242,10 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
         let buf = render_grid_png_buf(&tris, config, &views, br, bmin.z, w, h, bg, group_styles);
         return if config.grid_labels {
-            let png = encode_raster_png(&buf, aa, transparent)?;
-            Ok(wrap_png_with_grid_labels(&png, config.width, config.height, &views))
+            let overlay = overlay_grid_labels(config.width, config.height, &views);
+            Ok(pack_raster_overlay(&buf, aa, transparent, &overlay))
         } else {
-            finish_raster(&buf, aa, transparent, raw)
+            finish_raster(&buf, aa, transparent)
         };
     }
 
@@ -2279,10 +2255,10 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
             let resolved: Vec<_> = views.iter().map(|n| (named_view(n, bc, br), capitalize(n))).collect();
             let buf = render_grid_png_buf(&tris, config, &resolved, br, bmin.z, w, h, bg, group_styles);
             return if config.grid_labels {
-                let png = encode_raster_png(&buf, aa, transparent)?;
-                Ok(wrap_png_with_grid_labels(&png, config.width, config.height, &resolved))
+                let overlay = overlay_grid_labels(config.width, config.height, &resolved);
+                Ok(pack_raster_overlay(&buf, aa, transparent, &overlay))
             } else {
-                finish_raster(&buf, aa, transparent, raw)
+                finish_raster(&buf, aa, transparent)
             };
         }
     }
@@ -2497,30 +2473,19 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     }
 
     if let Some(ref ann_cfg) = config.annotations {
-        let png_bytes = encode_raster_png(&buf, aa, transparent)?;
         // Scale centroids from supersampled space to output space
         let scale = 1.0 / aa as f64;
         let centroids: FxHashMap<u32, (f64, f64)> = compute_group_centroids(&projected)
             .into_iter()
             .map(|(gid, (x, y))| (gid, (x * scale, y * scale)))
             .collect();
-        Ok(wrap_png_with_annotations(
-            &png_bytes, config.width, config.height, &centroids, group_styles, ann_cfg,
-        ))
+        let overlay = overlay_annotations(config.width, config.height, &centroids, group_styles, ann_cfg);
+        Ok(pack_raster_overlay(&buf, aa, transparent, &overlay))
     } else if config.debug {
-        let png_bytes = encode_raster_png(&buf, aa, transparent)?;
-        Ok(wrap_png_with_debug(
-            &png_bytes,
-            config.width,
-            config.height,
-            &tris,
-            bmin,
-            bmax,
-            &view,
-            config,
-        ))
+        let overlay = overlay_debug(config.width, config.height, &tris, bmin, bmax, &view, config);
+        Ok(pack_raster_overlay(&buf, aa, transparent, &overlay))
     } else {
-        finish_raster(&buf, aa, transparent, raw)
+        finish_raster(&buf, aa, transparent)
     }
 }
 

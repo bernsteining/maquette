@@ -1736,14 +1736,6 @@ impl PixelBuffer {
     }
 
     /// Encode the pixel buffer as PNG.
-    pub fn encode_png(&self) -> Result<Vec<u8>, String> {
-        Ok(crate::png_encoder::encode_png_rgb8(
-            self.width as u32,
-            self.height as u32,
-            &self.pixels,
-        ))
-    }
-
     /// Expand the opaque RGB buffer to straight RGBA8 (alpha = 255).
     /// Returns `(width, height, rgba)`. Backs the raw output path.
     pub fn to_rgba8(&self) -> (u32, u32, Vec<u8>) {
@@ -1797,12 +1789,6 @@ impl PixelBuffer {
             }
         }
         (nw as u32, nh as u32, rgba)
-    }
-
-    /// Encode as a transparent RGBA PNG (see [`Self::to_rgba8_transparent`]).
-    pub fn encode_png_transparent(&self, factor: usize) -> Result<Vec<u8>, String> {
-        let (w, h, rgba) = self.to_rgba8_transparent(factor);
-        Ok(crate::png_encoder::encode_png_rgba8(w, h, &rgba))
     }
 }
 

@@ -9,12 +9,6 @@ crate-type = ["cdylib"]
 [dependencies]
 wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }
 
-# Only the native build (CLI PNG file export) compresses PNGs with miniz; the
-# wasm plugin emits raw RGBA and uses stored-deflate for its rare SVG-embedded
-# rasters, so it needs no compressor.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-miniz_oxide = "0.9.1"
-
 [profile.release]
 lto = "fat"
 strip = true
