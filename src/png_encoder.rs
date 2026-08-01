@@ -40,6 +40,44 @@ fn write_chunk(out: &mut Vec<u8>, chunk_type: &[u8; 4], data: &[u8]) {
     out.extend_from_slice(&crc32(chunk_type, data).to_be_bytes());
 }
 
+/// zlib-wrap the filtered scanlines. On native we compress with miniz (small
+/// files, for CLI PNG export). In wasm the plugin only reaches PNG through the
+/// rare SVG-embed paths (labelled grids, annotations, debug), so we emit an
+/// *uncompressed* zlib stream (stored deflate blocks) — a handful of lines,
+/// no `miniz_oxide` dependency, and thus a smaller plugin.
+#[cfg(not(target_arch = "wasm32"))]
+fn zlib_compress(raw: &[u8]) -> Vec<u8> {
+    miniz_oxide::deflate::compress_to_vec_zlib(raw, 1)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn zlib_compress(raw: &[u8]) -> Vec<u8> {
+    // zlib header: CMF=0x78, FLG=0x01 (no dict, level 0); 0x7801 % 31 == 0.
+    let mut out = vec![0x78, 0x01];
+    if raw.is_empty() {
+        out.extend_from_slice(&[0x01, 0x00, 0x00, 0xFF, 0xFF]); // one empty final stored block
+    } else {
+        let mut i = 0;
+        while i < raw.len() {
+            let chunk = core::cmp::min(0xFFFF, raw.len() - i);
+            let last = i + chunk >= raw.len();
+            out.push(if last { 0x01 } else { 0x00 }); // BFINAL | BTYPE=00 (stored)
+            out.extend_from_slice(&(chunk as u16).to_le_bytes()); // LEN
+            out.extend_from_slice(&(!(chunk as u16)).to_le_bytes()); // NLEN = ~LEN
+            out.extend_from_slice(&raw[i..i + chunk]);
+            i += chunk;
+        }
+    }
+    // Adler-32 of the uncompressed data (big-endian trailer).
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in raw {
+        a = (a + byte as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    out.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    out
+}
+
 /// Encode raw RGB 8-bit pixels as a minimal PNG.
 ///
 /// `pixels` must be exactly `width * height * 3` bytes (RGB, row-major).
@@ -67,7 +105,7 @@ pub fn encode_png_rgb8(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
     }
 
     // Compress with zlib wrapper (required by PNG spec).
-    let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 1);
+    let compressed = zlib_compress(&raw);
 
     // Allocate output: signature(8) + IHDR(25) + IDAT(12+data) + IEND(12)
     let mut out = Vec::with_capacity(8 + 25 + 12 + compressed.len() + 12);
@@ -115,7 +153,7 @@ pub fn encode_png_rgba8(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
         }
     }
 
-    let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 1);
+    let compressed = zlib_compress(&raw);
 
     let mut out = Vec::with_capacity(8 + 25 + 12 + compressed.len() + 12);
     out.extend_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);

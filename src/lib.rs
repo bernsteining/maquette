@@ -137,7 +137,7 @@ fn render_stl_png(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
     let triangles = cached_stl(stl_data)?;
     let empty = HashMap::new();
     let key = cache::hash(stl_data);
-    render::render_png(triangles, &config, &empty, Some(key), Some(key))
+    render::render_raster(triangles, &config, &empty, Some(key), Some(key), true)
 }
 
 /// Entry point: receives OBJ text + JSON config, returns PNG bytes.
@@ -147,7 +147,7 @@ fn render_obj_png(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
     let obj = cached_obj(obj_data, &config)?;
     let key = cache::hash(obj_data);
     let prep_key = if config.materials.is_empty() && config.highlight.is_empty() { Some(key) } else { None };
-    render::render_png(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key)
+    render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, true)
 }
 
 /// Returns JSON with model info (triangle count, bbox, etc.) for STL.
@@ -181,7 +181,7 @@ fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
     let config = parse_config(config_json)?;
     let triangles = cached_ply(ply_data, &config)?;
     let empty = HashMap::new();
-    render::render_png(&triangles, &config, &empty, None, None)
+    render::render_raster(&triangles, &config, &empty, None, None, true)
 }
 
 /// Returns JSON with model info (triangle count, bbox, etc.) for PLY.
