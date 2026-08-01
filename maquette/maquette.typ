@@ -30,28 +30,39 @@
   )
 }
 
+#let _u32le(data, i) = data.at(i) + data.at(i + 1) * 256 + data.at(i + 2) * 65536 + data.at(i + 3) * 16777216
+
+#let _raw-image(px, w, h, width, height) = image(
+  px, format: (encoding: "rgba8", width: w, height: h), width: width, height: height,
+)
+
 #let _render(data, png-fn, svg-fn, args) = {
   let a = _parse-args(args)
-  if a.format == "png" {
-    let result = png-fn(data, a.cfg)
-    if result.at(0) == 0x3C {
-      // SVG-wrapped raster (annotations, debug overlay, or a labelled grid).
-      image(result, format: "svg", width: a.width, height: a.height)
-    } else {
-      // Raw RGBA blob: [0x00][width u32 LE][height u32 LE][rgba8…]. Embedding
-      // the pixels directly skips PNG encode (in the plugin) and decode (in
-      // Typst) — and avoids re-compressing for the PDF.
-      let w = result.at(1) + result.at(2) * 256 + result.at(3) * 65536 + result.at(4) * 16777216
-      let h = result.at(5) + result.at(6) * 256 + result.at(7) * 65536 + result.at(8) * 16777216
-      image(
-        result.slice(9),
-        format: (encoding: "rgba8", width: w, height: h),
-        width: a.width,
-        height: a.height,
-      )
-    }
-  } else {
+  if a.format != "png" {
     image(svg-fn(data, a.cfg), format: "svg", width: a.width, height: a.height)
+  } else {
+    let result = png-fn(data, a.cfg)
+    let marker = result.at(0)
+    if marker == 0x00 {
+      // Raw RGBA: [0x00][w u32 LE][h u32 LE][rgba8…]. Embedding the pixels
+      // directly skips PNG encode (plugin) and decode (Typst), and avoids
+      // re-compressing for the PDF.
+      _raw-image(result.slice(9), _u32le(result, 1), _u32le(result, 5), a.width, a.height)
+    } else if marker == 0x02 {
+      // Raster + vector overlay: [0x02][w][h][rgba8 w*h*4][svg]. Layer the
+      // transparent SVG (labels / grid lines / annotations / debug text) over
+      // the raw pixels — no PNG anywhere.
+      let w = _u32le(result, 1)
+      let h = _u32le(result, 5)
+      let n = w * h * 4
+      box({
+        _raw-image(result.slice(9, 9 + n), w, h, a.width, a.height)
+        place(top + left, image(result.slice(9 + n), format: "svg", width: 100%, height: 100%))
+      })
+    } else {
+      // 0x3C — a pure SVG (defensive; raster mode returns 0x00 or 0x02).
+      image(result, format: "svg", width: a.width, height: a.height)
+    }
   }
 }
 
