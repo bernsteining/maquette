@@ -791,13 +791,72 @@ document.querySelectorAll("#fmt button").forEach((b) => {
 ["dragleave","drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev==="dragleave" && e.relatedTarget) return; $("stage").classList.remove("drag"); }));
 document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; if (f) loadFile(f); });
 
+// ─────────────────────────── wasm module cache (IndexedDB) ──────────────────
+// Repeat visits skip both the download and the compile: we persist the compiled
+// WebAssembly.Module in IndexedDB, keyed by the file's ETag/Last-Modified. A
+// cheap HEAD request tells us whether the cached module is still current, so a
+// CI redeploy of a new wasm invalidates the cache automatically.
+const IDB = { name: "maquette-cache", store: "modules", key: "maquette.wasm" };
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(IDB.name, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(IDB.store);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbGet(key) {
+  try {
+    const db = await idbOpen();
+    return await new Promise((res, rej) => {
+      const q = db.transaction(IDB.store, "readonly").objectStore(IDB.store).get(key);
+      q.onsuccess = () => res(q.result);
+      q.onerror = () => rej(q.error);
+    });
+  } catch { return undefined; }
+}
+async function idbPut(key, val) {
+  try {
+    const db = await idbOpen();
+    await new Promise((res, rej) => {
+      const q = db.transaction(IDB.store, "readwrite").objectStore(IDB.store).put(val, key);
+      q.onsuccess = () => res();
+      q.onerror = () => rej(q.error);
+    });
+  } catch { /* private mode, or a browser that won't structured-clone Module: skip caching */ }
+}
+
+async function compileModule() {
+  // Streaming compile overlaps download with compilation. Fall back to a plain
+  // compile if the response isn't served as application/wasm (some hosts).
+  try { return await WebAssembly.compileStreaming(fetch(WASM_URL)); }
+  catch { return await WebAssembly.compile(await (await fetch(WASM_URL)).arrayBuffer()); }
+}
+
+async function loadModule() {
+  let tag = null;
+  try {
+    const h = await fetch(WASM_URL, { method: "HEAD" });
+    tag = h.headers.get("etag") || h.headers.get("last-modified");
+  } catch { /* no freshness signal → compile fresh, don't cache */ }
+
+  if (tag) {
+    const hit = await idbGet(IDB.key);
+    if (hit && hit.tag === tag && hit.module instanceof WebAssembly.Module) return hit.module;
+  }
+  const module = await compileModule();
+  if (tag) idbPut(IDB.key, { tag, module });
+  return module;
+}
+
 // ─────────────────────────────────── boot ─────────────────────────────────
 (async function boot() {
   applyStateFromHash();          // restore a shared config before building the form
   buildForm(); refreshVisibility();
   try {
-    const wasmBytes = await (await fetch(WASM_URL)).arrayBuffer();
-    ({ instance } = await WebAssembly.instantiate(wasmBytes, importObject));
+    const module = await loadModule();
+    // With a Module (not bytes), instantiate() resolves to the Instance directly.
+    instance = await WebAssembly.instantiate(module, importObject);
     memory = instance.exports.memory;
     model = { name: "bunny.obj", bytes: new Uint8Array(await (await fetch("bunny.obj")).arrayBuffer()) };
     measure(); onChange();
