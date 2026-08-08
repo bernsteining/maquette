@@ -141,7 +141,7 @@ Import a render function, read a model file, and call it. That's it.
 
 #grid(columns: (1fr, 1fr), column-gutter: 1.5em,
   [
-    #raw(block: true, lang: "typ", "#import \"@preview/maquette:0.1.2\": render-stl\n\n#let cube = read(\"data/cube.stl\", encoding: none)\n#render-stl(cube)")
+    #raw(block: true, lang: "typ", "#import \"@preview/maquette:0.1.3\": render-stl\n\n#let cube = read(\"data/cube.stl\", encoding: none)\n#render-stl(cube)")
     #v(0.7em)
     #text(size: 9pt)[*For STL & PLY: Always read with `encoding: none`.* Without it, Typst's `read()` defaults to UTF-8 text and _binary STL/PLY files_ — or any file containing non-UTF-8 bytes — fail with a _"file is not valid UTF-8"_ error before maquette even runs. For OBJ, it shouldn't be necessary.]
   ],
