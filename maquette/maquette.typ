@@ -36,6 +36,16 @@
   px, format: (encoding: "rgba8", width: w, height: h), width: width, height: height,
 )
 
+// Resolve a requested dimension (auto / length / ratio / relative) to a
+// concrete length against `base`. Needed because `place`d children can't carry
+// relative sizes — they collapse to zero (see the 0x02 overlay path).
+#let _resolve(dim, base) = {
+  if dim == auto { auto }
+  else if type(dim) == length { dim }
+  else if type(dim) == ratio { dim * base }
+  else { dim.ratio * base + dim.length } // relative = ratio + length
+}
+
 #let _render(data, png-fn, svg-fn, args) = {
   let a = _parse-args(args)
   if a.format != "png" {
@@ -55,9 +65,29 @@
       let w = _u32le(result, 1)
       let h = _u32le(result, 5)
       let n = w * h * 4
-      box({
-        _raw-image(result.slice(9, 9 + n), w, h, a.width, a.height)
-        place(top + left, image(result.slice(9 + n), format: "svg", width: 100%, height: 100%))
+      let raster = result.slice(9, 9 + n)
+      let overlay = result.slice(9 + n)
+      // `place` can NOT resolve a relative size (`100%`, `58%`, …) for its
+      // child — it collapses to zero and the overlay silently vanishes — so
+      // both layers must receive the *same concrete* lengths. Resolve the
+      // requested size against the container (via `layout`), fill the width
+      // when nothing is given (like a bare SVG image), and otherwise keep the
+      // render's aspect ratio (viewBox w×h) for any auto axis.
+      layout(size => {
+        let dw = _resolve(a.width, size.width)
+        let dh = _resolve(a.height, size.height)
+        if dw == auto and dh == auto {
+          dw = size.width
+          dh = size.width * h / w
+        } else if dw == auto {
+          dw = dh * w / h
+        } else if dh == auto {
+          dh = dw * h / w
+        }
+        box({
+          _raw-image(raster, w, h, dw, dh)
+          place(top + left, image(overlay, format: "svg", width: dw, height: dh))
+        })
       })
     } else {
       // 0x3C — a pure SVG (defensive; raster mode returns 0x00 or 0x02).
