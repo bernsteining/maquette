@@ -757,16 +757,13 @@ function ensureSpherical() {
     state.zoom = Math.max(0.3, Math.min(4, Math.round(state.zoom * f * 1000) / 1000));
     controlRefs.zoom?.(state.zoom);
   };
-  const panBy = (dx, dy) => {
-    const el = elOutc.style.display !== "none" ? elOutc : elOut;
-    const r = el.getBoundingClientRect();
-    const w = r.width || stage.clientWidth, h = r.height || stage.clientHeight;
-    // pan is a fraction of the viewport ([right, up]); move the model with the fingers.
-    state.pan = [
-      Math.round((state.pan[0] + dx / w) * 1000) / 1000,
-      Math.round((state.pan[1] - dy / h) * 1000) / 1000,
-    ];
-    controlRefs.pan?.(state.pan);
+  const orbitBy = (dx, dy, ptype) => {
+    // Touch reads as direct manipulation, so its horizontal orbit is inverted vs a
+    // mouse orbit; a mouse keeps the -1 direction.
+    const xdir = ptype === "mouse" ? -1 : 1;
+    state.azimuth = Math.round((state.azimuth + xdir * dx * 0.5) * 10) / 10;
+    state.elevation = Math.max(-89, Math.min(89, Math.round((state.elevation + dy * 0.5) * 10) / 10));
+    controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation);
   };
 
   stage.addEventListener("pointerdown", (e) => {
@@ -781,24 +778,17 @@ function ensureSpherical() {
   stage.addEventListener("pointermove", (e) => {
     const p = pts.get(e.pointerId);
     if (!p) return;
-    if (pts.size >= 2) {                                    // two fingers → zoom + pan together
+    if (pts.size >= 2) {                                    // two fingers → orbit + zoom together
       p.x = e.clientX; p.y = e.clientY;
       const d = twoDist(), [cx, cy] = twoCent();
       if (pd > 0 && d > 0) setZoom(d / pd);                 // pinch → zoom
-      panBy(cx - pcx, cy - pcy);                            // drag centroid → pan
+      orbitBy(cx - pcx, cy - pcy, e.pointerType);           // drag centroid → orbit
       pd = d; pcx = cx; pcy = cy;
-      scheduleRender();
     } else {                                                // one pointer → orbit
-      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      orbitBy(e.clientX - p.x, e.clientY - p.y, e.pointerType);
       p.x = e.clientX; p.y = e.clientY;
-      // Touch reads as direct manipulation (grabbing the model), so its horizontal
-      // orbit is inverted relative to a mouse orbit; a mouse keeps the -1 direction.
-      const xdir = e.pointerType === "mouse" ? -1 : 1;
-      state.azimuth = Math.round((state.azimuth + xdir * dx * 0.5) * 10) / 10;
-      state.elevation = Math.max(-89, Math.min(89, Math.round((state.elevation + dy * 0.5) * 10) / 10));
-      controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation);
-      scheduleRender();
     }
+    scheduleRender();
   });
 
   const end = (e) => {
