@@ -415,6 +415,18 @@ const conds = []; // {node, when, local} for visibility refresh
 const ENC = new TextEncoder(), DEC = new TextDecoder();
 const elCode = $("code"), elErr = $("err"), elOut = $("out"), elOutc = $("outc"), elRtime = $("rtime"), elMeasure = $("measure");
 
+// Build stamp: CI replaces __BUILD_COMMIT__ in index.html with the deployed short
+// SHA. Hover shows it (desktop); tapping the pill reveals it (mobile). Locally the
+// placeholder is untouched, so it reads "dev".
+(function () {
+  const el = $("build"); if (!el) return;
+  const c = el.dataset.commit;
+  const v = c && !c.startsWith("__") ? c : "dev";
+  el.title = "deployed build · " + v;
+  el.style.cursor = "pointer";
+  el.onclick = () => { const o = el.textContent; el.textContent = v; setTimeout(() => (el.textContent = o), 1600); };
+})();
+
 // The two polymorphic config values, shared by buildConfig and buildTypst.
 const ambientCfg = () => state._hemi.__on
   ? { intensity: state._hemi.intensity, sky: state._hemi.sky, ground: state._hemi.ground }
@@ -736,11 +748,25 @@ function ensureSpherical() {
 (function setupOrbit() {
   const stage = $("stage");
   const pts = new Map();          // active pointers: id → {x, y}
-  let pinchDist = 0;              // last two-finger distance while pinching
-  const twoDist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  let pd = 0, pcx = 0, pcy = 0;   // last two-finger distance + centroid while pinching
+  const two = () => [...pts.values()];
+  const twoDist = () => { const [a, b] = two(); return Math.hypot(a.x - b.x, a.y - b.y); };
+  const twoCent = () => { const [a, b] = two(); return [(a.x + b.x) / 2, (a.y + b.y) / 2]; };
+  const seedPinch = () => { pd = twoDist(); [pcx, pcy] = twoCent(); };
   const setZoom = (f) => {
     state.zoom = Math.max(0.3, Math.min(4, Math.round(state.zoom * f * 1000) / 1000));
     controlRefs.zoom?.(state.zoom);
+  };
+  const panBy = (dx, dy) => {
+    const el = elOutc.style.display !== "none" ? elOutc : elOut;
+    const r = el.getBoundingClientRect();
+    const w = r.width || stage.clientWidth, h = r.height || stage.clientHeight;
+    // pan is a fraction of the viewport ([right, up]); move the model with the fingers.
+    state.pan = [
+      Math.round((state.pan[0] + dx / w) * 1000) / 1000,
+      Math.round((state.pan[1] - dy / h) * 1000) / 1000,
+    ];
+    controlRefs.pan?.(state.pan);
   };
 
   stage.addEventListener("pointerdown", (e) => {
@@ -749,17 +775,18 @@ function ensureSpherical() {
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { stage.setPointerCapture(e.pointerId); } catch {}
     stage.classList.add("grabbing"); ensureSpherical();
-    if (pts.size === 2) pinchDist = twoDist();              // enter pinch
+    if (pts.size === 2) seedPinch();                        // enter pinch
   });
 
   stage.addEventListener("pointermove", (e) => {
     const p = pts.get(e.pointerId);
     if (!p) return;
-    if (pts.size >= 2) {                                    // two fingers → pinch-zoom
+    if (pts.size >= 2) {                                    // two fingers → zoom + pan together
       p.x = e.clientX; p.y = e.clientY;
-      const d = twoDist();
-      if (pinchDist > 0 && d > 0) setZoom(d / pinchDist);
-      pinchDist = d;
+      const d = twoDist(), [cx, cy] = twoCent();
+      if (pd > 0 && d > 0) setZoom(d / pd);                 // pinch → zoom
+      panBy(cx - pcx, cy - pcy);                            // drag centroid → pan
+      pd = d; pcx = cx; pcy = cy;
       scheduleRender();
     } else {                                                // one pointer → orbit
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
@@ -776,9 +803,9 @@ function ensureSpherical() {
 
   const end = (e) => {
     if (!pts.delete(e.pointerId)) return;
-    pinchDist = 0;                                          // re-seed below if a pinch continues
+    pd = 0;                                                 // re-seed below if a pinch continues
     if (pts.size === 0) { stage.classList.remove("grabbing"); renderCode(); render(); }
-    else if (pts.size === 2) pinchDist = twoDist();
+    else if (pts.size === 2) seedPinch();
   };
   stage.addEventListener("pointerup", end);
   stage.addEventListener("pointercancel", end);
