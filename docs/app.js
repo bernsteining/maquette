@@ -371,7 +371,7 @@ function buildTypst() {
   }
   if (outputFormat === "svg") P.push('format: "svg"');
   const body = P.length ? `#${fn}(model,\n  ${P.join(",\n  ")},\n)` : `#${fn}(model)`;
-  return `#import "@preview/maquette:0.1.2": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
+  return `#import "@preview/maquette:0.1.3": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
 }
 
 // Tiny Typst highlighter — the generated snippet has a small, known grammar, so a
