@@ -735,29 +735,58 @@ function ensureSpherical() {
 }
 (function setupOrbit() {
   const stage = $("stage");
-  let dragging = false, lx = 0, ly = 0;
+  const pts = new Map();          // active pointers: id → {x, y}
+  let pinchDist = 0;              // last two-finger distance while pinching
+  const twoDist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  const setZoom = (f) => {
+    state.zoom = Math.max(0.3, Math.min(4, Math.round(state.zoom * f * 1000) / 1000));
+    controlRefs.zoom?.(state.zoom);
+  };
+
   stage.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || e.target.closest("#tools")) return;   // ignore toolbar clicks
-    dragging = true; lx = e.clientX; ly = e.clientY;
+    if (e.target.closest("#tools")) return;                 // ignore toolbar clicks
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { stage.setPointerCapture(e.pointerId); } catch {}
     stage.classList.add("grabbing"); ensureSpherical();
+    if (pts.size === 2) pinchDist = twoDist();              // enter pinch
   });
+
   stage.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
-    state.azimuth = Math.round((state.azimuth - dx * 0.5) * 10) / 10;
-    state.elevation = Math.max(-89, Math.min(89, Math.round((state.elevation + dy * 0.5) * 10) / 10));
-    controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation);
-    scheduleRender();
+    const p = pts.get(e.pointerId);
+    if (!p) return;
+    if (pts.size >= 2) {                                    // two fingers → pinch-zoom
+      p.x = e.clientX; p.y = e.clientY;
+      const d = twoDist();
+      if (pinchDist > 0 && d > 0) setZoom(d / pinchDist);
+      pinchDist = d;
+      scheduleRender();
+    } else {                                                // one pointer → orbit
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.x = e.clientX; p.y = e.clientY;
+      // Touch reads as direct manipulation (grabbing the model), so its horizontal
+      // orbit is inverted relative to a mouse orbit; a mouse keeps the -1 direction.
+      const xdir = e.pointerType === "mouse" ? -1 : 1;
+      state.azimuth = Math.round((state.azimuth + xdir * dx * 0.5) * 10) / 10;
+      state.elevation = Math.max(-89, Math.min(89, Math.round((state.elevation + dy * 0.5) * 10) / 10));
+      controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation);
+      scheduleRender();
+    }
   });
-  const end = () => { if (dragging) { dragging = false; stage.classList.remove("grabbing"); renderCode(); render(); } };
+
+  const end = (e) => {
+    if (!pts.delete(e.pointerId)) return;
+    pinchDist = 0;                                          // re-seed below if a pinch continues
+    if (pts.size === 0) { stage.classList.remove("grabbing"); renderCode(); render(); }
+    else if (pts.size === 2) pinchDist = twoDist();
+  };
   stage.addEventListener("pointerup", end);
   stage.addEventListener("pointercancel", end);
+
   stage.addEventListener("wheel", (e) => {
     e.preventDefault();
-    const f = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    state.zoom = Math.max(0.3, Math.min(4, Math.round(state.zoom * f * 1000) / 1000));
-    controlRefs.zoom?.(state.zoom); scheduleRender();
+    setZoom(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+    scheduleRender();
   }, { passive: false });
 })();
 
