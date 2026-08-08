@@ -12,7 +12,7 @@ Everything runs as a single WASM plugin (~495 KB), with focus on speed.
 
 **[Try it live in your browser →](https://bernsteining.github.io/maquette/)** — drag to orbit, tweak every setting, and copy the generated Typst code. It runs the exact same WASM as the plugin, fully client-side. Because your browser JIT-compiles the WASM (Typst runs it in an interpreter), the demo is dramatically faster to iterate on — the quickest way to dial in a camera angle and lighting before pasting the code into your document, with no recompile between tweaks.
 
-Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.2/examples/documentation.pdf) to see examples of all the features.
+Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.3/examples/documentation.pdf) to see examples of all the features.
 
 ## Example
 
@@ -23,7 +23,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 <td>
 
 ```typst
-#import "@preview/maquette:0.1.2": render-obj
+#import "@preview/maquette:0.1.3": render-obj
 #let bunny = read("examples/data/bunny.obj", encoding: none)
 
 #render-obj(bunny,
@@ -74,7 +74,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 </tr>
 </table>
 
-Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.2/examples/documentation.pdf) has many examples covering all the features offered by `maquette`.
+Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.3/examples/documentation.pdf) has many examples covering all the features offered by `maquette`.
 
 ## Rendering Techniques
 
@@ -132,7 +132,7 @@ Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0
 
 ## Documentation
 
-See [examples/documentation.pdf](https://github.com/bernsteining/maquette/blob/v0.1.2/examples/documentation.pdf) for a full walkthrough with examples, or compile it:
+See [examples/documentation.pdf](https://github.com/bernsteining/maquette/blob/v0.1.3/examples/documentation.pdf) for a full walkthrough with examples, or compile it:
 
 ```sh
 make demo
