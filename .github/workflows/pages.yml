@@ -68,6 +68,7 @@ jobs:
         run: rustc --version && wasm-opt --version
 
       - name: Build WASM (via Makefile — identical build to local)
+        shell: bash   # ${GITHUB_SHA::7} below is a bash substring; container default shell is sh
         # `make wasm` is the single source of truth for the cargo + wasm-opt flags.
         # REMAP overrides the Makefile's default ($HOME) with the container's paths
         # so nothing (registry, toolchain, workspace) leaks into the artifact.
