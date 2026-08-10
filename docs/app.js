@@ -32,6 +32,11 @@ const PROJ = ["perspective","orthographic","isometric","dimetric","trimetric","m
   "cabinet","cavalier","fisheye","stereographic","curvilinear","cylindrical","pannini","tiny-planet"];
 
 const SCHEMA = [
+  { s: "Point cloud (PLY)", open: true, when: () => ext(model.name) === "ply", fields: [
+    { k: "point_size", label: "Point size / radius (0 = auto)", t: "num", def: 0, omitIf: v => v === 0 },
+    { k: "point_neighbors", label: "Neighbors k (higher = fewer holes)", t: "num", def: 12, omitIf: v => v === 12 },
+    { k: "point_boundary", label: "Boundary cut angle ° (0 = off)", t: "num", def: 60, omitIf: v => v === 60 },
+  ]},
   { s: "Camera & viewport", fields: [
     // `init` = starting value (a good view of the default bunny); `def` = maquette's
     // real default, used as the export baseline so the snippet stays faithful.
@@ -185,9 +190,6 @@ const SCHEMA = [
       ]},
     { k: "explode", label: "Explode", t: "rng", def: 0, min: 0, max: 1, step: 0.02 },
     { k: "decimate", label: "Decimate", t: "rng", def: 0, min: 0, max: 1, step: 0.02 },
-    { k: "point_size", label: "Point size (PLY clouds)", t: "num", def: 0, omitIf: v => v === 0 },
-    { k: "point_neighbors", label: "Point neighbors (k)", t: "num", def: 12, omitIf: v => v === 12 },
-    { k: "point_boundary", label: "Point boundary (°)", t: "num", def: 60, omitIf: v => v === 60 },
   ]},
 
   { s: "Multi-view", fields: [
@@ -605,6 +607,7 @@ function buildForm() {
       searchItems.push({ node, section: d, text: fieldText(f) });
     }
     d.append(body); root.append(d);
+    if (sec.when) conds.push({ node: d, when: sec.when, local: state });
     searchSections.push({ el: d, open: !!sec.open });
   }
 }
@@ -709,7 +712,7 @@ async function copyText(text) {
 async function loadFile(file) {
   model = { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
   $("fname").textContent = model.name;
-  measure(); onChange();
+  refreshVisibility(); measure(); onChange();
 }
 $("browse").onclick = () => $("file").click();
 $("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
