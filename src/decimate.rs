@@ -176,12 +176,10 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
         let pb = Vec3::new(rep_x[b2] as f64, rep_y[b2] as f64, rep_z[b2] as f64);
         let pc = Vec3::new(rep_x[c] as f64, rep_y[c] as f64, rep_z[c] as f64);
 
-        let n = pb.sub(pa).cross(pc.sub(pa));
-        let len = n.length();
-        if len < 1e-12 {
-            continue; // collinear after clustering
-        }
-        let normal = n.scale(1.0 / len);
+        let normal = match Vec3::face_normal(pa, pb, pc) {
+            Some(n) => n,
+            None => continue, // collinear after clustering
+        };
 
         let vertex_colors = if has_vcolors {
             Some([rep_col[a], rep_col[b2], rep_col[c]])

@@ -29,14 +29,14 @@ pub(crate) fn resolve_config_view(config: &RenderConfig, bc: Vec3, br: f64) -> V
     {
         bc
     } else {
-        Vec3::new(config.center[0], config.center[1], config.center[2])
+        Vec3::from(config.center)
     };
 
-    let up = Vec3::new(config.up[0], config.up[1], config.up[2]);
+    let up = Vec3::from(config.up);
 
     // Cartesian camera overrides spherical when explicitly set
     let camera = if let Some(cam) = config.camera {
-        let raw_camera = Vec3::new(cam[0], cam[1], cam[2]);
+        let raw_camera = Vec3::from(cam);
         let dist = raw_camera.sub(center).length();
         let dist = if dist < 1e-6 { br * 3.0 } else { dist };
         axonometric_camera(center, dist, &config.projection).unwrap_or(raw_camera)

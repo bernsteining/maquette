@@ -57,6 +57,17 @@ pub fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
     }
 }
 
+/// Average three RGB colors (per-channel mean), used to collapse per-vertex
+/// colors to a single flat face color.
+#[inline]
+pub fn avg3(a: (u8, u8, u8), b: (u8, u8, u8), c: (u8, u8, u8)) -> (u8, u8, u8) {
+    (
+        ((a.0 as u16 + b.0 as u16 + c.0 as u16) / 3) as u8,
+        ((a.1 as u16 + b.1 as u16 + c.1 as u16) / 3) as u8,
+        ((a.2 as u16 + b.2 as u16 + c.2 as u16) / 3) as u8,
+    )
+}
+
 /// Interpolate two colors by parameter t ∈ [0, 1].
 #[inline]
 pub fn lerp_color(a: (u8, u8, u8), b: (u8, u8, u8), t: f64) -> (u8, u8, u8) {
