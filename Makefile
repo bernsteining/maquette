@@ -28,4 +28,19 @@ harness:
 doc: build
 	typst compile examples/documentation.typ examples/documentation.pdf --root .
 
-.PHONY: wasm build harness doc
+# Model files the browser demo ships. Canonical copies live once in
+# examples/data/; the demo needs them under docs/ (the only dir Pages
+# publishes). Single source of truth for the demo's model set — shared by
+# `make demo` (local) and the Pages CI, so neither hard-codes the list.
+DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj rubi_scan.ply
+
+# Copy the demo models into docs/ (gitignored there — regenerated, not committed).
+demo-assets:
+	cp $(addprefix examples/data/,$(DEMO_MODELS)) docs/
+
+# Assemble the demo dir locally: fresh wasm + models, ready to serve.
+demo: wasm demo-assets
+	cp $(WASM_OUT) docs/maquette.wasm
+	@echo "docs/ ready — serve with:  python3 -m http.server -d docs"
+
+.PHONY: wasm build harness doc demo-assets demo
