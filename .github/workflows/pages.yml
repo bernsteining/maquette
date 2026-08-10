@@ -76,6 +76,10 @@ jobs:
           make wasm REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
           cp maquette/maquette.wasm docs/maquette.wasm
           ls -la docs/maquette.wasm
+          # Demo models aren't committed under docs/ (canonical copies live in
+          # examples/data/); stage them into the artifact the same way as the wasm.
+          make demo-assets
+          ls -la docs/*.obj docs/*.ply
           # Stamp the deployed commit into the demo's build pill (hover / tap to see it).
           sed -i "s/__BUILD_COMMIT__/${GITHUB_SHA::7}/g" docs/index.html
           echo "stamped build ${GITHUB_SHA::7}"

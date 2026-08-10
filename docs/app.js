@@ -537,8 +537,16 @@ function listNode(f) {   // extra lights
       const sel = document.createElement("select");
       [["directional","Directional"],["positional","Positional"],["area","Area"]].forEach(([v,t]) => { const o = document.createElement("option"); o.value=v; o.textContent=t; sel.append(o); });
       sel.value = L.type; sel.onchange = () => { L.type = sel.value; onChange(); };
-      const vec = document.createElement("div"); vec.className = "row";
-      L.vector.forEach((n, j) => { const ni = document.createElement("input"); ni.type="number"; ni.step="any"; ni.value=n; ni.oninput=()=>{L.vector[j]=+ni.value;onChange();}; vec.append(ni); });
+      const vec = document.createElement("div"); // per-axis slider + precise number box
+      ["X","Y","Z"].forEach((axis, j) => {
+        const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0";
+        const tag = document.createElement("span"); tag.textContent = axis; tag.style.cssText = "width:1em;color:var(--muted);font-size:12px";
+        const rng = document.createElement("input"); rng.type="range"; rng.min="-3"; rng.max="3"; rng.step="0.05"; rng.value=L.vector[j]; rng.style.flex="1";
+        const ni = document.createElement("input"); ni.type="number"; ni.step="any"; ni.value=L.vector[j]; ni.style.width="4.5em";
+        rng.oninput=()=>{ L.vector[j]=+rng.value; ni.value=rng.value; onChange(); };
+        ni.oninput =()=>{ L.vector[j]=+ni.value; if (Math.abs(+ni.value)<=3) rng.value=ni.value; onChange(); };
+        row.append(tag, rng, ni); vec.append(row);
+      });
       const col = document.createElement("input"); col.type="color"; col.value=L.color; col.oninput=()=>{L.color=col.value;onChange();};
       const inten = document.createElement("input"); inten.type="number"; inten.step="any"; inten.value=L.intensity; inten.oninput=()=>{L.intensity=+inten.value;onChange();};
       const size = document.createElement("input"); size.type="number"; size.step="any"; size.value=L.size; size.oninput=()=>{L.size=+size.value;onChange();};
@@ -709,11 +717,41 @@ async function copyText(text) {
 }
 
 // ─────────────────────────────── model I/O ────────────────────────────────
-async function loadFile(file) {
-  model = { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
-  $("fname").textContent = model.name;
+// Built-in models — fetched lazily (only when picked), same origin as bunny.obj.
+const MODELS = [
+  ["bunny.obj", "Bunny (OBJ)"],
+  ["teapot.obj", "Teapot (OBJ)"],
+  ["crankshaft.obj", "Crankshaft (OBJ · 5.8 MB)"],
+  ["brain_skull.obj", "Brain + skull (OBJ)"],
+  ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
+];
+
+// Shared ingestion for both dropped/browsed files and built-in presets.
+function ingest(name, bytes) {
+  model = { name, bytes };
+  syncPreset(name);
   refreshVisibility(); measure(); onChange();
 }
+async function loadFile(file) {
+  ingest(file.name, new Uint8Array(await file.arrayBuffer()));
+}
+async function loadPreset(name) {
+  try { ingest(name, new Uint8Array(await (await fetch(name)).arrayBuffer())); }
+  catch (e) { showErr("failed to load " + name + ": " + e.message); }
+}
+// Reflect the active model in the dropdown; a dropped file gets a transient entry.
+function syncPreset(name) {
+  const sel = $("preset");
+  if (MODELS.some(([v]) => v === name)) { sel.value = name; return; }
+  let custom = sel.querySelector("option[data-custom]");
+  if (!custom) { custom = document.createElement("option"); custom.dataset.custom = "1"; sel.append(custom); }
+  custom.value = name; custom.textContent = name + " (loaded)"; sel.value = name;
+}
+(function initPresets() {
+  const sel = $("preset");
+  for (const [v, t] of MODELS) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.append(o); }
+  sel.onchange = () => { if (sel.value) loadPreset(sel.value); };
+})();
 $("browse").onclick = () => $("file").click();
 $("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
 $("copy").onclick = async () => { await copyText(buildTypst()); const o = $("copy").textContent; $("copy").textContent = "Copied!"; setTimeout(() => ($("copy").textContent = o), 1200); };

@@ -4,3 +4,9 @@ harness/target
 # work-in-progress, kept local only
 examples/documentation.md
 scripts/
+
+# Demo assets copied into docs/ at build time (canonical copies live in
+# examples/data/; the wasm is built from source). `make demo` / CI regenerate.
+docs/*.obj
+docs/*.stl
+docs/*.ply
