@@ -175,7 +175,7 @@ With a show rule, you can write OBJ / STL / PLY geometry directly in fenced code
 
 All parameters are optional — pass them as named arguments or a dictionary; defaults are shown below. Setting any to `none` restores its default (for `background`, that means transparent).
 
-#text(size: 9.3pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
+#text(size: 9pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
   \"camera\": [3, 3, 3],                             // Camera position in world space (Cartesian)
   \"azimuth\": null,                                 // Spherical camera: horizontal angle in degrees
   \"elevation\": null,                               // Spherical camera: vertical angle in degrees
@@ -232,6 +232,8 @@ All parameters are optional — pass them as named arguments or a dictionary; de
   \"explode\": 0,                                    // Exploded view factor
   \"decimate\": 0,                                   // Mesh simplification 0-1 (higher = fewer triangles)
   \"point_size\": 0,                                 // Point cloud neighbor radius (0 = auto)
+  \"point_neighbors\": 12,                           // Point cloud: neighbors per point (higher = fewer holes)
+  \"point_boundary\": 60,                            // Point cloud: cut connections across a normal jump > this angle°
   \"antialias\": 1,                                  // 0: off, 1: FXAA, 2: SSAA, 3-4: SSAA x2
   \"ssao\": false,                                   // true or {samples, radius, bias, strength}
   \"bloom\": false,                                  // true or {threshold, intensity, radius}
@@ -1125,7 +1127,10 @@ Maquette handles PLY files in ASCII and binary (little/big-endian) formats — a
 
 === Point Clouds
 
-PLY files can also contain clouds of points. 3D scanning apps usually allow to export in such a format.  Enjoy my Rubik's cube scanned with the help of my iPad's LiDAR! Point clouds rendering are configurable with `point_size`, which will define the distance for points to be considered as neighbors for our #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN] to reconstruct the model. Auto-computed if zero.
+PLY files can also contain clouds of points. 3D scanning apps usually allow to export in such a format. Enjoy my Rubik's cube scanned with the help of my iPad's LiDAR! Maquette reconstructs the surface with #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN], tuned by three knobs (defaults in parentheses):
+- `point_size` (`0`) — neighbor search radius. `0` auto-sizes it from point density; larger connects more distant points.
+- `point_neighbors` (`12`) — neighbors fanned per point. Higher closes small holes but is denser and slower; lower is faster but gappier.
+- `point_boundary` (`60`) — connections spanning a normal jump wider than this angle (degrees) are cut. Lower cuts more (fewer fringes, but can gap sharp edges); higher keeps more; `0` disables it.
 
 ```example
 // hl: 8
@@ -1137,6 +1142,8 @@ PLY files can also contain clouds of points. 3D scanning apps usually allow to e
   distance: 0.75,
   auto_fit: false,
   point_size: 0.03,
+  point_neighbors: 40,
+  point_boundary: 60,
   width: 65%,
 )
 ```
