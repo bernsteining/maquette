@@ -1,5 +1,5 @@
 use crate::color::parse_hex_color;
-use crate::math::{parse_vec3_iter, parse_i64_fast, Vec3};
+use crate::math::{parse_vec3_bytes, parse_i64_bytes, AsciiTokens, Vec3};
 use crate::parser::Triangle;
 use crate::config::{GroupAppearance, GroupStyle};
 use std::collections::HashMap;
@@ -15,8 +15,6 @@ pub fn parse_obj(
     materials: &HashMap<String, String>,
     highlight: &HashMap<String, GroupStyle>,
 ) -> Result<(Vec<Triangle>, HashMap<u32, GroupAppearance>), String> {
-    let text = std::str::from_utf8(data).map_err(|_| "invalid UTF-8 in OBJ")?;
-
     let mut vertices: Vec<Vec3> = Vec::new();
     let mut normals: Vec<Vec3> = Vec::new();
     let mut triangles: Vec<Triangle> = Vec::new();
@@ -29,41 +27,46 @@ pub fn parse_obj(
     // Reusable buffer for face indices (avoids per-face allocation)
     let mut face_buf: Vec<(usize, Option<usize>)> = Vec::new();
 
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
+    // Parse OBJ bytes directly (ASCII) — no whole-buffer UTF-8 validation, no
+    // Unicode-aware `.lines()`/`.trim()`/`split_whitespace`.
+    let n = data.len();
+    let mut pos = 0;
+    while pos < n {
+        let mut eol = pos;
+        while eol < n && data[eol] != b'\n' { eol += 1; }
+        let mut line = &data[pos..eol];
+        pos = eol + 1;
+        if line.last() == Some(&b'\r') { line = &line[..line.len() - 1]; }
 
-        let mut parts = line.split_whitespace();
+        let mut parts = AsciiTokens::new(line);
         let keyword = match parts.next() {
             Some(k) => k,
             None => continue,
         };
 
         match keyword {
-            "v" => {
-                vertices.push(parse_vec3_iter(&mut parts)
+            b"v" => {
+                vertices.push(parse_vec3_bytes(&mut parts)
                     .ok_or("vertex needs 3 valid coordinates")?);
             }
-            "vn" => {
-                normals.push(parse_vec3_iter(&mut parts)
+            b"vn" => {
+                normals.push(parse_vec3_bytes(&mut parts)
                     .ok_or("normal needs 3 valid coordinates")?);
             }
-            "usemtl" => {
-                let mtl_name = match parts.next() {
+            b"usemtl" => {
+                let name = match parts.next() {
                     Some(n) => n,
                     None => continue,
                 };
-                if mtl_name.starts_with('#') && mtl_name.len() >= 7 {
-                    current_color = Some(parse_hex_color(mtl_name));
-                } else if let Some(hex) = materials.get(mtl_name) {
-                    current_color = Some(parse_hex_color(hex));
+                current_color = if name.first() == Some(&b'#') && name.len() >= 7 {
+                    std::str::from_utf8(name).ok().map(parse_hex_color)
+                } else if let Ok(s) = std::str::from_utf8(name) {
+                    materials.get(s).map(|hex| parse_hex_color(hex))
                 } else {
-                    current_color = None;
-                }
+                    None
+                };
             }
-            "f" => {
+            b"f" => {
                 face_buf.clear();
                 let nv = vertices.len();
                 let nn = normals.len();
@@ -86,7 +89,7 @@ pub fn parse_obj(
                     let v2 = vertices[face_buf[i + 1].0];
 
                     let normal = face_normal.unwrap_or_else(|| {
-                        (v1 - v0).cross(v2 - v0).normalized()
+                        Vec3::face_normal(v0, v1, v2).unwrap_or(Vec3::new(0.0, 0.0, 0.0))
                     });
 
                     triangles.push(Triangle {
@@ -98,9 +101,12 @@ pub fn parse_obj(
                     });
                 }
             }
-            "g" | "o" => {
+            b"g" | b"o" => {
                 let mut name = String::new();
-                for p in parts { if !name.is_empty() { name.push(' '); } name.push_str(p); }
+                for p in parts {
+                    if !name.is_empty() { name.push(' '); }
+                    if let Ok(s) = std::str::from_utf8(p) { name.push_str(s); }
+                }
                 let gid = group_counter;
                 current_group = Some(gid);
                 group_counter += 1;
@@ -122,12 +128,12 @@ pub fn parse_obj(
                         name: Some(name),
                         ..Default::default()
                     });
-                    if keyword == "o" {
+                    if keyword == b"o" {
                         current_highlight = None;
                     }
                 }
             }
-            _ => {} // skip mtllib, s, vt, etc.
+            _ => {} // skip mtllib, s, vt, comments, etc.
         }
     }
 
@@ -138,22 +144,20 @@ pub fn parse_obj(
 /// Returns (vertex_index, Option<normal_index>), 0-based.
 /// Uses manual parsing to avoid split('/').collect() allocation.
 #[inline]
-fn parse_face_index(s: &str, nv: usize, nn: usize) -> Option<(usize, Option<usize>)> {
-    let b = s.as_bytes();
+fn parse_face_index(b: &[u8], nv: usize, nn: usize) -> Option<(usize, Option<usize>)> {
     // Find first '/'
     let slash1 = b.iter().position(|&c| c == b'/');
-    let vi_str = match slash1 {
-        Some(pos) => &s[..pos],
-        None => s,
+    let vi_b = match slash1 {
+        Some(pos) => &b[..pos],
+        None => b,
     };
-    let vi = resolve_index(vi_str, nv)?;
+    let vi = resolve_index(vi_b, nv)?;
 
     let ni = if let Some(pos1) = slash1 {
-        // Find second '/'
         let rest = &b[pos1 + 1..];
         if let Some(pos2) = rest.iter().position(|&c| c == b'/') {
-            let ni_str = &s[pos1 + 1 + pos2 + 1..];
-            if !ni_str.is_empty() { resolve_index(ni_str, nn) } else { None }
+            let ni_b = &b[pos1 + 1 + pos2 + 1..];
+            if !ni_b.is_empty() { resolve_index(ni_b, nn) } else { None }
         } else {
             None
         }
@@ -165,8 +169,8 @@ fn parse_face_index(s: &str, nv: usize, nn: usize) -> Option<(usize, Option<usiz
 
 /// Convert 1-based (or negative) OBJ index to 0-based. Uses fast integer parser.
 #[inline]
-fn resolve_index(s: &str, count: usize) -> Option<usize> {
-    let idx = parse_i64_fast(s)?;
+fn resolve_index(b: &[u8], count: usize) -> Option<usize> {
+    let idx = parse_i64_bytes(b)?;
     if idx > 0 {
         let i = (idx - 1) as usize;
         if i < count { Some(i) } else { None }
