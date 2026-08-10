@@ -103,19 +103,76 @@ pub(crate) fn pointcloud_to_triangles(
     let has_normals = cloud.normals.len() == n;
     let has_colors = cloud.colors.len() == n;
 
-    let radius = if config.point_size > 0.0 {
-        config.point_size
-    } else {
-        diag / (n as f64).cbrt() * 1.5
-    };
-    let rsq_f32 = (radius * radius) as f32;
+    let max_neighbors: usize = config.point_neighbors.max(3);
+    // Cut fan connections across a normal jump larger than `point_boundary`°
+    // (removes hairy fringes at surface boundaries). <=0 disables the filter.
+    let boundary_cos = if config.point_boundary > 0.0 { config.point_boundary.to_radians().cos() } else { -2.0 };
 
     // f32 SOA for SIMD-accelerated distance checks
     let xs: Vec<f32> = positions.iter().map(|p| p.x as f32).collect();
     let ys: Vec<f32> = positions.iter().map(|p| p.y as f32).collect();
     let zs: Vec<f32> = positions.iter().map(|p| p.z as f32).collect();
 
-    // Build spatial hash with FxHasher — also store cell coords to avoid recomputing
+    // Search radius. Each point fans to its `max_neighbors` nearest points, so
+    // the radius only needs to *cover* those. Instead of assuming a dimensionality
+    // (the old `diag / n^(1/3)` over-sizes surface scans ~3x — ~27x too many
+    // candidates for the identical mesh), we derive it from the data: sample
+    // points, measure each sample's k-th-nearest-neighbor distance, and size the
+    // radius to cover the sparsest sampled point (+ a margin for unsampled points
+    // and f32 rounding). Capped at the old estimate, so it is never larger or
+    // sparser than before — only right-sized — for any cloud topology/density.
+    let volume_radius = diag / (n as f64).cbrt() * 1.5;
+    let radius = if config.point_size > 0.0 {
+        config.point_size
+    } else {
+        let inv = (1.0 / volume_radius) as f32;
+        let mut coarse: HashMap<(i32, i32, i32), Vec<u32>, FxBuildHasher> =
+            HashMap::with_hasher(FxBuildHasher::default());
+        for i in 0..n {
+            coarse
+                .entry(((xs[i] * inv).floor() as i32, (ys[i] * inv).floor() as i32, (zs[i] * inv).floor() as i32))
+                .or_default()
+                .push(i as u32);
+        }
+        let step = (n / 256).max(1);
+        let mut ds: Vec<f32> = Vec::new();
+        let mut worst_kth = 0.0f32;
+        let mut sampled = false;
+        let mut si = 0;
+        while si < n {
+            let i = si;
+            si += step;
+            let (cx, cy, cz) = ((xs[i] * inv).floor() as i32, (ys[i] * inv).floor() as i32, (zs[i] * inv).floor() as i32);
+            ds.clear();
+            for dz in -1i32..=1 {
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if let Some(b) = coarse.get(&(cx + dx, cy + dy, cz + dz)) {
+                            for &j in b {
+                                if j as usize != i {
+                                    let ex = xs[j as usize] - xs[i];
+                                    let ey = ys[j as usize] - ys[i];
+                                    let ez = zs[j as usize] - zs[i];
+                                    ds.push(ex * ex + ey * ey + ez * ez);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if ds.len() >= max_neighbors {
+                let k = max_neighbors - 1;
+                ds.select_nth_unstable_by(k, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let kth = ds[k].sqrt();
+                if kth > worst_kth { worst_kth = kth; }
+                sampled = true;
+            }
+        }
+        if sampled { ((worst_kth as f64) * 1.2).min(volume_radius).max(1e-9) } else { volume_radius }
+    };
+    let rsq_f32 = (radius * radius) as f32;
+
+    // Build spatial hash at the chosen radius.
     let inv_cell_f32 = (1.0 / radius) as f32;
     let mut grid: HashMap<(i32, i32, i32), Vec<u32>, FxBuildHasher> =
         HashMap::with_hasher(FxBuildHasher::default());
@@ -125,8 +182,6 @@ pub(crate) fn pointcloud_to_triangles(
         let cz = (zs[i] * inv_cell_f32).floor() as i32;
         grid.entry((cx, cy, cz)).or_default().push(i as u32);
     }
-
-    let max_neighbors: usize = 12;
     let mut tri_set: HashSet<(u32, u32, u32), FxBuildHasher> =
         HashSet::with_hasher(FxBuildHasher::default());
 
@@ -250,13 +305,24 @@ pub(crate) fn pointcloud_to_triangles(
                 else { core::cmp::Ordering::Equal }
             });
 
-            // Fan-triangulate: create triangle (i, neighbor[k], neighbor[k+1])
+            // Fan-triangulate: triangle (i, neighbor[k], neighbor[k+1]). Reject
+            // "bridge" triangles that span a normal discontinuity — a boundary
+            // between surfaces at different orientations (e.g. a scanned object
+            // meeting its support plane), the cause of the hairy fringes. Uses
+            // the per-vertex normals when present; smoothly-curved surfaces have
+            // similar adjacent normals, so this connects them fully (no holes).
             let nn = sorted.len();
+            let ni = if has_normals { cloud.normals[i] } else { Vec3::new(0.0, 0.0, 0.0) };
             for k in 0..nn {
                 let ja = sorted[k].0;
                 let jb = sorted[(k + 1) % nn].0;
                 if ja == jb { continue; }
-
+                if has_normals
+                    && (ni.dot(cloud.normals[ja as usize]) < boundary_cos
+                        || ni.dot(cloud.normals[jb as usize]) < boundary_cos)
+                {
+                    continue;
+                }
                 let (mut a, mut b, mut c) = (ii, ja, jb);
                 sort3(&mut a, &mut b, &mut c);
                 tri_set.insert((a, b, c));
