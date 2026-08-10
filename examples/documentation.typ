@@ -1104,14 +1104,14 @@ Some binary STL files encode per-face colors in the attribute bytes using the RG
 // hl: 1
 #let colored = read("data/colored_cube.stl", encoding: none)
 
-#render-stl(colored, projection: "isometric", width: 65%)
+#render-stl(colored, projection: "isometric", width: 60%)
 ```
 
 == PLY Format
 
 === Meshes
 
-Maquette handles PLY files in ASCII and binary (little/big-endian) formats — all three are parsed automatically. PLY can store colors in its format, allowing us to color the model directly. Enjoy this beautiful PLY-colored Rubik's cube generated with Blender.
+Maquette handles PLY files in ASCII and binary (little/big-endian) formats — all three are parsed automatically. PLY can store colors in its format, allowing us to color the model directly. Enjoy this beautiful PLY-colored Rubik's cube.
 
 ```example
 // hl: 1
@@ -1120,31 +1120,31 @@ Maquette handles PLY files in ASCII and binary (little/big-endian) formats — a
 #render-ply(rubi,
   azimuth: 45,
   elevation: 25,
-  distance: 9,
-  width: 65%,
+  distance: 8.7,
+  width: 60%,
 )
 ```
 
 === Point Clouds
 
-PLY files can also contain clouds of points. 3D scanning apps usually allow to export in such a format. Enjoy my Rubik's cube scanned with the help of my iPad's LiDAR! Maquette reconstructs the surface with #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN], tuned by three knobs (defaults in parentheses):
-- `point_size` (`0`) — neighbor search radius. `0` auto-sizes it from point density; larger connects more distant points.
-- `point_neighbors` (`12`) — neighbors fanned per point. Higher closes small holes but is denser and slower; lower is faster but gappier.
-- `point_boundary` (`60`) — connections spanning a normal jump wider than this angle (degrees) are cut. Lower cuts more (fewer fringes, but can gap sharp edges); higher keeps more; `0` disables it.
+PLY files can also contain clouds of points. 3D scanning apps usually allow to export in such a format. Enjoy my Rubik's cube scanned with the help of my iPad's LiDAR! Maquette reconstructs the surface with #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN], tuned by three knobs:
+- `point_size` (default: `0`) — neighbor search radius. `0` auto-sizes it from point density; larger connects more distant points.
+- `point_neighbors` (default: `12`) — neighbors fanned per point. Higher closes small holes but is denser and slower; lower is faster but gappier.
+- `point_boundary` (default: `60`) — connections spanning a normal jump wider than this angle (degrees) are cut. Lower cuts more (fewer fringes, but can gap sharp edges); higher keeps more; `0` disables it.
 
 ```example
-// hl: 8
+// hl: 8-10
 #let rubi_scan = read("data/rubi_scan.ply", encoding: none)
 
 #render-ply(rubi_scan,
   up: (0,1,0),
   elevation: 25,
-  distance: 0.75,
+  zoom: 2.5,
   auto_fit: false,
   point_size: 0.03,
-  point_neighbors: 40,
-  point_boundary: 60,
-  width: 65%,
+  point_neighbors: 16,
+  point_boundary: 75,
+  width: 60%,
 )
 ```
 
