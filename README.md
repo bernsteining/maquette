@@ -252,6 +252,8 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 | `glow` | `false` | Glow: `true` or `{ color, intensity, radius }` |
 | `sharpen` | `false` | Sharpen: `true` or `{ strength }` |
 | `point_size` | `0` | Point cloud neighbor search radius (`0` = auto from point density) |
+| `point_neighbors` | `12` | Point cloud reconstruction: neighbors per point (higher = fewer holes, denser, slower) |
+| `point_boundary` | `60` | Point cloud reconstruction: cut fan connections across a normal jump larger than this angle (degrees), removing hairy fringes at surface boundaries. `0` = keep all |
 
 ### Annotations
 
@@ -394,7 +396,11 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 "decimate": 0,
 // Mesh simplification strength 0-1 (grid vertex clustering; higher = fewer triangles)
 "point_size": 0,
-// Point cloud splat radius (0 = auto)
+// Point cloud neighbor search radius (0 = auto from point density)
+"point_neighbors": 12,
+// Point cloud: neighbors per point (higher = fewer holes, denser, slower)
+"point_boundary": 60,
+// Point cloud: cut connections across a normal jump > this angle° (0 = keep all)
 "antialias": 1,
 // Supersampling for PNG (2 = 2x2 SSAA, 4 = 4x4)
 "fxaa": true,

@@ -1,4 +1,4 @@
-use crate::math::{parse_f64_fast, parse_i64_fast, Vec3};
+use crate::math::{parse_f64_bytes, parse_i64_bytes, AsciiTokens, Vec3};
 use crate::parser::Triangle;
 
 #[derive(Clone)]
@@ -323,8 +323,10 @@ fn collect_face_indices<'a>(
 // -- ASCII body parsing --
 
 fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
-    let text = std::str::from_utf8(data).map_err(|_| "PLY: invalid UTF-8")?;
-    let mut lines = text.lines().map(|l| l.trim_ascii()).filter(|l| !l.is_empty());
+    // Parse the ASCII body straight from bytes: split on '\n', trim ASCII
+    // whitespace (handles trailing '\r'), skip blanks — no whole-buffer
+    // from_utf8 / Unicode .lines().
+    let mut lines = data.split(|&c| c == b'\n').map(|l| l.trim_ascii()).filter(|l| !l.is_empty());
 
     let mut positions: Vec<Vec3> = Vec::new();
     let mut normals: Vec<Vec3> = Vec::new();
@@ -344,7 +346,7 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
 
                 for _ in 0..vl.count {
                     let line = lines.next().ok_or("PLY: unexpected end of vertex data")?;
-                    let b = line.as_bytes();
+                    let b = line;
                     let len = b.len();
                     let mut buf = [0.0f64; 16];
                     let mut i = 0;
@@ -355,7 +357,7 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
                         let start = i;
                         while i < len && b[i] > b' ' { i += 1; }
                         if needed[prop] {
-                            buf[prop] = parse_f64_fast(&line[start..i]).unwrap_or(0.0);
+                            buf[prop] = parse_f64_bytes(&b[start..i]).unwrap_or(0.0);
                         }
                         prop += 1;
                     }
@@ -378,12 +380,12 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
                 let mut heap_buf = Vec::new();
                 for _ in 0..fl.count {
                     let line = lines.next().ok_or("PLY: unexpected end of face data")?;
-                    let mut tokens = line.split_ascii_whitespace();
+                    let mut tokens = AsciiTokens::new(line);
                     for _ in 0..tok_off { tokens.next(); }
-                    let face_n = parse_i64_fast(tokens.next().ok_or("PLY: empty face line")?)
+                    let face_n = parse_i64_bytes(tokens.next().ok_or("PLY: empty face line")?)
                         .ok_or("PLY: bad face count")? as usize;
                     let indices = collect_face_indices(face_n, nv, &mut stack_buf, &mut heap_buf, || {
-                        parse_i64_fast(tokens.next().ok_or("PLY: face line too short")?)
+                        parse_i64_bytes(tokens.next().ok_or("PLY: face line too short")?)
                             .ok_or_else(|| "PLY: bad index".into())
                             .map(|v| v as usize)
                     })?;

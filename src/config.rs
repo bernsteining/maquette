@@ -674,6 +674,8 @@ pub struct RenderConfig {
     pub sss: Option<SssConfig>,
     pub annotations: Option<AnnotationConfig>,
     pub point_size: f64,
+    pub point_neighbors: usize,
+    pub point_boundary: f64,
     pub shadows: Option<ShadowMapConfig>,
     /// Multiplier on the auto-fit scale (1.0 = fill bounding sphere; >1 zooms in).
     pub zoom: f64,
@@ -742,6 +744,8 @@ impl Default for RenderConfig {
             sss: None,
             annotations: None,
             point_size: 0.0,
+            point_neighbors: 12,
+            point_boundary: 60.0,
             shadows: None,
             zoom: 1.0,
             pan: [0.0, 0.0],
@@ -1102,6 +1106,8 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                     "offset" => offset = parse_f64,
                 }),
                 "point_size" => cfg.point_size = p.parse_f64()?,
+                "point_neighbors" => cfg.point_neighbors = p.parse_usize()?,
+                "point_boundary" => cfg.point_boundary = p.parse_f64()?,
                 "shadows" => cfg.shadows = parse_optional_object!(p, ShadowMapConfig, {
                     "resolution" => resolution = parse_usize,
                     "bias" => bias = parse_f64,
