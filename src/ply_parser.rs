@@ -213,7 +213,7 @@ fn parse_header(data: &[u8]) -> Result<(Header, usize), String> {
     let mut lines = text.lines();
 
     match lines.next() {
-        Some(l) if l.trim() == "ply" => {}
+        Some(l) if l.trim_ascii() == "ply" => {}
         _ => return Err("not a PLY file".into()),
     }
 
@@ -222,9 +222,9 @@ fn parse_header(data: &[u8]) -> Result<(Header, usize), String> {
     let mut cur: Option<(String, usize, Vec<(String, Prop)>)> = None;
 
     for line in lines {
-        let line = line.trim();
+        let line = line.trim_ascii();
         if line.is_empty() || line.starts_with("comment") || line == "end_header" { continue; }
-        let mut parts = line.split_whitespace();
+        let mut parts = line.split_ascii_whitespace();
         match parts.next().unwrap_or("") {
             "format" => {
                 format = Some(match parts.next().ok_or("PLY: missing format")? {
@@ -282,14 +282,10 @@ fn triangulate(
     for i in 1..indices.len() - 1 {
         let (i0, i1, i2) = (indices[0], indices[i], indices[i + 1]);
         let (v0, v1, v2) = (positions[i0], positions[i1], positions[i2]);
-        let normal = if has_n { normals[i0] } else { (v1 - v0).cross(v2 - v0).normalized() };
+        let normal = if has_n { normals[i0] } else { Vec3::face_normal(v0, v1, v2).unwrap_or(Vec3::new(0.0, 0.0, 0.0)) };
         let (color, vertex_colors) = if has_c {
             let (c0, c1, c2) = (colors[i0], colors[i1], colors[i2]);
-            (Some((
-                ((c0.0 as u16 + c1.0 as u16 + c2.0 as u16) / 3) as u8,
-                ((c0.1 as u16 + c1.1 as u16 + c2.1 as u16) / 3) as u8,
-                ((c0.2 as u16 + c1.2 as u16 + c2.2 as u16) / 3) as u8,
-            )), Some([c0, c1, c2]))
+            (Some(crate::color::avg3(c0, c1, c2)), Some([c0, c1, c2]))
         } else {
             (None, None)
         };
@@ -328,7 +324,7 @@ fn collect_face_indices<'a>(
 
 fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
     let text = std::str::from_utf8(data).map_err(|_| "PLY: invalid UTF-8")?;
-    let mut lines = text.lines().map(|l| l.trim()).filter(|l| !l.is_empty());
+    let mut lines = text.lines().map(|l| l.trim_ascii()).filter(|l| !l.is_empty());
 
     let mut positions: Vec<Vec3> = Vec::new();
     let mut normals: Vec<Vec3> = Vec::new();
@@ -382,7 +378,7 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
                 let mut heap_buf = Vec::new();
                 for _ in 0..fl.count {
                     let line = lines.next().ok_or("PLY: unexpected end of face data")?;
-                    let mut tokens = line.split_whitespace();
+                    let mut tokens = line.split_ascii_whitespace();
                     for _ in 0..tok_off { tokens.next(); }
                     let face_n = parse_i64_fast(tokens.next().ok_or("PLY: empty face line")?)
                         .ok_or("PLY: bad face count")? as usize;

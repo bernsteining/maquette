@@ -120,6 +120,42 @@ impl Vec3 {
         )
     }
 
+    /// Unit face normal of triangle `(a, b, c)`, or `None` if the triangle is
+    /// degenerate (near-zero area). Centralizes the `(b-a)×(c-a)` normal shared
+    /// by the OBJ/PLY parsers, decimation, and point-cloud reconstruction.
+    #[inline]
+    pub fn face_normal(a: Vec3, b: Vec3, c: Vec3) -> Option<Vec3> {
+        let n = (b - a).cross(c - a);
+        let len = n.length();
+        if len < 1e-12 { None } else { Some(n.scale(1.0 / len)) }
+    }
+
+    /// Two orthonormal tangents spanning the plane perpendicular to `self`
+    /// (which must be unit length), with `(t1, t2, self)` right-handed. Seeds
+    /// from the smallest-magnitude axis so it stays well-conditioned for any
+    /// orientation.
+    #[inline]
+    pub fn tangent_basis(self) -> (Vec3, Vec3) {
+        let seed = if self.x.abs() <= self.y.abs() && self.x.abs() <= self.z.abs() {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else if self.y.abs() <= self.z.abs() {
+            Vec3::new(0.0, 1.0, 0.0)
+        } else {
+            Vec3::new(0.0, 0.0, 1.0)
+        };
+        let t1 = self.cross(seed).normalized();
+        let t2 = self.cross(t1);
+        (t1, t2)
+    }
+
+}
+
+impl From<[f64; 3]> for Vec3 {
+    /// Build a `Vec3` from a `[f64; 3]` config array (center, up, light dir, …).
+    #[inline]
+    fn from(a: [f64; 3]) -> Self {
+        Vec3::new(a[0], a[1], a[2])
+    }
 }
 
 impl std::ops::Sub for Vec3 {
@@ -179,7 +215,13 @@ pub fn build_adjacency(triangles: &[crate::parser::Triangle]) -> FxHashMap<(i64,
 /// 3D model data (no NaN/Inf, limited exponent range).
 #[inline]
 pub fn parse_f64_fast(s: &str) -> Option<f64> {
-    let b = s.as_bytes();
+    parse_f64_bytes(s.as_bytes())
+}
+
+/// Byte-slice core of [`parse_f64_fast`], so parsers can work directly on
+/// `&[u8]` tokens without a `&str`/UTF-8 layer.
+#[inline]
+pub fn parse_f64_bytes(b: &[u8]) -> Option<f64> {
     let len = b.len();
     if len == 0 { return None; }
     let mut i = 0;
@@ -255,10 +297,51 @@ pub fn parse_vec3_iter<'a>(parts: &mut impl Iterator<Item = &'a str>) -> Option<
     Some(Vec3::new(x, y, z))
 }
 
+/// Parse 3 floats from a byte-token iterator into a Vec3.
+#[inline]
+pub fn parse_vec3_bytes<'a>(parts: &mut impl Iterator<Item = &'a [u8]>) -> Option<Vec3> {
+    let x = parts.next().and_then(parse_f64_bytes)?;
+    let y = parts.next().and_then(parse_f64_bytes)?;
+    let z = parts.next().and_then(parse_f64_bytes)?;
+    Some(Vec3::new(x, y, z))
+}
+
+/// Iterator over ASCII-whitespace-separated tokens of a byte slice — a byte-level
+/// `split_ascii_whitespace` with no `&str`/UTF-8 layer.
+pub struct AsciiTokens<'a> {
+    b: &'a [u8],
+    i: usize,
+}
+
+impl<'a> AsciiTokens<'a> {
+    #[inline]
+    pub fn new(b: &'a [u8]) -> Self {
+        AsciiTokens { b, i: 0 }
+    }
+}
+
+impl<'a> Iterator for AsciiTokens<'a> {
+    type Item = &'a [u8];
+    #[inline]
+    fn next(&mut self) -> Option<&'a [u8]> {
+        let b = self.b;
+        while self.i < b.len() && b[self.i].is_ascii_whitespace() { self.i += 1; }
+        if self.i >= b.len() { return None; }
+        let start = self.i;
+        while self.i < b.len() && !b[self.i].is_ascii_whitespace() { self.i += 1; }
+        Some(&b[start..self.i])
+    }
+}
+
 /// Fast manual integer parser for OBJ indices. Handles negative (relative) indices.
 #[inline]
 pub fn parse_i64_fast(s: &str) -> Option<i64> {
-    let b = s.as_bytes();
+    parse_i64_bytes(s.as_bytes())
+}
+
+/// Byte-slice core of [`parse_i64_fast`].
+#[inline]
+pub fn parse_i64_bytes(b: &[u8]) -> Option<i64> {
     let len = b.len();
     if len == 0 { return None; }
     let mut i = 0;

@@ -42,11 +42,11 @@ fn is_ascii_stl(data: &[u8]) -> bool {
 fn parse_ascii(data: &[u8]) -> Result<Vec<Triangle>, String> {
     let text = std::str::from_utf8(data).map_err(|_| "invalid UTF-8 in STL")?;
     let mut triangles = Vec::new();
-    let mut lines = text.lines().map(|l| l.trim());
+    let mut lines = text.lines().map(|l| l.trim_ascii());
 
     while let Some(line) = lines.next() {
         if let Some(rest) = line.strip_prefix("facet normal") {
-            let normal = parse_vec3(rest.trim())?;
+            let normal = parse_vec3(rest.trim_ascii())?;
             // Skip "outer loop"
             lines.next();
             let v0 = parse_vertex(&mut lines)?;
@@ -72,11 +72,11 @@ fn parse_vertex<'a>(lines: &mut impl Iterator<Item = &'a str>) -> Result<Vec3, S
     let rest = line
         .strip_prefix("vertex")
         .ok_or("expected 'vertex' keyword")?;
-    parse_vec3(rest.trim())
+    parse_vec3(rest.trim_ascii())
 }
 
 fn parse_vec3(s: &str) -> Result<Vec3, String> {
-    parse_vec3_iter(&mut s.split_whitespace()).ok_or_else(|| "expected 3 floats".into())
+    parse_vec3_iter(&mut s.split_ascii_whitespace()).ok_or_else(|| "expected 3 floats".into())
 }
 
 fn parse_binary(data: &[u8]) -> Result<Vec<Triangle>, String> {
