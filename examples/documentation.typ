@@ -1133,17 +1133,16 @@ PLY files can also contain clouds of points. 3D scanning apps usually allow to e
 - `point_boundary` (default: `60`) — connections spanning a normal jump wider than this angle (degrees) are cut. Lower cuts more (fewer fringes, but can gap sharp edges); higher keeps more; `0` disables it.
 
 ```example
-// hl: 8-10
+// hl: 8-9
 #let rubi_scan = read("data/rubi_scan.ply", encoding: none)
 
 #render-ply(rubi_scan,
-  up: (0,1,0),
-  elevation: 25,
+  azimuth: -197,
+  elevation: 20.5,
+  up: (0, 1, 0),
   zoom: 2.5,
-  auto_fit: false,
-  point_size: 0.03,
-  point_neighbors: 16,
-  point_boundary: 75,
+  point_neighbors: 10,
+  point_boundary: 70,
   width: 60%,
 )
 ```
