@@ -162,9 +162,7 @@ fn triangulate_loop(chain: &[(Vec3, Color3)], cap_normal: Vec3, out: &mut Vec<Tr
     if nv < 3 { return; }
 
     // Project onto the cap plane using a right-handed basis (u, v, cap_normal).
-    let a = if cap_normal.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
-    let u = cap_normal.cross(a).normalized();
-    let vv = cap_normal.cross(u);
+    let (u, vv) = cap_normal.tangent_basis();
     let p: Vec<(f64, f64)> = chain.iter().map(|&(pt, _)| (pt.dot(u), pt.dot(vv))).collect();
 
     #[inline]

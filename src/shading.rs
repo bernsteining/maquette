@@ -43,7 +43,7 @@ pub(crate) fn resolve_lights(config: &RenderConfig) -> Vec<ResolvedLight> {
     if config.lights.is_empty() {
         vec![ResolvedLight {
             kind: LightKind::Directional,
-            vector: Vec3::new(config.light_dir[0], config.light_dir[1], config.light_dir[2]).normalized(),
+            vector: Vec3::from(config.light_dir).normalized(),
             color: (1.0f32, 1.0f32, 1.0f32),
             cast_shadow: true,
             size: 0.0,
@@ -55,9 +55,9 @@ pub(crate) fn resolve_lights(config: &RenderConfig) -> Vec<ResolvedLight> {
             ResolvedLight {
                 kind: l.kind,
                 vector: if l.kind == LightKind::Directional {
-                    Vec3::new(l.vector[0], l.vector[1], l.vector[2]).normalized()
+                    Vec3::from(l.vector).normalized()
                 } else {
-                    Vec3::new(l.vector[0], l.vector[1], l.vector[2])
+                    Vec3::from(l.vector)
                 },
                 color: (l.color.0 * intensity, l.color.1 * intensity, l.color.2 * intensity),
                 cast_shadow: l.cast_shadow,
@@ -69,11 +69,11 @@ pub(crate) fn resolve_lights(config: &RenderConfig) -> Vec<ResolvedLight> {
 
 pub(crate) fn shadow_light_dir(config: &RenderConfig) -> Vec3 {
     if config.lights.is_empty() {
-        Vec3::new(config.light_dir[0], config.light_dir[1], config.light_dir[2]).normalized()
+        Vec3::from(config.light_dir).normalized()
     } else {
         config.lights.iter()
             .find(|l| l.kind == LightKind::Directional)
-            .map(|l| Vec3::new(l.vector[0], l.vector[1], l.vector[2]).normalized())
+            .map(|l| Vec3::from(l.vector).normalized())
             .unwrap_or(Vec3::new(0.0, 0.0, 1.0))
     }
 }
