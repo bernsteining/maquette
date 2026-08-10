@@ -186,6 +186,8 @@ const SCHEMA = [
     { k: "explode", label: "Explode", t: "rng", def: 0, min: 0, max: 1, step: 0.02 },
     { k: "decimate", label: "Decimate", t: "rng", def: 0, min: 0, max: 1, step: 0.02 },
     { k: "point_size", label: "Point size (PLY clouds)", t: "num", def: 0, omitIf: v => v === 0 },
+    { k: "point_neighbors", label: "Point neighbors (k)", t: "num", def: 12, omitIf: v => v === 12 },
+    { k: "point_boundary", label: "Point boundary (°)", t: "num", def: 60, omitIf: v => v === 60 },
   ]},
 
   { s: "Multi-view", fields: [
@@ -253,7 +255,7 @@ const HELP = {
   sharpen: "Unsharp-mask edge sharpening (PNG only).",
   clip: "Cut the model with a plane; optionally cap and hatch the section.",
   explode: "Push components outward from the center (multi-part models).",
-  decimate: "Simplify the mesh (higher = fewer triangles).", point_size: "Neighbor radius for PLY point clouds.",
+  decimate: "Simplify the mesh (higher = fewer triangles).", point_size: "Neighbor radius for PLY point clouds.", point_neighbors: "PLY clouds: neighbors per point (higher = fewer holes, slower).", point_boundary: "PLY clouds: cut connections across a normal jump > this angle\u00b0 (0 = keep all).",
   views: "Render a grid of named orthographic views.", grid_labels: "Show labels on the multi-view grid.",
   turntable: "Render a spun grid of frames around the model.",
   materials: "Map OBJ material names to colors.", highlight: "Recolor named OBJ groups.",
