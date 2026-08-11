@@ -32,7 +32,9 @@ doc: build
 # examples/data/; the demo needs them under docs/ (the only dir Pages
 # publishes). Single source of truth for the demo's model set — shared by
 # `make demo` (local) and the Pages CI, so neither hard-codes the list.
-DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj rubi_scan.ply
+# Picker models first, then extras only referenced by documentation deep-links.
+DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj rubi_scan.ply \
+              cube.stl colored_cube.stl cube.obj rubi_blender.ply
 
 # Copy the demo models into docs/ (gitignored there — regenerated, not committed).
 demo-assets:

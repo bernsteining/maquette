@@ -33,11 +33,69 @@
   ambient: 0.4, light_dir: (2, 3, 2.5),
 )
 
+// ── Demo deep-links ──────────────────────────────────────────────────────
+// Every example render is wrapped in a link to the live web demo, preloaded
+// with that example's model + config (?model=…&field=value…). The demo decodes
+// this exact vocabulary (plugin config; strings raw, everything else JSON).
+#let demo-base = "https://bernsteining.github.io/maquette/"
+#let hexd = "0123456789ABCDEF"
+#let safe-bytes = array(bytes("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"))
+#let pct(s) = {                     // percent-encode a string for a URL
+  let out = ""
+  for b in array(bytes(s)) {
+    if safe-bytes.contains(b) { out += str(bytes((b,))) }
+    else { out += "%" + hexd.slice(calc.quo(b, 16), calc.quo(b, 16) + 1) + hexd.slice(calc.rem(b, 16), calc.rem(b, 16) + 1) }
+  }
+  out
+}
+#let demo-url(name, cfg) = {
+  let parts = ("model=" + pct(name),)
+  for (k, v) in cfg {
+    if k in ("width", "height", "format") { continue }   // display-only, not demo config
+    let vs = if v == none { "none" } else if type(v) == str { v } else { str(json.encode(v, pretty: false)) }
+    parts.push(pct(k) + "=" + pct(vs))
+  }
+  demo-base + "?" + parts.join("&")
+}
+#let cfg-of(args) = {               // config = positional dict (if any) + named args
+  let c = (:)
+  if args.pos().len() >= 1 and type(args.pos().at(0)) == dictionary { c = args.pos().at(0) }
+  c + args.named()
+}
+#let dm(name, data) = (maq-model: true, name: name, data: data)   // name-carrying model
+#let unwrap(m) = if type(m) == dictionary and m.at("maq-model", default: false) { m.data } else { m }
+#let wrap-render(fn) = (m, ..args) => if type(m) == dictionary and m.at("maq-model", default: false) {
+  link(demo-url(m.name, cfg-of(args)), fn(m.data, ..args))
+} else { fn(m, ..args) }
+#let wrap-info(fn) = (m, ..args) => fn(unwrap(m), ..args)
+
+// Wrap the render + info APIs and model vars GLOBALLY, so every render in the
+// document — not just ```example blocks, but the hero, quickstart, projection
+// grids and captioned figures too — deep-links to the demo. Renders of raw bytes
+// (inline geometry via `bytes(…)`) have no named model and pass through unlinked.
+#let (r-obj, r-stl, r-ply) = (render-obj, render-stl, render-ply)
+#let (i-obj, i-stl, i-ply) = (get-obj-info, get-stl-info, get-ply-info)
+#let render-obj = wrap-render(r-obj)
+#let render-stl = wrap-render(r-stl)
+#let render-ply = wrap-render(r-ply)
+#let get-obj-info = wrap-info(i-obj)
+#let get-stl-info = wrap-info(i-stl)
+#let get-ply-info = wrap-info(i-ply)
+#let bunny = dm("bunny.obj", bunny)
+#let cube = dm("cube.stl", cube)
+#let colored = dm("colored_cube.stl", colored)
+#let obj-cube = dm("cube.obj", obj-cube)
+#let teapot = dm("teapot.obj", teapot)
+#let crankshaft = dm("crankshaft.obj", crankshaft)
+#let skull-brain = dm("brain_skull.obj", skull-brain)
+#let rubi = dm("rubi_blender.ply", rubi)
+#let rubi_scan = dm("rubi_scan.ply", rubi_scan)
+
 #let doc-scope = (
   render-stl: render-stl, render-obj: render-obj, render-ply: render-ply,
   get-stl-info: get-stl-info, get-obj-info: get-obj-info, get-ply-info: get-ply-info,
-  cube: cube, colored: colored, settings: settings,
-  obj-cube: obj-cube, teapot: teapot, crankshaft: crankshaft, bunny:bunny, skull-brain: skull-brain, rubi: rubi, rubi_scan: rubi_scan
+  settings: settings, cube: cube, colored: colored, obj-cube: obj-cube, teapot: teapot,
+  crankshaft: crankshaft, bunny: bunny, skull-brain: skull-brain, rubi: rubi, rubi_scan: rubi_scan,
 )
 #let filter-eval(text) = text.split("\n").filter(l =>
   not l.starts-with("#import") and not (l.starts-with("#let ") and l.contains("read("))
