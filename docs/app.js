@@ -971,42 +971,110 @@ $("btn-download").onclick = () => {
   }
 };
 
-// Build a shareable URL: ?model=<name>&<field>=<value>… over the config diff vs
-// defaults. Strings stay raw for readability (mode=x-ray); everything else is
-// JSON (azimuth=-119, up=[0,1,0], ssao={…}). Round-trips losslessly.
-function shareUrl() {
-  const init = initState();
-  const p = new URLSearchParams();
-  p.set("model", model.name);
-  for (const k in state) {
-    if (eq(state[k], init[k])) continue;
-    const v = state[k];
-    p.set(k, typeof v === "string" ? v : JSON.stringify(v));
-  }
-  return location.origin + location.pathname + "?" + p.toString();
+// ── Shareable links ────────────────────────────────────────────────────────
+// A link carries the model + config diff. We emit whichever encoding is shorter:
+// a readable ?code=value… form (field names aliased to short codes, minimal
+// percent-encoding — same scheme the Typst docs emit) or a compact
+// ?_=1<deflate+base64url> blob (best for large configs). Both are decoded on load,
+// and after any link loads the address bar is shortened to the best form.
+// Old full-name ?model=…&field=… links and legacy #cfg= blobs still decode.
+const bytesToB64u = (b) => { let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const b64uToBytes = (s) => { const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/")); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; };
+const hasCompression = typeof CompressionStream !== "undefined" && typeof DecompressionStream !== "undefined";
+// Top-level config keys → short letter codes before deflate, shaving the
+// field-name bytes deflate can't fully squeeze. APPEND-ONLY (never reorder/remove)
+// so old links keep decoding; unlisted keys pass through unshortened. Only applied
+// to top-level keys — map values (highlight/materials group names) are left alone.
+const FIELD_CODES = ["model", "camera", "azimuth", "elevation", "distance", "center", "up", "projection",
+  "fov", "zoom", "pan", "auto_center", "auto_fit", "background", "width", "height", "color", "opacity",
+  "specular", "shininess", "smooth", "gamma_correction", "cull_backface", "shading", "gooch_warm",
+  "gooch_cool", "cel_bands", "mode", "xray_opacity", "stroke", "wireframe", "light_dir", "ambient",
+  "fresnel", "tone_mapping", "sss", "lights", "color_map", "overhang_angle", "scalar_function",
+  "vertex_smoothing", "color_map_palette", "outline", "ground_shadow", "shadows", "antialias", "ssao",
+  "bloom", "glow", "sharpen", "clip", "explode", "decimate", "views", "grid_labels", "turntable",
+  "materials", "highlight", "annotations", "debug", "debug_color", "point_size", "point_neighbors",
+  "point_boundary", "_cam", "_hemi", "_bgNone"];
+// Letters-only codes so no code is an integer-like key (which JS would reorder).
+const CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const codeFor = (i) => i < 52 ? CODE_ALPHABET[i] : CODE_ALPHABET[((i - 52) / 52) | 0] + CODE_ALPHABET[(i - 52) % 52];
+const KEY_ALIAS = {}, KEY_UNALIAS = {};
+FIELD_CODES.forEach((k, i) => { const c = codeFor(i); KEY_ALIAS[k] = c; KEY_UNALIAS[c] = k; });
+const aliasKeys = (o) => { const r = {}; for (const k in o) r[KEY_ALIAS[k] ?? k] = o[k]; return r; };
+const unaliasKeys = (o) => { const r = {}; for (const k in o) r[KEY_UNALIAS[k] ?? k] = o[k]; return r; };
+// Query chars safe to leave literal (shorter than %XX). URLSearchParams still
+// parses these; only & = + # % space and non-ASCII get encoded. Must match the
+// Typst documentation-link generator so both produce identical links.
+const B_SAFE = new Set([..."ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~,:!$*;@/?[]{}\"()"].map((c) => c.charCodeAt(0)));
+const pctB = (s) => [...s].map((ch) => B_SAFE.has(ch.charCodeAt(0)) ? ch : encodeURIComponent(ch)).join("");
+async function deflate(str) {
+  const cs = new CompressionStream("deflate-raw"), w = cs.writable.getWriter();
+  w.write(ENC.encode(str)); w.close();
+  return new Uint8Array(await new Response(cs.readable).arrayBuffer());
 }
-// Apply ?model=…&field=… (and legacy #cfg=<blob>) into state. Returns the model
-// to load and whether any config beyond the model was present.
-function applyStateFromUrl() {
-  const raw = {}; let name = null, hadConfig = false;
-  for (const [k, v] of new URLSearchParams(location.search)) {
-    if (k === "model") { name = v; continue; }
-    hadConfig = true;
-    let val; try { val = JSON.parse(v); } catch { val = v; }   // "-119"→-119, "x-ray"→"x-ray"
-    raw[k] = val;
-  }
-  const m = location.hash.match(/cfg=([^&]+)/);       // legacy base64 links
-  if (m) {
+async function inflate(bytes) {
+  const ds = new DecompressionStream("deflate-raw"), w = ds.writable.getWriter();
+  w.write(bytes); w.close();
+  return DEC.decode(await new Response(ds.readable).arrayBuffer());
+}
+
+function shareConfig() {                       // model + config diff vs defaults
+  const init = initState(), cfg = { model: model.name };
+  for (const k in state) if (!eq(state[k], init[k])) cfg[k] = state[k];
+  return cfg;
+}
+const baseUrl = () => location.origin + location.pathname;
+function readableUrl(cfg) {           // ?code=value… — aliased keys, minimal encoding
+  const parts = [];
+  for (const [k, v] of Object.entries(aliasKeys(cfg))) parts.push(k + "=" + pctB(typeof v === "string" ? v : JSON.stringify(v)));
+  return baseUrl() + "?" + parts.join("&");
+}
+async function compactUrl(cfg) {      // ?_=1<deflate+base64url> ("_" is never a field code)
+  if (!hasCompression) return null;
+  try { return baseUrl() + "?_=1" + bytesToB64u(await deflate(JSON.stringify(aliasKeys(cfg)))); }
+  catch { return null; }
+}
+async function bestUrl(cfg) {                  // shortest of readable / compact
+  const r = readableUrl(cfg), c = await compactUrl(cfg);
+  return c && c.length < r.length ? c : r;
+}
+
+// Decode a link into state. Returns the model to load, whether any config was
+// present, and the raw config (for the exact-render override + address shortening).
+async function applyStateFromUrl() {
+  const p = new URLSearchParams(location.search);
+  let raw = null, name = null, hadConfig = false;
+  const blob = p.get("_");
+  if (blob) {
     try {
-      const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
-      Object.assign(raw, JSON.parse(decodeURIComponent(escape(atob(b64)))));
+      const bytes = b64uToBytes(blob.slice(1));
+      const obj = unaliasKeys(JSON.parse(blob[0] === "1" ? await inflate(bytes) : DEC.decode(bytes)));
+      if (obj.model != null) name = obj.model;
+      delete obj.model;
+      raw = obj; hadConfig = Object.keys(obj).length > 0;
+    } catch (e) { console.warn("ignoring malformed compact link", e); }
+  }
+  if (!raw) {
+    raw = {};
+    for (const [k, v] of p) {
+      if (k === "_") continue;
+      const key = KEY_UNALIAS[k] ?? k;    // aliased code → field; old full-name links pass through
+      if (key === "model") { name = v; continue; }
       hadConfig = true;
-    } catch (e) { console.warn("ignoring malformed config link", e); }
+      let val; try { val = JSON.parse(v); } catch { val = v; }   // "-119"→-119, "x-ray"→"x-ray"
+      raw[key] = val;
+    }
+    const m = location.hash.match(/cfg=([^&]+)/);       // legacy base64 blob
+    if (m) {
+      try { Object.assign(raw, JSON.parse(DEC.decode(b64uToBytes(m[1])))); hadConfig = true; }
+      catch (e) { console.warn("ignoring malformed config link", e); }
+    }
   }
   applyConfig(raw);
   renderOverride = hadConfig ? structuredClone(raw) : null;   // exact render, until first edit
-  return { name, hadConfig };
+  return { name, hadConfig, raw };
 }
+// An enabled toggle-group filled from a field's defaults.
+const groupBase = (field) => ({ __on: true, ...structuredClone(field.def) });
 // Normalize a plugin-style OR demo-state config object into demo state (in place).
 // Lets documentation deep-links use the clean plugin config (sss:{…}, fresnel:0.3,
 // background:"none", highlight:{name:color}) and still populate the UI correctly.
@@ -1020,7 +1088,7 @@ function applyConfig(cfg) {
     }
     if (k === "background" && v === "") { state._bgNone = true; continue; }
     if (f && f.t === "grp" && k !== "clip") {                   // toggle groups: true | {…} | scalar shorthands (clip handled below)
-      const base = { __on: true, ...structuredClone(f.def) };
+      const base = groupBase(f);
       if (v === true) v = base;
       else if (k === "fresnel" && typeof v === "number") v = { ...base, intensity: v };
       else if (k === "tone_mapping" && typeof v === "string") v = { ...base, method: v };
@@ -1032,10 +1100,10 @@ function applyConfig(cfg) {
       continue;
     }
     if (k === "ambient" && v && typeof v === "object" && !Array.isArray(v)) {      // hemisphere ambient
-      state._hemi = { __on: true, ...structuredClone(TOP_FIELDS._hemi.def), ...v }; continue;
+      state._hemi = { ...groupBase(TOP_FIELDS._hemi), ...v }; continue;
     }
     if (k === "clip" && v && typeof v === "object" && !Array.isArray(v)) {          // plugin clip → demo state
-      const cl = { __on: true, ...structuredClone(TOP_FIELDS.clip.def) };
+      const cl = groupBase(TOP_FIELDS.clip);
       if ("depth" in v) cl.depth = v.depth;
       if (v.from) cl.source = v.from; else if (v.axis) cl.source = v.axis;          // camera | x/y/z (plane: no UI, override renders it)
       if (v.keep) cl.keep = v.keep;
@@ -1059,7 +1127,7 @@ function applyConfig(cfg) {
   }
 }
 $("btn-share").onclick = async () => {
-  const url = shareUrl();
+  const url = await bestUrl(shareConfig());
   history.replaceState(null, "", url);
   const ok = await copyText(url);
   const b = $("btn-share"), o = b.textContent; b.textContent = ok ? "Copied!" : "Link in URL"; setTimeout(() => (b.textContent = o), 1400);
@@ -1154,7 +1222,7 @@ async function loadModule() {
 
 // ─────────────────────────────────── boot ─────────────────────────────────
 (async function boot() {
-  const { name: urlModel, hadConfig } = applyStateFromUrl();  // shared model + config, if any
+  const { name: urlModel, hadConfig, raw } = await applyStateFromUrl();  // shared model + config, if any
   buildForm(); refreshVisibility();
   try {
     const module = await loadModule();
@@ -1172,5 +1240,8 @@ async function loadModule() {
     model = { name, bytes };
     syncPreset(name);
     refreshVisibility(); measure(); onChange();
+    // Shorten the address bar to the compact form, so even a long readable
+    // documentation link becomes short (and copy-ready) once it has loaded.
+    if (hadConfig) bestUrl({ model: name, ...raw }).then(u => history.replaceState(null, "", u));
   } catch (e) { showErr("failed to load WASM/model: " + e.message); console.error(e); }
 })();
