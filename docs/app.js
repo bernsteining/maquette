@@ -318,6 +318,15 @@ function group(f, mode) {
 }
 
 // ─────────────────────── build render config (→ WASM) ─────────────────────
+// Exact config from a deep-link, kept as a render override so features the UI
+// can't fully represent (clip plane equation, per-group highlight stroke/opacity)
+// still render pixel-exact. Wins over the state-derived config per top-level key;
+// cleared the moment the user edits anything (then it's a live, state-driven config).
+let renderOverride = null;
+function renderConfig() {
+  const c = buildConfig();
+  return renderOverride ? { ...c, ...renderOverride } : c;
+}
 function buildConfig() {
   const c = {};
   for (const sec of SCHEMA) for (const f of sec.fields) {
@@ -488,8 +497,7 @@ function ctl(f, slot, local) {
     }
     wrap.append(labelEl, input);
   }
-  const tip = f.help || HELP[f.k];
-  if (tip) labelEl.title = tip;
+  attachTip(labelEl, f.help || HELP[f.k]);
   if (slot === state && sync) controlRefs[f.k] = sync;
   if (f.when) conds.push({ node: wrap, when: f.when, local });
   return wrap;
@@ -504,7 +512,7 @@ function groupNode(f) {
     head.append(cb);
   }
   head.append(document.createTextNode(f.label));
-  { const tip = f.help || HELP[f.k]; if (tip) head.title = tip; }
+  attachTip(head, f.help || HELP[f.k]);
   const sub = document.createElement("div"); sub.className = "sub";
   for (const s of f.fields) sub.append(ctl(s, state[f.k], state[f.k]));
   box.append(head, sub);
@@ -638,7 +646,7 @@ function rebuildForm() {
 }
 function labelWrap(f, node) {
   const w = document.createElement("div"); w.className = "ctl";
-  if (f.label) { const l = document.createElement("label"); l.innerHTML = `<span>${f.label}</span>`; const tip = f.help || HELP[f.k]; if (tip) l.title = tip; w.append(l); }
+  if (f.label) { const l = document.createElement("label"); l.innerHTML = `<span>${f.label}</span>`; attachTip(l, f.help || HELP[f.k]); w.append(l); }
   w.append(node);
   if (f.when) conds.push({ node: w, when: f.when, local: state });
   return w;
@@ -668,7 +676,7 @@ function render() {
   try {
     const token = ++renderToken;
     const t0 = performance.now();
-    const out = callPlugin(fn, model.bytes, ENC.encode(JSON.stringify(buildConfig())));
+    const out = callPlugin(fn, model.bytes, ENC.encode(JSON.stringify(renderConfig())));
     const ms = performance.now() - t0;
     // Raster output is raw RGBA ([0x00][w][h][rgba8…]); grid / turntable / debug /
     // annotations add a transparent vector overlay ([0x02][w][h][rgba8 w*h*4][svg…]).
@@ -721,23 +729,60 @@ async function copyText(text) {
 const MODELS = [
   ["bunny.obj", "Bunny (OBJ)"],
   ["teapot.obj", "Teapot (OBJ)"],
-  ["crankshaft.obj", "Crankshaft (OBJ · 5.8 MB)"],
+  ["crankshaft.obj", "Crankshaft (OBJ)"],
   ["brain_skull.obj", "Brain + skull (OBJ)"],
   ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
 ];
+
+// Per-model "showcase" config, applied when a built-in model is picked so each
+// loads looking like its documentation example. On every preset load these keys
+// are first reset to their schema defaults, then the picked model's overrides
+// applied — so switching models never leaves another model's styling behind.
+const MODEL_DEFAULTS = {
+  // White skull with a pink brain revealed through x-ray (see documentation.pdf).
+  "brain_skull.obj": {
+    highlight: [["Skull", "#e8e8e8"], ["Brain", "#ee69b4"]],
+    mode: "x-ray", xray_opacity: 0.3,
+  },
+  // Brushed-steel grey; crankshaft is modelled -Y up (as the documentation uses).
+  "crankshaft.obj": {
+    color: "#7d8590", specular: 0.6, shininess: 48, up: [0, -1, 0],
+  },
+  // Point-cloud reconstruction framed like the documentation's Rubik scan.
+  "rubi_scan.ply": {
+    point_size: 0.024, point_boundary: 110,
+    _cam: "spherical", azimuth: -119, elevation: 24.5, up: [0, 1, 0], zoom: 2.254,
+  },
+};
+const DEFAULTS_KEYS = [...new Set(Object.values(MODEL_DEFAULTS).flatMap(Object.keys))];
+const TOP_FIELDS = Object.fromEntries(SCHEMA.flatMap(s => s.fields.map(f => [f.k, f])));
+function applyModelDefaults(name) {
+  for (const k of DEFAULTS_KEYS) {   // reset to the field's starting value (init, else def)
+    const f = TOP_FIELDS[k];
+    state[k] = structuredClone(f && f.init !== undefined ? f.init : f && f.def);
+  }
+  const ov = MODEL_DEFAULTS[name];
+  if (ov) for (const k in ov) state[k] = structuredClone(ov[k]);
+}
 
 // Shared ingestion for both dropped/browsed files and built-in presets.
 function ingest(name, bytes) {
   model = { name, bytes };
   syncPreset(name);
+  renderOverride = null;
+  if (location.search || location.hash) history.replaceState(null, "", location.pathname);  // drop a stale share link
   refreshVisibility(); measure(); onChange();
 }
 async function loadFile(file) {
   ingest(file.name, new Uint8Array(await file.arrayBuffer()));
 }
 async function loadPreset(name) {
-  try { ingest(name, new Uint8Array(await (await fetch(name)).arrayBuffer())); }
-  catch (e) { showErr("failed to load " + name + ": " + e.message); }
+  try {
+    const bytes = new Uint8Array(await (await fetch(name)).arrayBuffer());
+    applyModelDefaults(name);
+    buildForm(); refreshVisibility();   // reflect the new state in the form controls
+    ingest(name, bytes);
+  } catch (e) { showErr("failed to load " + name + ": " + e.message); }
 }
 // Reflect the active model in the dropdown; a dropped file gets a transient entry.
 function syncPreset(name) {
@@ -754,6 +799,30 @@ function syncPreset(name) {
 })();
 $("browse").onclick = () => $("file").click();
 $("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
+
+// ─────────────────────── hover descriptions (tooltips) ─────────────────────
+// Tag an element with its help text; a single delegated listener shows an
+// immediate, styled tooltip on hover (native `title` is too slow/subtle).
+function attachTip(el, tip) { if (!tip) return; el.dataset.tip = tip; el.classList.add("has-tip"); }
+const tipEl = $("tip");
+function positionTip(target) {
+  const r = target.getBoundingClientRect(), m = 8;
+  const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+  let x = Math.min(r.left, innerWidth - tw - m);
+  let y = r.bottom + 6;
+  if (y + th > innerHeight - m) y = r.top - th - 6;   // flip above when no room below
+  tipEl.style.left = Math.max(m, x) + "px";
+  tipEl.style.top = Math.max(m, y) + "px";
+}
+document.addEventListener("mouseover", (e) => {
+  const el = e.target.closest && e.target.closest("[data-tip]");
+  if (!el) return;
+  tipEl.textContent = el.dataset.tip; tipEl.classList.add("show"); positionTip(el);
+});
+document.addEventListener("mouseout", (e) => {
+  const el = e.target.closest && e.target.closest("[data-tip]");
+  if (el && !el.contains(e.relatedTarget)) tipEl.classList.remove("show");
+});
 $("copy").onclick = async () => { await copyText(buildTypst()); const o = $("copy").textContent; $("copy").textContent = "Copied!"; setTimeout(() => ($("copy").textContent = o), 1200); };
 
 // ── measurements (model-intrinsic; get-*-info) ─────────────────────────────
@@ -869,23 +938,97 @@ $("btn-download").onclick = () => {
   }
 };
 
-// Encode the config (diff vs defaults) into the URL hash — shareable & compact.
-function encodeState() {
-  const init = initState(), diff = {};
-  for (const k in state) if (!eq(state[k], init[k])) diff[k] = state[k];
-  return btoa(unescape(encodeURIComponent(JSON.stringify(diff)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+// Build a shareable URL: ?model=<name>&<field>=<value>… over the config diff vs
+// defaults. Strings stay raw for readability (mode=x-ray); everything else is
+// JSON (azimuth=-119, up=[0,1,0], ssao={…}). Round-trips losslessly.
+function shareUrl() {
+  const init = initState();
+  const p = new URLSearchParams();
+  p.set("model", model.name);
+  for (const k in state) {
+    if (eq(state[k], init[k])) continue;
+    const v = state[k];
+    p.set(k, typeof v === "string" ? v : JSON.stringify(v));
+  }
+  return location.origin + location.pathname + "?" + p.toString();
 }
-function applyStateFromHash() {
-  const m = location.hash.match(/cfg=([^&]+)/);
-  if (!m) return;
-  try {
-    const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
-    Object.assign(state, structuredClone(JSON.parse(decodeURIComponent(escape(atob(b64))))));
-  } catch (e) { console.warn("ignoring malformed config link", e); }
+// Apply ?model=…&field=… (and legacy #cfg=<blob>) into state. Returns the model
+// to load and whether any config beyond the model was present.
+function applyStateFromUrl() {
+  const raw = {}; let name = null, hadConfig = false;
+  for (const [k, v] of new URLSearchParams(location.search)) {
+    if (k === "model") { name = v; continue; }
+    hadConfig = true;
+    let val; try { val = JSON.parse(v); } catch { val = v; }   // "-119"→-119, "x-ray"→"x-ray"
+    raw[k] = val;
+  }
+  const m = location.hash.match(/cfg=([^&]+)/);       // legacy base64 links
+  if (m) {
+    try {
+      const b64 = m[1].replace(/-/g, "+").replace(/_/g, "/");
+      Object.assign(raw, JSON.parse(decodeURIComponent(escape(atob(b64)))));
+      hadConfig = true;
+    } catch (e) { console.warn("ignoring malformed config link", e); }
+  }
+  applyConfig(raw);
+  renderOverride = hadConfig ? structuredClone(raw) : null;   // exact render, until first edit
+  return { name, hadConfig };
+}
+// Normalize a plugin-style OR demo-state config object into demo state (in place).
+// Lets documentation deep-links use the clean plugin config (sss:{…}, fresnel:0.3,
+// background:"none", highlight:{name:color}) and still populate the UI correctly.
+function applyConfig(cfg) {
+  for (const k in cfg) {
+    let v = cfg[k];
+    const f = TOP_FIELDS[k];
+    if (v === "none" || v === null) {          // Typst `none` = transparent bg / unset default
+      if (k === "background") state._bgNone = true;
+      continue;
+    }
+    if (k === "background" && v === "") { state._bgNone = true; continue; }
+    if (f && f.t === "grp" && k !== "clip") {                   // toggle groups: true | {…} | scalar shorthands (clip handled below)
+      const base = { __on: true, ...structuredClone(f.def) };
+      if (v === true) v = base;
+      else if (k === "fresnel" && typeof v === "number") v = { ...base, intensity: v };
+      else if (k === "tone_mapping" && typeof v === "string") v = { ...base, method: v };
+      else if (v && typeof v === "object" && !Array.isArray(v)) v = { ...base, ...v };
+      state[k] = v; continue;
+    }
+    if (f && f.t === "map" && v && typeof v === "object" && !Array.isArray(v)) {   // {name: color|{color,…}} → pairs
+      state[k] = Object.entries(v).map(([n, cv]) => [n, cv && typeof cv === "object" ? (cv.color || "#88ccff") : cv]);
+      continue;
+    }
+    if (k === "ambient" && v && typeof v === "object" && !Array.isArray(v)) {      // hemisphere ambient
+      state._hemi = { __on: true, ...structuredClone(TOP_FIELDS._hemi.def), ...v }; continue;
+    }
+    if (k === "clip" && v && typeof v === "object" && !Array.isArray(v)) {          // plugin clip → demo state
+      const cl = { __on: true, ...structuredClone(TOP_FIELDS.clip.def) };
+      if ("depth" in v) cl.depth = v.depth;
+      if (v.from) cl.source = v.from; else if (v.axis) cl.source = v.axis;          // camera | x/y/z (plane: no UI, override renders it)
+      if (v.keep) cl.keep = v.keep;
+      if ("cap" in v) cl.cap = v.cap;
+      if (v.hatch && typeof v.hatch === "object") {
+        cl.hatch = true;
+        const h = v.hatch;
+        if (h.style != null) cl.hstyle = h.style;
+        if (h.angle != null) cl.hangle = h.angle;
+        if (h.spacing != null) cl.hspacing = h.spacing;
+        if (h.width != null) cl.hwidth = h.width;
+        if (h.color != null) cl.hcolor = h.color;
+      }
+      state.clip = cl; continue;
+    }
+    if (k in state) state[k] = v;
+  }
+  if (!("_cam" in cfg)) {                                       // infer camera mode from which params are present
+    if ("azimuth" in cfg || "elevation" in cfg || "distance" in cfg) state._cam = "spherical";
+    else if ("camera" in cfg) state._cam = "cartesian";
+  }
 }
 $("btn-share").onclick = async () => {
-  location.hash = "cfg=" + encodeState();
-  const ok = await copyText(location.href);
+  const url = shareUrl();
+  history.replaceState(null, "", url);
+  const ok = await copyText(url);
   const b = $("btn-share"), o = b.textContent; b.textContent = ok ? "Copied!" : "Link in URL"; setTimeout(() => (b.textContent = o), 1400);
 };
 
@@ -893,10 +1036,15 @@ $("btn-reset").onclick = () => {
   const init = initState();
   for (const k in state) delete state[k];
   Object.assign(state, init);
-  history.replaceState(null, "", location.pathname + location.search);
+  renderOverride = null;
+  history.replaceState(null, "", location.pathname);
   $("search").value = "";
   rebuildForm(); measure(); onChange();
 };
+
+// The first manual edit of any control drops the deep-link override, so from
+// there the render follows the (editable) state instead of the frozen link config.
+$("form").addEventListener("input", () => { renderOverride = null; }, true);
 
 $("search").addEventListener("input", () => filterForm($("search").value));
 
@@ -973,14 +1121,23 @@ async function loadModule() {
 
 // ─────────────────────────────────── boot ─────────────────────────────────
 (async function boot() {
-  applyStateFromHash();          // restore a shared config before building the form
+  const { name: urlModel, hadConfig } = applyStateFromUrl();  // shared model + config, if any
   buildForm(); refreshVisibility();
   try {
     const module = await loadModule();
     // With a Module (not bytes), instantiate() resolves to the Instance directly.
     instance = await WebAssembly.instantiate(module, importObject);
     memory = instance.exports.memory;
-    model = { name: "bunny.obj", bytes: new Uint8Array(await (await fetch("bunny.obj")).arrayBuffer()) };
-    measure(); onChange();
+    // Load the model named in the URL (any file present in the demo dir — not
+    // just picker built-ins, so documentation deep-links resolve), else bunny.
+    const wanted = urlModel || "bunny.obj";
+    // Bare ?model=… link (no config): show that model's showcase defaults.
+    if (urlModel && !hadConfig) { applyModelDefaults(wanted); buildForm(); }
+    let name = wanted, bytes;
+    try { const r = await fetch(wanted); if (!r.ok) throw 0; bytes = new Uint8Array(await r.arrayBuffer()); }
+    catch { name = "bunny.obj"; bytes = new Uint8Array(await (await fetch("bunny.obj")).arrayBuffer()); }
+    model = { name, bytes };
+    syncPreset(name);
+    refreshVisibility(); measure(); onChange();
   } catch (e) { showErr("failed to load WASM/model: " + e.message); console.error(e); }
 })();
