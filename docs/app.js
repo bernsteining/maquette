@@ -174,11 +174,12 @@ const SCHEMA = [
 
   { s: "Geometry & clipping", fields: [
     { k: "clip", label: "Clip plane", t: "grp", toggle: true, def: {
-        source: "camera", depth: 0.5, keep: "far", cap: true,
+        source: "camera", plane: [0, 0, 1, 0], depth: 0.5, keep: "far", cap: true,
         hatch: false, hstyle: "lines", hangle: 45, hspacing: 6, hwidth: 0.6, hcolor: "#333333" },
       build: "clip", fields: [
-        { k: "source", label: "From", t: "sel", def: "camera", opts: [["camera","Camera"],["x","X axis"],["y","Y axis"],["z","Z axis"]] },
-        { k: "depth", label: "Depth", t: "rng", def: 0.5, min: 0, max: 1, step: 0.01 },
+        { k: "source", label: "From", t: "sel", def: "camera", opts: [["camera","Camera"],["x","X axis"],["y","Y axis"],["z","Z axis"],["plane","Plane (a,b,c,d)"]] },
+        { k: "plane", label: "Plane a, b, c, d", t: "vec", def: [0,0,1,0], when: (s,l) => l.source === "plane" },
+        { k: "depth", label: "Depth", t: "rng", def: 0.5, min: 0, max: 1, step: 0.01, when: (s,l) => l.source !== "plane" },
         { k: "keep", label: "Keep", t: "sel", def: "far", opts: [["far","Far half"],["near","Near half"]] },
         { k: "cap", label: "Cap cross-section", t: "bool", def: true },
         { k: "hatch", label: "Hatch cap", t: "bool", def: false },
@@ -203,7 +204,7 @@ const SCHEMA = [
 
   { s: "OBJ groups", fields: [
     { k: "materials", label: "Materials (name → color)", t: "map", def: [] },
-    { k: "highlight", label: "Highlight (group → color)", t: "map", def: [] },
+    { k: "highlight", label: "Highlight (group → appearance)", t: "map", rich: true, def: [] },
     { k: "annotations", label: "Annotations", t: "grp", toggle: true, bool: true, def: { color: "#333333", font_size: 12, offset: 40 }, fields: [
       { k: "color", label: "Color", t: "col", def: "#333333" },
       { k: "font_size", label: "Font size", t: "num", def: 12 },
@@ -299,8 +300,9 @@ function fmtT(v) {                                  // JS value → Typst litera
 function group(f, mode) {
   const s = state[f.k];
   if (f.build === "clip") {                          // clip: assemble source/keep/hatch
-    const o = { depth: s.depth };
-    if (s.source === "camera") o.from = "camera"; else o.axis = s.source;
+    const o = {};
+    if (s.source === "plane") o.plane = s.plane.slice();
+    else { o.depth = s.depth; if (s.source === "camera") o.from = "camera"; else o.axis = s.source; }
     if (s.keep === "near") o.keep = "near";
     if (mode === "cfg" || s.cap !== true) o.cap = s.cap;
     if (s.hatch) o.hatch = { style: s.hstyle, angle: s.hangle, spacing: s.hspacing, width: s.hwidth, color: s.hcolor };
@@ -327,6 +329,28 @@ function renderConfig() {
   const c = buildConfig();
   return renderOverride ? { ...c, ...renderOverride } : c;
 }
+// Rich highlight per-group appearance ↔ demo state. Normalize a loaded value
+// (plain "#color" or {color, stroke, stroke_width, opacity}) to a full object for
+// editing; collapse back to the minimal form (a bare color string when that's all).
+const hlNormalize = (cv) => {
+  const a = { color: "#88ccff", stroke: "", stroke_width: 0, opacity: 1 };
+  if (typeof cv === "string") a.color = cv;
+  else if (cv && typeof cv === "object") {
+    if (cv.color) a.color = cv.color;
+    if (cv.stroke) a.stroke = cv.stroke;
+    if (cv.stroke_width != null) a.stroke_width = cv.stroke_width;
+    if (cv.opacity != null) a.opacity = cv.opacity;
+  }
+  return a;
+};
+const hlCollapse = (v) => {
+  if (typeof v === "string") return v;
+  const o = { color: v.color };
+  if (v.stroke) o.stroke = v.stroke;
+  if (v.stroke_width) o.stroke_width = v.stroke_width;
+  if (v.opacity != null && v.opacity !== 1) o.opacity = v.opacity;
+  return Object.keys(o).length === 1 ? o.color : o;   // only color → plain string
+};
 function buildConfig() {
   const c = {};
   for (const sec of SCHEMA) for (const f of sec.fields) {
@@ -342,7 +366,7 @@ function buildConfig() {
       case "views": if (state.views.length) c.views = state.views.slice(); break;
       case "palette": if (state[f.k].length) c[f.k] = state[f.k].slice(); break;
       case "lights": if (state.lights.length) c.lights = state.lights.map(l => ({ ...l })); break;
-      case "map": if (state[f.k].length) c[f.k] = Object.fromEntries(state[f.k].filter(r => r[0])); break;
+      case "map": if (state[f.k].length) c[f.k] = Object.fromEntries(state[f.k].filter(r => r[0]).map(([n, v]) => [n, f.rich ? hlCollapse(v) : v])); break;
       default: c[f.k] = state[f.k];
     }
   }
@@ -378,7 +402,7 @@ function buildTypst() {
       case "views": if (state.views.length) push("views", fmtT(state.views)); break;
       case "palette": if (state[f.k].length) push(f.k, fmtT(state[f.k])); break;
       case "lights": if (state.lights.length) push("lights", fmtT(state.lights)); break;
-      case "map": { const rows = state[f.k].filter(r => r[0]); if (rows.length) push(f.k, `(${rows.map(([n,v]) => `"${n}": ${fmtT(v)}`).join(", ")})`); break; }
+      case "map": { const rows = state[f.k].filter(r => r[0]); if (rows.length) push(f.k, `(${rows.map(([n,v]) => `"${n}": ${fmtT(f.rich ? hlCollapse(v) : v)}`).join(", ")})`); break; }
       default: if (!eq(state[f.k], f.def)) push(f.k, fmtT(state[f.k]));
     }
   }
@@ -577,13 +601,29 @@ function paletteNode(f) {
 }
 
 function mapNode(f) {
+  const rm = (i, rerender) => { const b = document.createElement("button"); b.className="rm"; b.textContent="✕"; b.title="remove"; b.onclick=()=>{ state[f.k].splice(i,1); rerender(); onChange(); }; return b; };
+  if (f.rich) return dynList(state[f.k], "+ entry",       // group → {color, stroke, stroke_width, opacity}
+    () => ["", { color: "#88ccff", stroke: "", stroke_width: 0, opacity: 1 }],
+    (row, i, rerender) => {
+      const v = row[1];
+      const mk = (label, el) => { const d = document.createElement("div"); d.className="ctl"; const l = document.createElement("label"); l.innerHTML = `<span>${label}</span>`; d.append(l, el); return d; };
+      const inp = (type, val, on, extra) => { const e = document.createElement("input"); e.type = type; e.value = val; if (extra) for (const a in extra) e.setAttribute(a, extra[a]); e.oninput = () => on(e.value); return e; };
+      const name = inp("text", row[0], x => { row[0] = x; onChange(); }, { placeholder: "group name" });
+      const color = inp("color", v.color, x => { v.color = x; onChange(); }); color.style.flex = "0 0 40px";
+      const top = document.createElement("div"); top.className = "row"; top.style.marginBottom = "5px"; top.append(name, color, rm(i, rerender));
+      const it = document.createElement("div"); it.className = "item";
+      it.append(top,
+        mk("Stroke (blank = none)", inp("text", v.stroke, x => { v.stroke = x; onChange(); }, { placeholder: "#ffffff" })),
+        mk("Stroke width", inp("number", v.stroke_width, x => { v.stroke_width = x === "" ? 0 : +x; onChange(); }, { step: "any" })),
+        mk("Opacity", inp("number", v.opacity, x => { v.opacity = x === "" ? 1 : +x; onChange(); }, { step: "0.05", min: "0", max: "1" })));
+      return it;
+    });
   return dynList(state[f.k], "+ entry", () => ["", "#88ccff"],
     (row, i, rerender) => {
       const r = document.createElement("div"); r.className="row"; r.style.marginBottom="5px";
       const name = document.createElement("input"); name.type="text"; name.placeholder="name"; name.value=row[0]; name.oninput=()=>{ row[0]=name.value; onChange(); };
       const col = document.createElement("input"); col.type="color"; col.value=row[1]; col.style.flex="0 0 40px"; col.oninput=()=>{ row[1]=col.value; onChange(); };
-      const rm = document.createElement("button"); rm.className="rm"; rm.textContent="✕"; rm.onclick=()=>{ state[f.k].splice(i,1); rerender(); onChange(); };
-      r.append(name, col, rm); return r;
+      r.append(name, col, rm(i, rerender)); return r;
     });
 }
 
@@ -1095,8 +1135,8 @@ function applyConfig(cfg) {
       else if (v && typeof v === "object" && !Array.isArray(v)) v = { ...base, ...v };
       state[k] = v; continue;
     }
-    if (f && f.t === "map" && v && typeof v === "object" && !Array.isArray(v)) {   // {name: color|{color,…}} → pairs
-      state[k] = Object.entries(v).map(([n, cv]) => [n, cv && typeof cv === "object" ? (cv.color || "#88ccff") : cv]);
+    if (f && f.t === "map" && v && typeof v === "object" && !Array.isArray(v)) {   // {name: color|{color,…}} → rows
+      state[k] = Object.entries(v).map(([n, cv]) => [n, f.rich ? hlNormalize(cv) : (cv && typeof cv === "object" ? (cv.color || "#88ccff") : cv)]);
       continue;
     }
     if (k === "ambient" && v && typeof v === "object" && !Array.isArray(v)) {      // hemisphere ambient
@@ -1105,7 +1145,8 @@ function applyConfig(cfg) {
     if (k === "clip" && v && typeof v === "object" && !Array.isArray(v)) {          // plugin clip → demo state
       const cl = groupBase(TOP_FIELDS.clip);
       if ("depth" in v) cl.depth = v.depth;
-      if (v.from) cl.source = v.from; else if (v.axis) cl.source = v.axis;          // camera | x/y/z (plane: no UI, override renders it)
+      if (Array.isArray(v.plane)) { cl.source = "plane"; cl.plane = v.plane.slice(); }   // explicit plane a·x+b·y+c·z+d
+      else if (v.from) cl.source = v.from; else if (v.axis) cl.source = v.axis;          // camera | x/y/z
       if (v.keep) cl.keep = v.keep;
       if ("cap" in v) cl.cap = v.cap;
       if (v.hatch && typeof v.hatch === "object") {
