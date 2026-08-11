@@ -94,7 +94,15 @@
     display: flex; justify-content: space-between; align-items: center;
     font-size: 11.5px; color: var(--muted); margin-bottom: 3px; gap: 8px;
   }
-  .ctl > label[title], .group > .head[title] { cursor: help; }
+  .ctl > label.has-tip, .group > .head.has-tip { cursor: help; }
+  .ctl > label.has-tip > span:first-child, .group > .head.has-tip {
+    text-decoration: underline dotted; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+  #tip {
+    position: fixed; z-index: 60; max-width: 260px; pointer-events: none;
+    background: var(--ink); color: var(--panel);
+    font-size: 11.5px; line-height: 1.45; padding: 6px 9px; border-radius: 7px;
+    box-shadow: var(--shadow); opacity: 0; transition: opacity .1s; }
+  #tip.show { opacity: 1; }
   .ctl > label .val { color: var(--ink); font-variant-numeric: tabular-nums; font-size: 11px; background: var(--bg); padding: 0 5px; border-radius: 4px; }
   select, input[type=text], input[type=number] {
     width: 100%; font: inherit; font-size: 12px; padding: 4px 6px;
@@ -235,6 +243,7 @@
     </section>
   </main>
 
-  <script src="app.js?v=15"></script>
+  <div id="tip" role="tooltip"></div>
+  <script src="app.js?v=19"></script>
 </body>
 </html>
