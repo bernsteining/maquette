@@ -34,13 +34,15 @@
 )
 
 // ── Demo deep-links ──────────────────────────────────────────────────────
-// Every example render is wrapped in a link to the live web demo, preloaded
-// with that example's model + config (?model=…&field=value…). The demo decodes
-// this exact vocabulary (plugin config; strings raw, everything else JSON).
+// Every example render is wrapped in a link to the live web demo, preloaded with
+// that example's model + config. The link is compact ?code=value…: field names
+// are aliased to short letter codes, and only URL-hostile chars are percent-encoded
+// (`, : [ ] { } "` etc. stay literal). The demo decodes this exact scheme.
 #let demo-base = "https://bernsteining.github.io/maquette/"
 #let hexd = "0123456789ABCDEF"
-#let safe-bytes = array(bytes("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"))
-#let pct(s) = {                     // percent-encode a string for a URL
+// Chars left literal in a URL query (must match the demo's B_SAFE set exactly).
+#let safe-bytes = array(bytes("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~,:!$*;@/?[]{}\"()"))
+#let pct(s) = {                     // percent-encode only the URL-hostile bytes
   let out = ""
   for b in array(bytes(s)) {
     if safe-bytes.contains(b) { out += str(bytes((b,))) }
@@ -48,12 +50,33 @@
   }
   out
 }
+// Field name → short code (base52 letter index). Must match the demo's FIELD_CODES
+// order exactly. APPEND-ONLY; unlisted keys pass through unshortened.
+#let field-codes = ("model", "camera", "azimuth", "elevation", "distance", "center", "up", "projection",
+  "fov", "zoom", "pan", "auto_center", "auto_fit", "background", "width", "height", "color", "opacity",
+  "specular", "shininess", "smooth", "gamma_correction", "cull_backface", "shading", "gooch_warm",
+  "gooch_cool", "cel_bands", "mode", "xray_opacity", "stroke", "wireframe", "light_dir", "ambient",
+  "fresnel", "tone_mapping", "sss", "lights", "color_map", "overhang_angle", "scalar_function",
+  "vertex_smoothing", "color_map_palette", "outline", "ground_shadow", "shadows", "antialias", "ssao",
+  "bloom", "glow", "sharpen", "clip", "explode", "decimate", "views", "grid_labels", "turntable",
+  "materials", "highlight", "annotations", "debug", "debug_color", "point_size", "point_neighbors",
+  "point_boundary", "_cam", "_hemi", "_bgNone")
+#let code-alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+#let code-for(i) = if i < 52 { code-alphabet.slice(i, i + 1) } else {
+  code-alphabet.slice(calc.quo(i - 52, 52), calc.quo(i - 52, 52) + 1) + code-alphabet.slice(calc.rem(i - 52, 52), calc.rem(i - 52, 52) + 1)
+}
+#let key-alias = {
+  let m = (:)
+  for (i, k) in field-codes.enumerate() { m.insert(k, code-for(i)) }
+  m
+}
+#let alias-key(k) = key-alias.at(k, default: k)
 #let demo-url(name, cfg) = {
-  let parts = ("model=" + pct(name),)
+  let parts = (alias-key("model") + "=" + pct(name),)
   for (k, v) in cfg {
     if k in ("width", "height", "format") { continue }   // display-only, not demo config
     let vs = if v == none { "none" } else if type(v) == str { v } else { str(json.encode(v, pretty: false)) }
-    parts.push(pct(k) + "=" + pct(vs))
+    parts.push(alias-key(k) + "=" + pct(vs))
   }
   demo-base + "?" + parts.join("&")
 }
