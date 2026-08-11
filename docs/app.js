@@ -834,6 +834,7 @@ function measure() {
   if (!fn) return;
   try {
     const info = JSON.parse(DEC.decode(callPlugin(fn, model.bytes, ENC.encode("{}"))));
+    if (Array.isArray(info.bbox_center)) bboxCenter = info.bbox_center;   // for cartesian→spherical orbit
     const n = (x) => Number.isInteger(x) ? x.toLocaleString() : (+x).toPrecision(3);
     const stats = [];
     if (info.triangles != null) stats.push(["tris", n(info.triangles)]);
@@ -854,8 +855,39 @@ function scheduleRender() {
   rafPending = true;
   requestAnimationFrame(() => { rafPending = false; renderCode(); render(); });
 }
+let bboxCenter = [0, 0, 0];   // model bbox center (from get-info), for cartesian→spherical
+// Invert the plugin's up-based spherical basis (projection.rs) so an explicit
+// cartesian camera maps to the azimuth/elevation/distance that reproduce its view.
+function cartesianToSpherical(cam, center, up) {
+  const sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+  const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+  const off = sub(cam, center), dist = Math.hypot(off[0], off[1], off[2]);
+  if (dist < 1e-6) return null;
+  const v = norm(off), u = norm(up);
+  const arbitrary = Math.abs(u[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const right = norm(cross(u, arbitrary));
+  const forward = norm(cross(right, u));
+  const el = Math.asin(Math.max(-1, Math.min(1, dot(v, u))));
+  const az = Math.atan2(dot(v, forward), dot(v, right));
+  return { azimuth: az * 180 / Math.PI, elevation: el * 180 / Math.PI, distance: dist };
+}
+// Switch to orbit (spherical) mode. Clears any deep-link render override so the
+// view stops being frozen, and converts an explicit cartesian camera to
+// azimuth/elevation/distance so orbiting continues from exactly where it was.
 function ensureSpherical() {
-  if (state._cam !== "spherical") { state._cam = "spherical"; controlRefs._cam?.("spherical"); refreshVisibility(); }
+  renderOverride = null;
+  if (state._cam === "spherical") return;
+  const center = eq(state.center, [0, 0, 0]) ? bboxCenter : state.center;   // auto_center → bbox center
+  const sph = cartesianToSpherical(state.camera, center, state.up);
+  if (sph) {
+    state.azimuth = Math.round(sph.azimuth * 10) / 10;
+    state.elevation = Math.max(-89, Math.min(89, Math.round(sph.elevation * 10) / 10));
+    state.distance = Math.round(sph.distance * 1000) / 1000;
+    controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation); controlRefs.distance?.(state.distance);
+  }
+  state._cam = "spherical"; controlRefs._cam?.("spherical"); refreshVisibility();
 }
 (function setupOrbit() {
   const stage = $("stage");
@@ -866,6 +898,7 @@ function ensureSpherical() {
   const twoCent = () => { const [a, b] = two(); return [(a.x + b.x) / 2, (a.y + b.y) / 2]; };
   const seedPinch = () => { pd = twoDist(); [pcx, pcy] = twoCent(); };
   const setZoom = (f) => {
+    renderOverride = null;                       // zooming unfreezes a deep-link render
     state.zoom = Math.max(0.3, Math.min(4, Math.round(state.zoom * f * 1000) / 1000));
     controlRefs.zoom?.(state.zoom);
   };
