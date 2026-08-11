@@ -48637,11 +48637,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&color=%23e8d0b0&background=%23ffffff&tone_mapping=aces&specular=0.2&antialias=4)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&q=%23e8d0b0&n=%23ffffff&I=aces&s=0.2&T=4)
   >>
   /F 4
   /StructParent 3
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&color=%23e8d0b0&background=%23ffffff&tone_mapping=aces&specular=0.2&antialias=4)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&q=%23e8d0b0&n=%23ffffff&I=aces&s=0.2&T=4)
 >>
 endobj
 
@@ -50711,11 +50711,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl)
   >>
   /F 4
   /StructParent 133
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl)
 >>
 endobj
 
@@ -50867,11 +50867,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&color=%23c0ffee)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&q=%23c0ffee)
   >>
   /F 4
   /StructParent 136
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&color=%23c0ffee)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&q=%23c0ffee)
 >>
 endobj
 
@@ -50884,11 +50884,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&center=%5B0.5%2C0.5%2C0.5%5D&background=%231a1a2e)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&f=[0.5,0.5,0.5]&n=%231a1a2e)
   >>
   /F 4
   /StructParent 137
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&center=%5B0.5%2C0.5%2C0.5%5D&background=%231a1a2e)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&f=[0.5,0.5,0.5]&n=%231a1a2e)
 >>
 endobj
 
@@ -50901,11 +50901,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&background=none)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&n=none)
   >>
   /F 4
   /StructParent 138
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&background=none)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&n=none)
 >>
 endobj
 
@@ -50975,11 +50975,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C0%2C10%5D&up=%5B0%2C1%2C0%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,0,10]&g=[0,1,0])
   >>
   /F 4
   /StructParent 141
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C0%2C10%5D&up=%5B0%2C1%2C0%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,0,10]&g=[0,1,0])
 >>
 endobj
 
@@ -51077,11 +51077,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&azimuth=30&elevation=-10&distance=10)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&c=30&d=-10&e=10)
   >>
   /F 4
   /StructParent 147
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&azimuth=30&elevation=-10&distance=10)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&c=30&d=-10&e=10)
 >>
 endobj
 
@@ -51172,11 +51172,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&fov=20)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&i=20)
   >>
   /F 4
   /StructParent 150
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&fov=20)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&i=20)
 >>
 endobj
 
@@ -51189,11 +51189,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&azimuth=45&distance=30&auto_fit=false&fov=10)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&c=45&e=30&m=false&i=10)
   >>
   /F 4
   /StructParent 151
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&azimuth=45&distance=30&auto_fit=false&fov=10)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&c=45&e=30&m=false&i=10)
 >>
 endobj
 
@@ -51206,11 +51206,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.5&tone_mapping=aces&ambient=0.35&light_dir=%5B2%2C3%2C2.5%5D&zoom=1.0&pan=%5B0%2C0%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.5&I=aces&G=0.35&F=[2,3,2.5]&j=1.0&k=[0,0])
   >>
   /F 4
   /StructParent 152
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.5&tone_mapping=aces&ambient=0.35&light_dir=%5B2%2C3%2C2.5%5D&zoom=1.0&pan=%5B0%2C0%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.5&I=aces&G=0.35&F=[2,3,2.5]&j=1.0&k=[0,0])
 >>
 endobj
 
@@ -51223,11 +51223,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.5&tone_mapping=aces&ambient=0.35&light_dir=%5B2%2C3%2C2.5%5D&zoom=1.45&pan=%5B0%2C0%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.5&I=aces&G=0.35&F=[2,3,2.5]&j=1.45&k=[0,0])
   >>
   /F 4
   /StructParent 153
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.5&tone_mapping=aces&ambient=0.35&light_dir=%5B2%2C3%2C2.5%5D&zoom=1.45&pan=%5B0%2C0%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.5&I=aces&G=0.35&F=[2,3,2.5]&j=1.45&k=[0,0])
 >>
 endobj
 
@@ -51240,11 +51240,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.5&tone_mapping=aces&ambient=0.35&light_dir=%5B2%2C3%2C2.5%5D&zoom=1.45&pan=%5B-0.12%2C0%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.5&I=aces&G=0.35&F=[2,3,2.5]&j=1.45&k=[-0.12,0])
   >>
   /F 4
   /StructParent 154
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.5&tone_mapping=aces&ambient=0.35&light_dir=%5B2%2C3%2C2.5%5D&zoom=1.45&pan=%5B-0.12%2C0%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.5&I=aces&G=0.35&F=[2,3,2.5]&j=1.45&k=[-0.12,0])
 >>
 endobj
 
@@ -51345,11 +51345,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0})
   >>
   /F 4
   /StructParent 158
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0})
 >>
 endobj
 
@@ -51379,11 +51379,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=orthographic)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=orthographic)
   >>
   /F 4
   /StructParent 160
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=orthographic)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=orthographic)
 >>
 endobj
 
@@ -51413,11 +51413,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=isometric)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=isometric)
   >>
   /F 4
   /StructParent 162
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=isometric)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=isometric)
 >>
 endobj
 
@@ -51447,11 +51447,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=dimetric)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=dimetric)
   >>
   /F 4
   /StructParent 164
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=dimetric)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=dimetric)
 >>
 endobj
 
@@ -51481,11 +51481,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=trimetric)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=trimetric)
   >>
   /F 4
   /StructParent 166
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=trimetric)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=trimetric)
 >>
 endobj
 
@@ -51515,11 +51515,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=military)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=military)
   >>
   /F 4
   /StructParent 168
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=military)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=military)
 >>
 endobj
 
@@ -51615,11 +51615,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=cabinet)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=cabinet)
   >>
   /F 4
   /StructParent 171
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=cabinet)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=cabinet)
 >>
 endobj
 
@@ -51649,11 +51649,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=cavalier)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=cavalier)
   >>
   /F 4
   /StructParent 173
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&stroke=%7B%22color%22%3A%22%23111111%22%2C%22width%22%3A1.0%7D&projection=cavalier)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&D={"color":"%23111111","width":1.0}&h=cavalier)
 >>
 endobj
 
@@ -51683,11 +51683,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&elevation=25&distance=2.5&projection=fisheye)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&d=25&e=2.5&h=fisheye)
   >>
   /F 4
   /StructParent 175
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&elevation=25&distance=2.5&projection=fisheye)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&d=25&e=2.5&h=fisheye)
 >>
 endobj
 
@@ -51717,11 +51717,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&elevation=25&distance=2.5&projection=stereographic)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&d=25&e=2.5&h=stereographic)
   >>
   /F 4
   /StructParent 177
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&elevation=25&distance=2.5&projection=stereographic)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&d=25&e=2.5&h=stereographic)
 >>
 endobj
 
@@ -51751,11 +51751,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&elevation=25&distance=14&projection=curvilinear)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&d=25&e=14&h=curvilinear)
   >>
   /F 4
   /StructParent 179
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&elevation=25&distance=14&projection=curvilinear)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&d=25&e=14&h=curvilinear)
 >>
 endobj
 
@@ -51785,11 +51785,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&elevation=25&distance=2.5&projection=cylindrical)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&d=25&e=2.5&h=cylindrical)
   >>
   /F 4
   /StructParent 181
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&elevation=25&distance=2.5&projection=cylindrical)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&d=25&e=2.5&h=cylindrical)
 >>
 endobj
 
@@ -51819,11 +51819,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&distance=2.5&projection=pannini)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&e=2.5&h=pannini)
   >>
   /F 4
   /StructParent 183
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&distance=2.5&projection=pannini)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&e=2.5&h=pannini)
 >>
 endobj
 
@@ -51853,11 +51853,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C1.7%2C0%5D&up=%5B0%2C0%2C1%5D&projection=tiny-planet)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,1.7,0]&g=[0,0,1]&h=tiny-planet)
   >>
   /F 4
   /StructParent 185
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C1.7%2C0%5D&up=%5B0%2C0%2C1%5D&projection=tiny-planet)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,1.7,0]&g=[0,0,1]&h=tiny-planet)
 >>
 endobj
 
@@ -51960,11 +51960,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&ambient=0.05&zoom=1.5)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&G=0.05&j=1.5)
   >>
   /F 4
   /StructParent 188
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&ambient=0.05&zoom=1.5)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&G=0.05&j=1.5)
 >>
 endobj
 
@@ -51977,11 +51977,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&ambient=0.3&zoom=1.5)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&G=0.3&j=1.5)
   >>
   /F 4
   /StructParent 189
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&ambient=0.3&zoom=1.5)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&G=0.3&j=1.5)
 >>
 endobj
 
@@ -51994,11 +51994,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&ambient=0.6&zoom=1.5)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&G=0.6&j=1.5)
   >>
   /F 4
   /StructParent 190
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&ambient=0.6&zoom=1.5)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&G=0.6&j=1.5)
 >>
 endobj
 
@@ -52011,11 +52011,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.3&ambient=0.3)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.3&G=0.3)
   >>
   /F 4
   /StructParent 191
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.3&ambient=0.3)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.3&G=0.3)
 >>
 endobj
 
@@ -52028,11 +52028,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.3&ambient=%7B%22intensity%22%3A0.4%2C%22sky%22%3A%22%238899cc%22%2C%22ground%22%3A%22%23443322%22%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.3&G={"intensity":0.4,"sky":"%238899cc","ground":"%23443322"})
   >>
   /F 4
   /StructParent 192
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.3&ambient=%7B%22intensity%22%3A0.4%2C%22sky%22%3A%22%238899cc%22%2C%22ground%22%3A%22%23443322%22%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.3&G={"intensity":0.4,"sky":"%238899cc","ground":"%23443322"})
 >>
 endobj
 
@@ -52120,11 +52120,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&zoom=1.5)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&j=1.5)
   >>
   /F 4
   /StructParent 195
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&zoom=1.5)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&j=1.5)
 >>
 endobj
 
@@ -52137,11 +52137,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&zoom=1.5&smooth=false)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&j=1.5&u=false)
   >>
   /F 4
   /StructParent 196
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&zoom=1.5&smooth=false)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&j=1.5&u=false)
 >>
 endobj
 
@@ -52171,11 +52171,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&zoom=1.5&light_dir=%5B1%2C6%2C-7%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&j=1.5&F=[1,6,-7])
   >>
   /F 4
   /StructParent 198
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&zoom=1.5&light_dir=%5B1%2C6%2C-7%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&j=1.5&F=[1,6,-7])
 >>
 endobj
 
@@ -52188,11 +52188,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&zoom=1.5&specular=0.6&light_dir=%5B1%2C6%2C-7%5D&shininess=32)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&j=1.5&s=0.6&F=[1,6,-7]&t=32)
   >>
   /F 4
   /StructParent 199
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&zoom=1.5&specular=0.6&light_dir=%5B1%2C6%2C-7%5D&shininess=32)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&j=1.5&s=0.6&F=[1,6,-7]&t=32)
 >>
 endobj
 
@@ -52275,11 +52275,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.6&shininess=32&gamma_correction=false&zoom=1.5)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.6&t=32&v=false&j=1.5)
   >>
   /F 4
   /StructParent 202
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.6&shininess=32&gamma_correction=false&zoom=1.5)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.6&t=32&v=false&j=1.5)
 >>
 endobj
 
@@ -52292,11 +52292,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.6&shininess=32&zoom=1.5)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.6&t=32&j=1.5)
   >>
   /F 4
   /StructParent 203
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&specular=0.6&shininess=32&zoom=1.5)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&s=0.6&t=32&j=1.5)
 >>
 endobj
 
@@ -52326,11 +52326,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&background=%231a1a2e)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&n=%231a1a2e)
   >>
   /F 4
   /StructParent 205
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&background=%231a1a2e)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&n=%231a1a2e)
 >>
 endobj
 
@@ -52343,11 +52343,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&fresnel=0.6&background=%231a1a2e)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&H=0.6&n=%231a1a2e)
   >>
   /F 4
   /StructParent 206
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&fresnel=0.6&background=%231a1a2e)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&H=0.6&n=%231a1a2e)
 >>
 endobj
 
@@ -52422,11 +52422,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.19&ambient=0.05&specular=0.5&color=%23cccccc&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B3%2C3%2C0%5D%2C%22color%22%3A%22%23ff4444%22%2C%22intensity%22%3A1.2%7D%2C%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-3%2C2%2C2%5D%2C%22color%22%3A%22%2344ff44%22%2C%22intensity%22%3A1.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C1%2C0%5D%2C%22color%22%3A%22%234444ff%22%2C%22intensity%22%3A0.5%7D%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.19&G=0.05&s=0.5&q=%23cccccc&K=[{"type":"positional","vector":[3,3,0],"color":"%23ff4444","intensity":1.2},{"type":"positional","vector":[-3,2,2],"color":"%2344ff44","intensity":1.0},{"type":"directional","vector":[0,1,0],"color":"%234444ff","intensity":0.5}])
   >>
   /F 4
   /StructParent 209
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.19&ambient=0.05&specular=0.5&color=%23cccccc&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B3%2C3%2C0%5D%2C%22color%22%3A%22%23ff4444%22%2C%22intensity%22%3A1.2%7D%2C%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-3%2C2%2C2%5D%2C%22color%22%3A%22%2344ff44%22%2C%22intensity%22%3A1.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C1%2C0%5D%2C%22color%22%3A%22%234444ff%22%2C%22intensity%22%3A0.5%7D%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.19&G=0.05&s=0.5&q=%23cccccc&K=[{"type":"positional","vector":[3,3,0],"color":"%23ff4444","intensity":1.2},{"type":"positional","vector":[-3,2,2],"color":"%2344ff44","intensity":1.0},{"type":"directional","vector":[0,1,0],"color":"%234444ff","intensity":0.5}])
 >>
 endobj
 
@@ -52503,11 +52503,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.19&color=%23b05a3c&specular=1.0&shininess=80&fresnel=0.2&tone_mapping=aces&ambient=0.22&lights=%5B%7B%22type%22%3A%22area%22%2C%22vector%22%3A%5B4%2C7%2C5%5D%2C%22size%22%3A0%2C%22color%22%3A%22%23fff%22%2C%22intensity%22%3A2.4%7D%5D&shadows=%7B%22per_pixel%22%3Atrue%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.19&q=%23b05a3c&s=1.0&t=80&H=0.2&I=aces&G=0.22&K=[{"type":"area","vector":[4,7,5],"size":0,"color":"%23fff","intensity":2.4}]&S={"per_pixel":true})
   >>
   /F 4
   /StructParent 214
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.19&color=%23b05a3c&specular=1.0&shininess=80&fresnel=0.2&tone_mapping=aces&ambient=0.22&lights=%5B%7B%22type%22%3A%22area%22%2C%22vector%22%3A%5B4%2C7%2C5%5D%2C%22size%22%3A0%2C%22color%22%3A%22%23fff%22%2C%22intensity%22%3A2.4%7D%5D&shadows=%7B%22per_pixel%22%3Atrue%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.19&q=%23b05a3c&s=1.0&t=80&H=0.2&I=aces&G=0.22&K=[{"type":"area","vector":[4,7,5],"size":0,"color":"%23fff","intensity":2.4}]&S={"per_pixel":true})
 >>
 endobj
 
@@ -52520,11 +52520,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.19&color=%23b05a3c&specular=1.0&shininess=80&fresnel=0.2&tone_mapping=aces&ambient=0.22&lights=%5B%7B%22type%22%3A%22area%22%2C%22vector%22%3A%5B4%2C7%2C5%5D%2C%22size%22%3A1.5%2C%22color%22%3A%22%23fff%22%2C%22intensity%22%3A2.4%7D%5D&shadows=%7B%22per_pixel%22%3Atrue%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.19&q=%23b05a3c&s=1.0&t=80&H=0.2&I=aces&G=0.22&K=[{"type":"area","vector":[4,7,5],"size":1.5,"color":"%23fff","intensity":2.4}]&S={"per_pixel":true})
   >>
   /F 4
   /StructParent 215
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.19&color=%23b05a3c&specular=1.0&shininess=80&fresnel=0.2&tone_mapping=aces&ambient=0.22&lights=%5B%7B%22type%22%3A%22area%22%2C%22vector%22%3A%5B4%2C7%2C5%5D%2C%22size%22%3A1.5%2C%22color%22%3A%22%23fff%22%2C%22intensity%22%3A2.4%7D%5D&shadows=%7B%22per_pixel%22%3Atrue%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.19&q=%23b05a3c&s=1.0&t=80&H=0.2&I=aces&G=0.22&K=[{"type":"area","vector":[4,7,5],"size":1.5,"color":"%23fff","intensity":2.4}]&S={"per_pixel":true})
 >>
 endobj
 
@@ -52537,11 +52537,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.19&color=%23b05a3c&specular=1.0&shininess=80&fresnel=0.2&tone_mapping=aces&ambient=0.22&lights=%5B%7B%22type%22%3A%22area%22%2C%22vector%22%3A%5B4%2C7%2C5%5D%2C%22size%22%3A4%2C%22color%22%3A%22%23fff%22%2C%22intensity%22%3A2.4%7D%5D&shadows=%7B%22per_pixel%22%3Atrue%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.19&q=%23b05a3c&s=1.0&t=80&H=0.2&I=aces&G=0.22&K=[{"type":"area","vector":[4,7,5],"size":4,"color":"%23fff","intensity":2.4}]&S={"per_pixel":true})
   >>
   /F 4
   /StructParent 216
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.19&color=%23b05a3c&specular=1.0&shininess=80&fresnel=0.2&tone_mapping=aces&ambient=0.22&lights=%5B%7B%22type%22%3A%22area%22%2C%22vector%22%3A%5B4%2C7%2C5%5D%2C%22size%22%3A4%2C%22color%22%3A%22%23fff%22%2C%22intensity%22%3A2.4%7D%5D&shadows=%7B%22per_pixel%22%3Atrue%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.19&q=%23b05a3c&s=1.0&t=80&H=0.2&I=aces&G=0.22&K=[{"type":"area","vector":[4,7,5],"size":4,"color":"%23fff","intensity":2.4}]&S={"per_pixel":true})
 >>
 endobj
 
@@ -52634,11 +52634,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.05&specular=0.9&shininess=16&fresnel=0.5&color=%23ddccbb&background=%231a1a2e&lights=%5B%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B1%2C2%2C1%5D%2C%22color%22%3A%22%23ffaa66%22%2C%22intensity%22%3A2.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B-2%2C1%2C-1%5D%2C%22color%22%3A%22%236699ff%22%2C%22intensity%22%3A1.8%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C-1%2C2%5D%2C%22color%22%3A%22%23ffffff%22%2C%22intensity%22%3A0.8%7D%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.05&s=0.9&t=16&H=0.5&q=%23ddccbb&n=%231a1a2e&K=[{"type":"directional","vector":[1,2,1],"color":"%23ffaa66","intensity":2.0},{"type":"directional","vector":[-2,1,-1],"color":"%236699ff","intensity":1.8},{"type":"directional","vector":[0,-1,2],"color":"%23ffffff","intensity":0.8}])
   >>
   /F 4
   /StructParent 219
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.05&specular=0.9&shininess=16&fresnel=0.5&color=%23ddccbb&background=%231a1a2e&lights=%5B%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B1%2C2%2C1%5D%2C%22color%22%3A%22%23ffaa66%22%2C%22intensity%22%3A2.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B-2%2C1%2C-1%5D%2C%22color%22%3A%22%236699ff%22%2C%22intensity%22%3A1.8%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C-1%2C2%5D%2C%22color%22%3A%22%23ffffff%22%2C%22intensity%22%3A0.8%7D%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.05&s=0.9&t=16&H=0.5&q=%23ddccbb&n=%231a1a2e&K=[{"type":"directional","vector":[1,2,1],"color":"%23ffaa66","intensity":2.0},{"type":"directional","vector":[-2,1,-1],"color":"%236699ff","intensity":1.8},{"type":"directional","vector":[0,-1,2],"color":"%23ffffff","intensity":0.8}])
 >>
 endobj
 
@@ -52651,11 +52651,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.05&specular=0.9&shininess=16&fresnel=0.5&color=%23ddccbb&background=%231a1a2e&lights=%5B%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B1%2C2%2C1%5D%2C%22color%22%3A%22%23ffaa66%22%2C%22intensity%22%3A2.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B-2%2C1%2C-1%5D%2C%22color%22%3A%22%236699ff%22%2C%22intensity%22%3A1.8%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C-1%2C2%5D%2C%22color%22%3A%22%23ffffff%22%2C%22intensity%22%3A0.8%7D%5D&tone_mapping=reinhard)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.05&s=0.9&t=16&H=0.5&q=%23ddccbb&n=%231a1a2e&K=[{"type":"directional","vector":[1,2,1],"color":"%23ffaa66","intensity":2.0},{"type":"directional","vector":[-2,1,-1],"color":"%236699ff","intensity":1.8},{"type":"directional","vector":[0,-1,2],"color":"%23ffffff","intensity":0.8}]&I=reinhard)
   >>
   /F 4
   /StructParent 220
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.05&specular=0.9&shininess=16&fresnel=0.5&color=%23ddccbb&background=%231a1a2e&lights=%5B%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B1%2C2%2C1%5D%2C%22color%22%3A%22%23ffaa66%22%2C%22intensity%22%3A2.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B-2%2C1%2C-1%5D%2C%22color%22%3A%22%236699ff%22%2C%22intensity%22%3A1.8%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C-1%2C2%5D%2C%22color%22%3A%22%23ffffff%22%2C%22intensity%22%3A0.8%7D%5D&tone_mapping=reinhard)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.05&s=0.9&t=16&H=0.5&q=%23ddccbb&n=%231a1a2e&K=[{"type":"directional","vector":[1,2,1],"color":"%23ffaa66","intensity":2.0},{"type":"directional","vector":[-2,1,-1],"color":"%236699ff","intensity":1.8},{"type":"directional","vector":[0,-1,2],"color":"%23ffffff","intensity":0.8}]&I=reinhard)
 >>
 endobj
 
@@ -52668,11 +52668,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.05&specular=0.9&shininess=16&fresnel=0.5&color=%23ddccbb&background=%231a1a2e&lights=%5B%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B1%2C2%2C1%5D%2C%22color%22%3A%22%23ffaa66%22%2C%22intensity%22%3A2.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B-2%2C1%2C-1%5D%2C%22color%22%3A%22%236699ff%22%2C%22intensity%22%3A1.8%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C-1%2C2%5D%2C%22color%22%3A%22%23ffffff%22%2C%22intensity%22%3A0.8%7D%5D&tone_mapping=aces)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.05&s=0.9&t=16&H=0.5&q=%23ddccbb&n=%231a1a2e&K=[{"type":"directional","vector":[1,2,1],"color":"%23ffaa66","intensity":2.0},{"type":"directional","vector":[-2,1,-1],"color":"%236699ff","intensity":1.8},{"type":"directional","vector":[0,-1,2],"color":"%23ffffff","intensity":0.8}]&I=aces)
   >>
   /F 4
   /StructParent 221
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.05&specular=0.9&shininess=16&fresnel=0.5&color=%23ddccbb&background=%231a1a2e&lights=%5B%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B1%2C2%2C1%5D%2C%22color%22%3A%22%23ffaa66%22%2C%22intensity%22%3A2.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B-2%2C1%2C-1%5D%2C%22color%22%3A%22%236699ff%22%2C%22intensity%22%3A1.8%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C-1%2C2%5D%2C%22color%22%3A%22%23ffffff%22%2C%22intensity%22%3A0.8%7D%5D&tone_mapping=aces)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.05&s=0.9&t=16&H=0.5&q=%23ddccbb&n=%231a1a2e&K=[{"type":"directional","vector":[1,2,1],"color":"%23ffaa66","intensity":2.0},{"type":"directional","vector":[-2,1,-1],"color":"%236699ff","intensity":1.8},{"type":"directional","vector":[0,-1,2],"color":"%23ffffff","intensity":0.8}]&I=aces)
 >>
 endobj
 
@@ -52702,11 +52702,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&shading=blinn-phong)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&x=blinn-phong)
   >>
   /F 4
   /StructParent 223
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&shading=blinn-phong)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&x=blinn-phong)
 >>
 endobj
 
@@ -52788,11 +52788,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&shading=normal)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&x=normal)
   >>
   /F 4
   /StructParent 226
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&shading=normal)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&x=normal)
 >>
 endobj
 
@@ -52822,11 +52822,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&shading=flat)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&x=flat)
   >>
   /F 4
   /StructParent 228
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&shading=flat)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&x=flat)
 >>
 endobj
 
@@ -52856,11 +52856,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&shading=cel&fresnel=0.6&outline=%7B%22width%22%3A2.0%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&x=cel&H=0.6&Q={"width":2.0})
   >>
   /F 4
   /StructParent 230
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&shading=cel&fresnel=0.6&outline=%7B%22width%22%3A2.0%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&x=cel&H=0.6&Q={"width":2.0})
 >>
 endobj
 
@@ -52890,11 +52890,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&shading=gooch&gooch_warm=%23ffcc44&gooch_cool=%232255ff)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&x=gooch&y=%23ffcc44&z=%232255ff)
   >>
   /F 4
   /StructParent 232
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&shading=gooch&gooch_warm=%23ffcc44&gooch_cool=%232255ff)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&x=gooch&y=%23ffcc44&z=%232255ff)
 >>
 endobj
 
@@ -52982,11 +52982,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3.0%7D%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&K=[{"type":"positional","vector":[-0.1,0.14,-0.04],"color":"%23ff0000","intensity":3.0}])
   >>
   /F 4
   /StructParent 236
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3.0%7D%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&K=[{"type":"positional","vector":[-0.1,0.14,-0.04],"color":"%23ff0000","intensity":3.0}])
 >>
 endobj
 
@@ -52999,11 +52999,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3.0%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&K=[{"type":"positional","vector":[-0.1,0.14,-0.04],"color":"%23ff0000","intensity":3.0}]&J={"intensity":4,"power":3.5,"distortion":0.2})
   >>
   /F 4
   /StructParent 237
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3.0%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&K=[{"type":"positional","vector":[-0.1,0.14,-0.04],"color":"%23ff0000","intensity":3.0}]&J={"intensity":4,"power":3.5,"distortion":0.2})
 >>
 endobj
 
@@ -53076,11 +53076,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&vertex_smoothing=4&color_map=curvature)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&O=4&L=curvature)
   >>
   /F 4
   /StructParent 239
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&vertex_smoothing=4&color_map=curvature)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&O=4&L=curvature)
 >>
 endobj
 
@@ -53093,11 +53093,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&color_map=curvature&vertex_smoothing=0)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&L=curvature&O=0)
   >>
   /F 4
   /StructParent 240
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&color_map=curvature&vertex_smoothing=0)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&L=curvature&O=0)
 >>
 endobj
 
@@ -53110,11 +53110,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&color_map=overhang&overhang_angle=45)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&L=overhang&M=45)
   >>
   /F 4
   /StructParent 241
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&color_map=overhang&overhang_angle=45)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&L=overhang&M=45)
 >>
 endobj
 
@@ -53188,11 +53188,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&color_map=scalar&scalar_function=smoothstep%28-0.1%2C%200.1%2C%20x%29)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&L=scalar&N=smoothstep(-0.1,%200.1,%20x))
   >>
   /F 4
   /StructParent 243
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&color_map=scalar&scalar_function=smoothstep%28-0.1%2C%200.1%2C%20x%29)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&L=scalar&N=smoothstep(-0.1,%200.1,%20x))
 >>
 endobj
 
@@ -53205,11 +53205,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&color_map=scalar&scalar_function=sin%28x%2A60%29%2Acos%28y%2A60%29%20%2B%20sin%28y%2A60%29%2Acos%28z%2A60%29%20%2B%20sin%28z%2A60%29%2Acos%28x%2A60%29&color_map_palette=%5B%22%231a0533%22%2C%22%236b2fa0%22%2C%22%23e85d75%22%2C%22%23ffcc33%22%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&L=scalar&N=sin(x*60)*cos(y*60)%20%2B%20sin(y*60)*cos(z*60)%20%2B%20sin(z*60)*cos(x*60)&P=["%231a0533","%236b2fa0","%23e85d75","%23ffcc33"])
   >>
   /F 4
   /StructParent 244
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&ambient=0.3&specular=0.5&color_map=scalar&scalar_function=sin%28x%2A60%29%2Acos%28y%2A60%29%20%2B%20sin%28y%2A60%29%2Acos%28z%2A60%29%20%2B%20sin%28z%2A60%29%2Acos%28x%2A60%29&color_map_palette=%5B%22%231a0533%22%2C%22%236b2fa0%22%2C%22%23e85d75%22%2C%22%23ffcc33%22%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&G=0.3&s=0.5&L=scalar&N=sin(x*60)*cos(y*60)%20%2B%20sin(y*60)*cos(z*60)%20%2B%20sin(z*60)*cos(x*60)&P=["%231a0533","%236b2fa0","%23e85d75","%23ffcc33"])
 >>
 endobj
 
@@ -53287,11 +53287,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=colored_cube.stl&projection=isometric)
+    /URI (https://bernsteining.github.io/maquette/?a=colored_cube.stl&h=isometric)
   >>
   /F 4
   /StructParent 246
-  /Contents (https://bernsteining.github.io/maquette/?model=colored_cube.stl&projection=isometric)
+  /Contents (https://bernsteining.github.io/maquette/?a=colored_cube.stl&h=isometric)
 >>
 endobj
 
@@ -53304,11 +53304,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=rubi_blender.ply&azimuth=45&elevation=25&distance=8.7)
+    /URI (https://bernsteining.github.io/maquette/?a=rubi_blender.ply&c=45&d=25&e=8.7)
   >>
   /F 4
   /StructParent 247
-  /Contents (https://bernsteining.github.io/maquette/?model=rubi_blender.ply&azimuth=45&elevation=25&distance=8.7)
+  /Contents (https://bernsteining.github.io/maquette/?a=rubi_blender.ply&c=45&d=25&e=8.7)
 >>
 endobj
 
@@ -53338,11 +53338,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=rubi_scan.ply&azimuth=-197&elevation=20.5&up=%5B0%2C1%2C0%5D&zoom=2.5&point_neighbors=10&point_boundary=70)
+    /URI (https://bernsteining.github.io/maquette/?a=rubi_scan.ply&c=-197&d=20.5&g=[0,1,0]&j=2.5&ak=10&al=70)
   >>
   /F 4
   /StructParent 249
-  /Contents (https://bernsteining.github.io/maquette/?model=rubi_scan.ply&azimuth=-197&elevation=20.5&up=%5B0%2C1%2C0%5D&zoom=2.5&point_neighbors=10&point_boundary=70)
+  /Contents (https://bernsteining.github.io/maquette/?a=rubi_scan.ply&c=-197&d=20.5&g=[0,1,0]&j=2.5&ak=10&al=70)
 >>
 endobj
 
@@ -53415,11 +53415,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.obj&camera=%5B3%2C3%2C3%5D&materials=%7B%22face4%22%3A%22%232ecc71%22%2C%22face5%22%3A%22%23222222%22%2C%22face6%22%3A%22%23ff2222%22%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.obj&b=[3,3,3]&ae={"face4":"%232ecc71","face5":"%23222222","face6":"%23ff2222"})
   >>
   /F 4
   /StructParent 251
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.obj&camera=%5B3%2C3%2C3%5D&materials=%7B%22face4%22%3A%22%232ecc71%22%2C%22face5%22%3A%22%23222222%22%2C%22face6%22%3A%22%23ff2222%22%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.obj&b=[3,3,3]&ae={"face4":"%232ecc71","face5":"%23222222","face6":"%23ff2222"})
 >>
 endobj
 
@@ -53449,11 +53449,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&color=%23777777&highlight=%7B%22Model__Camshaft%22%3A%22%23ff0000%22%2C%22Model__Crankshaft%22%3A%22%2300ff00%22%2C%22Model__Piston_B%22%3A%7B%22color%22%3A%22%230000ff%22%7D%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&q=%23777777&af={"Model__Camshaft":"%23ff0000","Model__Crankshaft":"%2300ff00","Model__Piston_B":{"color":"%230000ff"}})
   >>
   /F 4
   /StructParent 253
-  /Contents (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&color=%23777777&highlight=%7B%22Model__Camshaft%22%3A%22%23ff0000%22%2C%22Model__Crankshaft%22%3A%22%2300ff00%22%2C%22Model__Piston_B%22%3A%7B%22color%22%3A%22%230000ff%22%7D%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&q=%23777777&af={"Model__Camshaft":"%23ff0000","Model__Crankshaft":"%2300ff00","Model__Piston_B":{"color":"%230000ff"}})
 >>
 endobj
 
@@ -53529,11 +53529,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&color=%23777777&antialias=4&highlight=%7B%22Model__Crankshaft%22%3A%7B%22color%22%3A%22%23cc0000%22%2C%22stroke%22%3A%22%23ffffff%22%2C%22stroke_width%22%3A0.5%7D%2C%22Model__Piston_A%22%3A%7B%22color%22%3A%22%2388ccff%22%2C%22opacity%22%3A0.3%7D%2C%22Model__Piston_C%22%3A%7B%22color%22%3A%22%2388ccff%22%2C%22opacity%22%3A0.3%7D%2C%22Model__Piston_D%22%3A%7B%22color%22%3A%22%2388ccff%22%2C%22opacity%22%3A0.3%7D%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&q=%23777777&T=4&af={"Model__Crankshaft":{"color":"%23cc0000","stroke":"%23ffffff","stroke_width":0.5},"Model__Piston_A":{"color":"%2388ccff","opacity":0.3},"Model__Piston_C":{"color":"%2388ccff","opacity":0.3},"Model__Piston_D":{"color":"%2388ccff","opacity":0.3}})
   >>
   /F 4
   /StructParent 255
-  /Contents (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&color=%23777777&antialias=4&highlight=%7B%22Model__Crankshaft%22%3A%7B%22color%22%3A%22%23cc0000%22%2C%22stroke%22%3A%22%23ffffff%22%2C%22stroke_width%22%3A0.5%7D%2C%22Model__Piston_A%22%3A%7B%22color%22%3A%22%2388ccff%22%2C%22opacity%22%3A0.3%7D%2C%22Model__Piston_C%22%3A%7B%22color%22%3A%22%2388ccff%22%2C%22opacity%22%3A0.3%7D%2C%22Model__Piston_D%22%3A%7B%22color%22%3A%22%2388ccff%22%2C%22opacity%22%3A0.3%7D%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&q=%23777777&T=4&af={"Model__Crankshaft":{"color":"%23cc0000","stroke":"%23ffffff","stroke_width":0.5},"Model__Piston_A":{"color":"%2388ccff","opacity":0.3},"Model__Piston_C":{"color":"%2388ccff","opacity":0.3},"Model__Piston_D":{"color":"%2388ccff","opacity":0.3}})
 >>
 endobj
 
@@ -53546,11 +53546,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-110%2C-90%2C380%5D&up=%5B0%2C-1%2C0%5D&color=%23777777&annotations=%7B%22groups%22%3A%5B%22Model__Piston_A%22%2C%22Model__Piston_B%22%2C%22Model__Piston_C%22%2C%22Model__Piston_D%22%2C%22Model__Piston_E%22%2C%22Model__Piston_F%22%5D%2C%22color%22%3A%22%23ffffff%22%2C%22font_size%22%3A12%2C%22offset%22%3A45%7D&background=%23222222)
+    /URI (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-110,-90,380]&g=[0,-1,0]&q=%23777777&ag={"groups":["Model__Piston_A","Model__Piston_B","Model__Piston_C","Model__Piston_D","Model__Piston_E","Model__Piston_F"],"color":"%23ffffff","font_size":12,"offset":45}&n=%23222222)
   >>
   /F 4
   /StructParent 256
-  /Contents (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-110%2C-90%2C380%5D&up=%5B0%2C-1%2C0%5D&color=%23777777&annotations=%7B%22groups%22%3A%5B%22Model__Piston_A%22%2C%22Model__Piston_B%22%2C%22Model__Piston_C%22%2C%22Model__Piston_D%22%2C%22Model__Piston_E%22%2C%22Model__Piston_F%22%5D%2C%22color%22%3A%22%23ffffff%22%2C%22font_size%22%3A12%2C%22offset%22%3A45%7D&background=%23222222)
+  /Contents (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-110,-90,380]&g=[0,-1,0]&q=%23777777&ag={"groups":["Model__Piston_A","Model__Piston_B","Model__Piston_C","Model__Piston_D","Model__Piston_E","Model__Piston_F"],"color":"%23ffffff","font_size":12,"offset":45}&n=%23222222)
 >>
 endobj
 
@@ -53625,11 +53625,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=brain_skull.obj&azimuth=270&up=%5B0%2C1%2C0%5D&distance=200&color=%23e8e8e8)
+    /URI (https://bernsteining.github.io/maquette/?a=brain_skull.obj&c=270&g=[0,1,0]&e=200&q=%23e8e8e8)
   >>
   /F 4
   /StructParent 258
-  /Contents (https://bernsteining.github.io/maquette/?model=brain_skull.obj&azimuth=270&up=%5B0%2C1%2C0%5D&distance=200&color=%23e8e8e8)
+  /Contents (https://bernsteining.github.io/maquette/?a=brain_skull.obj&c=270&g=[0,1,0]&e=200&q=%23e8e8e8)
 >>
 endobj
 
@@ -53642,11 +53642,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=brain_skull.obj&azimuth=270&up=%5B0%2C1%2C0%5D&distance=200&highlight=%7B%22Skull%22%3A%7B%22color%22%3A%22%23e8e8e8%22%7D%2C%22Brain%22%3A%7B%22color%22%3A%22%23ee69b4%22%7D%7D&xray_opacity=0.3&mode=x-ray)
+    /URI (https://bernsteining.github.io/maquette/?a=brain_skull.obj&c=270&g=[0,1,0]&e=200&af={"Skull":{"color":"%23e8e8e8"},"Brain":{"color":"%23ee69b4"}}&C=0.3&B=x-ray)
   >>
   /F 4
   /StructParent 259
-  /Contents (https://bernsteining.github.io/maquette/?model=brain_skull.obj&azimuth=270&up=%5B0%2C1%2C0%5D&distance=200&highlight=%7B%22Skull%22%3A%7B%22color%22%3A%22%23e8e8e8%22%7D%2C%22Brain%22%3A%7B%22color%22%3A%22%23ee69b4%22%7D%7D&xray_opacity=0.3&mode=x-ray)
+  /Contents (https://bernsteining.github.io/maquette/?a=brain_skull.obj&c=270&g=[0,1,0]&e=200&af={"Skull":{"color":"%23e8e8e8"},"Brain":{"color":"%23ee69b4"}}&C=0.3&B=x-ray)
 >>
 endobj
 
@@ -53739,11 +53739,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&distance=8&auto_fit=false&background=%23ffffff&wireframe=%7B%22color%22%3A%22%23cc3333%22%2C%22width%22%3A0.1%7D&mode=wireframe)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&e=8&m=false&n=%23ffffff&E={"color":"%23cc3333","width":0.1}&B=wireframe)
   >>
   /F 4
   /StructParent 262
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&distance=8&auto_fit=false&background=%23ffffff&wireframe=%7B%22color%22%3A%22%23cc3333%22%2C%22width%22%3A0.1%7D&mode=wireframe)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&e=8&m=false&n=%23ffffff&E={"color":"%23cc3333","width":0.1}&B=wireframe)
 >>
 endobj
 
@@ -53756,11 +53756,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&distance=8&antialias=4&mode=solid%2Bwireframe&wireframe=%7B%22width%22%3A0.3%7D&zoom=1.2)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&e=8&T=4&B=solid%2Bwireframe&E={"width":0.3}&j=1.2)
   >>
   /F 4
   /StructParent 263
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&up=%5B0%2C1%2C0%5D&distance=8&antialias=4&mode=solid%2Bwireframe&wireframe=%7B%22width%22%3A0.3%7D&zoom=1.2)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&g=[0,1,0]&e=8&T=4&B=solid%2Bwireframe&E={"width":0.3}&j=1.2)
 >>
 endobj
 
@@ -54100,11 +54100,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&light_dir=%5B1%2C-1%2C3%5D&ground_shadow=%7B%22opacity%22%3A0.35%2C%22color%22%3A%22%232244aa%22%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&F=[1,-1,3]&R={"opacity":0.35,"color":"%232244aa"})
   >>
   /F 4
   /StructParent 265
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&light_dir=%5B1%2C-1%2C3%5D&ground_shadow=%7B%22opacity%22%3A0.35%2C%22color%22%3A%22%232244aa%22%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&F=[1,-1,3]&R={"opacity":0.35,"color":"%232244aa"})
 >>
 endobj
 
@@ -54198,11 +54198,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&color=%237d8590&specular=0.6&shininess=48&fresnel=0.3&ambient=0.4&light_dir=%5B2%2C3%2C2.5%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&q=%237d8590&s=0.6&t=48&H=0.3&G=0.4&F=[2,3,2.5])
   >>
   /F 4
   /StructParent 271
-  /Contents (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&color=%237d8590&specular=0.6&shininess=48&fresnel=0.3&ambient=0.4&light_dir=%5B2%2C3%2C2.5%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&q=%237d8590&s=0.6&t=48&H=0.3&G=0.4&F=[2,3,2.5])
 >>
 endobj
 
@@ -54215,11 +54215,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&color=%237d8590&specular=0.6&shininess=48&fresnel=0.3&ambient=0.4&light_dir=%5B2%2C3%2C2.5%5D&shadows=%7B%22per_pixel%22%3Atrue%2C%22light_size%22%3A8%2C%22softness%22%3A2%2C%22resolution%22%3A1024%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&q=%237d8590&s=0.6&t=48&H=0.3&G=0.4&F=[2,3,2.5]&S={"per_pixel":true,"light_size":8,"softness":2,"resolution":1024})
   >>
   /F 4
   /StructParent 272
-  /Contents (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&color=%237d8590&specular=0.6&shininess=48&fresnel=0.3&ambient=0.4&light_dir=%5B2%2C3%2C2.5%5D&shadows=%7B%22per_pixel%22%3Atrue%2C%22light_size%22%3A8%2C%22softness%22%3A2%2C%22resolution%22%3A1024%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&q=%237d8590&s=0.6&t=48&H=0.3&G=0.4&F=[2,3,2.5]&S={"per_pixel":true,"light_size":8,"softness":2,"resolution":1024})
 >>
 endobj
 
@@ -54305,11 +54305,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&specular=0.5&antialias=0)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&s=0.5&T=0)
   >>
   /F 4
   /StructParent 275
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&specular=0.5&antialias=0)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&s=0.5&T=0)
 >>
 endobj
 
@@ -54322,11 +54322,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&specular=0.5&antialias=1)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&s=0.5&T=1)
   >>
   /F 4
   /StructParent 276
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&specular=0.5&antialias=1)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&s=0.5&T=1)
 >>
 endobj
 
@@ -54339,11 +54339,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&specular=0.5&antialias=2)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&s=0.5&T=2)
   >>
   /F 4
   /StructParent 277
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&specular=0.5&antialias=2)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&s=0.5&T=2)
 >>
 endobj
 
@@ -54356,11 +54356,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&specular=0.5&antialias=4)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&s=0.5&T=4)
   >>
   /F 4
   /StructParent 278
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&specular=0.5&antialias=4)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&s=0.5&T=4)
 >>
 endobj
 
@@ -54435,11 +54435,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&outline=%7B%22color%22%3A%22%23000000%22%2C%22width%22%3A5%7D&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&Q={"color":"%23000000","width":5}&g=[0,1,0]&c=180&e=0.25)
   >>
   /F 4
   /StructParent 281
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&outline=%7B%22color%22%3A%22%23000000%22%2C%22width%22%3A5%7D&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&Q={"color":"%23000000","width":5}&g=[0,1,0]&c=180&e=0.25)
 >>
 endobj
 
@@ -54469,11 +54469,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4)
   >>
   /F 4
   /StructParent 283
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4)
 >>
 endobj
 
@@ -54486,11 +54486,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&sharpen=%7B%22strength%22%3A2%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&X={"strength":2})
   >>
   /F 4
   /StructParent 284
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.4&sharpen=%7B%22strength%22%3A2%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.4&X={"strength":2})
 >>
 endobj
 
@@ -54566,11 +54566,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.2&shininess=64&fresnel=0.5&bloom=%7B%22threshold%22%3A0.2%2C%22intensity%22%3A1.2%2C%22radius%22%3A10%7D&background=%23000000)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.2&t=64&H=0.5&V={"threshold":0.2,"intensity":1.2,"radius":10}&n=%23000000)
   >>
   /F 4
   /StructParent 287
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.2&shininess=64&fresnel=0.5&bloom=%7B%22threshold%22%3A0.2%2C%22intensity%22%3A1.2%2C%22radius%22%3A10%7D&background=%23000000)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.2&t=64&H=0.5&V={"threshold":0.2,"intensity":1.2,"radius":10}&n=%23000000)
 >>
 endobj
 
@@ -54583,11 +54583,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.2&glow=%7B%22color%22%3A%22%2300ff00%22%2C%22intensity%22%3A0.5%2C%22radius%22%3A13%7D&color=%23008800&background=%23000000)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.2&W={"color":"%2300ff00","intensity":0.5,"radius":13}&q=%23008800&n=%23000000)
   >>
   /F 4
   /StructParent 288
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&specular=0.2&glow=%7B%22color%22%3A%22%2300ff00%22%2C%22intensity%22%3A0.5%2C%22radius%22%3A13%7D&color=%23008800&background=%23000000)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&e=0.25&s=0.2&W={"color":"%2300ff00","intensity":0.5,"radius":13}&q=%23008800&n=%23000000)
 >>
 endobj
 
@@ -54617,11 +54617,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&specular=0.5&color=%23777777)
+    /URI (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&s=0.5&q=%23777777)
   >>
   /F 4
   /StructParent 290
-  /Contents (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&specular=0.5&color=%23777777)
+  /Contents (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&s=0.5&q=%23777777)
 >>
 endobj
 
@@ -54634,11 +54634,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&ssao=%7B%22samples%22%3A16%2C%22radius%22%3A0.5%2C%22strength%22%3A1%7D&antialias=4&color=%23777777)
+    /URI (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&U={"samples":16,"radius":0.5,"strength":1}&T=4&q=%23777777)
   >>
   /F 4
   /StructParent 291
-  /Contents (https://bernsteining.github.io/maquette/?model=crankshaft.obj&camera=%5B-100%2C-100%2C500%5D&up=%5B0%2C-1%2C0%5D&zoom=1.25&pan=%5B0%2C0.08%5D&ssao=%7B%22samples%22%3A16%2C%22radius%22%3A0.5%2C%22strength%22%3A1%7D&antialias=4&color=%23777777)
+  /Contents (https://bernsteining.github.io/maquette/?a=crankshaft.obj&b=[-100,-100,500]&g=[0,-1,0]&j=1.25&k=[0,0.08]&U={"samples":16,"radius":0.5,"strength":1}&T=4&q=%23777777)
 >>
 endobj
 
@@ -54719,11 +54719,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=brain_skull.obj&azimuth=220&up=%5B0%2C1%2C0%5D&distance=180&highlight=%7B%22Skull%22%3A%7B%22color%22%3A%22%23e8e8e8%22%7D%2C%22Brain%22%3A%7B%22color%22%3A%22%23ff69b4%22%7D%7D&clip=%7B%22plane%22%3A%5B2%2C-1%2C0%2C1%5D%2C%22cap%22%3Afalse%7D&cull_backface=false)
+    /URI (https://bernsteining.github.io/maquette/?a=brain_skull.obj&c=220&g=[0,1,0]&e=180&af={"Skull":{"color":"%23e8e8e8"},"Brain":{"color":"%23ff69b4"}}&Y={"plane":[2,-1,0,1],"cap":false}&w=false)
   >>
   /F 4
   /StructParent 294
-  /Contents (https://bernsteining.github.io/maquette/?model=brain_skull.obj&azimuth=220&up=%5B0%2C1%2C0%5D&distance=180&highlight=%7B%22Skull%22%3A%7B%22color%22%3A%22%23e8e8e8%22%7D%2C%22Brain%22%3A%7B%22color%22%3A%22%23ff69b4%22%7D%7D&clip=%7B%22plane%22%3A%5B2%2C-1%2C0%2C1%5D%2C%22cap%22%3Afalse%7D&cull_backface=false)
+  /Contents (https://bernsteining.github.io/maquette/?a=brain_skull.obj&c=220&g=[0,1,0]&e=180&af={"Skull":{"color":"%23e8e8e8"},"Brain":{"color":"%23ff69b4"}}&Y={"plane":[2,-1,0,1],"cap":false}&w=false)
 >>
 endobj
 
@@ -54736,11 +54736,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&color=%23bcd6ef&clip=%7B%22from%22%3A%22camera%22%2C%22depth%22%3A0.45%2C%22hatch%22%3A%7B%22style%22%3A%22lines%22%2C%22angle%22%3A45%2C%22spacing%22%3A12%2C%22width%22%3A1.6%2C%22color%22%3A%22%2326323f%22%7D%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&q=%23bcd6ef&Y={"from":"camera","depth":0.45,"hatch":{"style":"lines","angle":45,"spacing":12,"width":1.6,"color":"%2326323f"}})
   >>
   /F 4
   /StructParent 295
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&color=%23bcd6ef&clip=%7B%22from%22%3A%22camera%22%2C%22depth%22%3A0.45%2C%22hatch%22%3A%7B%22style%22%3A%22lines%22%2C%22angle%22%3A45%2C%22spacing%22%3A12%2C%22width%22%3A1.6%2C%22color%22%3A%22%2326323f%22%7D%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&q=%23bcd6ef&Y={"from":"camera","depth":0.45,"hatch":{"style":"lines","angle":45,"spacing":12,"width":1.6,"color":"%2326323f"}})
 >>
 endobj
 
@@ -54753,11 +54753,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&color=%23bcd6ef&clip=%7B%22from%22%3A%22camera%22%2C%22depth%22%3A0.45%2C%22hatch%22%3A%7B%22style%22%3A%22cross%22%2C%22angle%22%3A30%2C%22spacing%22%3A12%2C%22width%22%3A1.6%2C%22color%22%3A%22%233c2731%22%7D%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&q=%23bcd6ef&Y={"from":"camera","depth":0.45,"hatch":{"style":"cross","angle":30,"spacing":12,"width":1.6,"color":"%233c2731"}})
   >>
   /F 4
   /StructParent 296
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&color=%23bcd6ef&clip=%7B%22from%22%3A%22camera%22%2C%22depth%22%3A0.45%2C%22hatch%22%3A%7B%22style%22%3A%22cross%22%2C%22angle%22%3A30%2C%22spacing%22%3A12%2C%22width%22%3A1.6%2C%22color%22%3A%22%233c2731%22%7D%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&q=%23bcd6ef&Y={"from":"camera","depth":0.45,"hatch":{"style":"cross","angle":30,"spacing":12,"width":1.6,"color":"%233c2731"}})
 >>
 endobj
 
@@ -54770,11 +54770,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&color=%23bcd6ef&clip=%7B%22from%22%3A%22camera%22%2C%22depth%22%3A0.45%2C%22hatch%22%3A%7B%22style%22%3A%22crosses%22%2C%22angle%22%3A0%2C%22spacing%22%3A12%2C%22width%22%3A1.6%2C%22color%22%3A%22%2326323f%22%7D%7D)
+    /URI (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&q=%23bcd6ef&Y={"from":"camera","depth":0.45,"hatch":{"style":"crosses","angle":0,"spacing":12,"width":1.6,"color":"%2326323f"}})
   >>
   /F 4
   /StructParent 297
-  /Contents (https://bernsteining.github.io/maquette/?model=cube.stl&camera=%5B3%2C2%2C2%5D&color=%23bcd6ef&clip=%7B%22from%22%3A%22camera%22%2C%22depth%22%3A0.45%2C%22hatch%22%3A%7B%22style%22%3A%22crosses%22%2C%22angle%22%3A0%2C%22spacing%22%3A12%2C%22width%22%3A1.6%2C%22color%22%3A%22%2326323f%22%7D%7D)
+  /Contents (https://bernsteining.github.io/maquette/?a=cube.stl&b=[3,2,2]&q=%23bcd6ef&Y={"from":"camera","depth":0.45,"hatch":{"style":"crosses","angle":0,"spacing":12,"width":1.6,"color":"%2326323f"}})
 >>
 endobj
 
@@ -54858,11 +54858,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=crankshaft.obj&up=%5B0%2C-1%2C0%5D&camera=%5B-200%2C-200%2C500%5D&color=%23555555&explode=0.8)
+    /URI (https://bernsteining.github.io/maquette/?a=crankshaft.obj&g=[0,-1,0]&b=[-200,-200,500]&q=%23555555&Z=0.8)
   >>
   /F 4
   /StructParent 300
-  /Contents (https://bernsteining.github.io/maquette/?model=crankshaft.obj&up=%5B0%2C-1%2C0%5D&camera=%5B-200%2C-200%2C500%5D&color=%23555555&explode=0.8)
+  /Contents (https://bernsteining.github.io/maquette/?a=crankshaft.obj&g=[0,-1,0]&b=[-200,-200,500]&q=%23555555&Z=0.8)
 >>
 endobj
 
@@ -54875,11 +54875,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&explode=0.5)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&Z=0.5)
   >>
   /F 4
   /StructParent 301
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&camera=%5B0%2C2%2C5%5D&up=%5B0%2C1%2C0%5D&explode=0.5)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&b=[0,2,5]&g=[0,1,0]&Z=0.5)
 >>
 endobj
 
@@ -54953,11 +54953,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&auto_center=false&center=%5B-0.0168%2C0.1102%2C-0.0015%5D&auto_fit=false&projection=orthographic&distance=0.2&mode=solid%2Bwireframe&antialias=2&decimate=0)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&l=false&f=[-0.0168,0.1102,-0.0015]&m=false&h=orthographic&e=0.2&B=solid%2Bwireframe&T=2&aa=0)
   >>
   /F 4
   /StructParent 304
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&auto_center=false&center=%5B-0.0168%2C0.1102%2C-0.0015%5D&auto_fit=false&projection=orthographic&distance=0.2&mode=solid%2Bwireframe&antialias=2&decimate=0)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&l=false&f=[-0.0168,0.1102,-0.0015]&m=false&h=orthographic&e=0.2&B=solid%2Bwireframe&T=2&aa=0)
 >>
 endobj
 
@@ -54970,11 +54970,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&auto_center=false&center=%5B-0.0168%2C0.1102%2C-0.0015%5D&auto_fit=false&projection=orthographic&distance=0.2&mode=solid%2Bwireframe&antialias=2&decimate=0.75)
+    /URI (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&l=false&f=[-0.0168,0.1102,-0.0015]&m=false&h=orthographic&e=0.2&B=solid%2Bwireframe&T=2&aa=0.75)
   >>
   /F 4
   /StructParent 305
-  /Contents (https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&auto_center=false&center=%5B-0.0168%2C0.1102%2C-0.0015%5D&auto_fit=false&projection=orthographic&distance=0.2&mode=solid%2Bwireframe&antialias=2&decimate=0.75)
+  /Contents (https://bernsteining.github.io/maquette/?a=bunny.obj&g=[0,1,0]&c=180&l=false&f=[-0.0168,0.1102,-0.0015]&m=false&h=orthographic&e=0.2&B=solid%2Bwireframe&T=2&aa=0.75)
 >>
 endobj
 
@@ -55034,11 +55034,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&views=%5B%22front%22%2C%22right%22%2C%22top%22%2C%22isometric%22%5D&grid_labels=true&cull_backface=false)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&ab=["front","right","top","isometric"]&ac=true&w=false)
   >>
   /F 4
   /StructParent 307
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&views=%5B%22front%22%2C%22right%22%2C%22top%22%2C%22isometric%22%5D&grid_labels=true&cull_backface=false)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&ab=["front","right","top","isometric"]&ac=true&w=false)
 >>
 endobj
 
@@ -55051,11 +55051,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&turntable=%7B%22iterations%22%3A6%2C%22elevation%22%3A40%7D&grid_labels=true&cull_backface=false)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&ad={"iterations":6,"elevation":40}&ac=true&w=false)
   >>
   /F 4
   /StructParent 308
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&turntable=%7B%22iterations%22%3A6%2C%22elevation%22%3A40%7D&grid_labels=true&cull_backface=false)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&ad={"iterations":6,"elevation":40}&ac=true&w=false)
 >>
 endobj
 
@@ -55118,11 +55118,11 @@ endobj
   /A <<
     /Type /Action
     /S /URI
-    /URI (https://bernsteining.github.io/maquette/?model=teapot.obj&debug=true&lights=%5B%7B%22type%22%3A%22area%22%2C%22vector%22%3A%5B2%2C4%2C0%5D%2C%22size%22%3A1.2%2C%22color%22%3A%22%23ff4444%22%2C%22intensity%22%3A1.2%7D%2C%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-1%2C2%2C2%5D%2C%22color%22%3A%22%2344ff44%22%2C%22intensity%22%3A1.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C1%2C0%5D%2C%22color%22%3A%22%234444ff%22%2C%22intensity%22%3A0.5%7D%5D)
+    /URI (https://bernsteining.github.io/maquette/?a=teapot.obj&ah=true&K=[{"type":"area","vector":[2,4,0],"size":1.2,"color":"%23ff4444","intensity":1.2},{"type":"positional","vector":[-1,2,2],"color":"%2344ff44","intensity":1.0},{"type":"directional","vector":[0,1,0],"color":"%234444ff","intensity":0.5}])
   >>
   /F 4
   /StructParent 310
-  /Contents (https://bernsteining.github.io/maquette/?model=teapot.obj&debug=true&lights=%5B%7B%22type%22%3A%22area%22%2C%22vector%22%3A%5B2%2C4%2C0%5D%2C%22size%22%3A1.2%2C%22color%22%3A%22%23ff4444%22%2C%22intensity%22%3A1.2%7D%2C%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-1%2C2%2C2%5D%2C%22color%22%3A%22%2344ff44%22%2C%22intensity%22%3A1.0%7D%2C%7B%22type%22%3A%22directional%22%2C%22vector%22%3A%5B0%2C1%2C0%5D%2C%22color%22%3A%22%234444ff%22%2C%22intensity%22%3A0.5%7D%5D)
+  /Contents (https://bernsteining.github.io/maquette/?a=teapot.obj&ah=true&K=[{"type":"area","vector":[2,4,0],"size":1.2,"color":"%23ff4444","intensity":1.2},{"type":"positional","vector":[-1,2,2],"color":"%2344ff44","intensity":1.0},{"type":"directional","vector":[0,1,0],"color":"%234444ff","intensity":0.5}])
 >>
 endobj
 
@@ -88203,8 +88203,8 @@ endobj
 5154 0 obj
 <<
   /Creator (Typst 0.14.2)
-  /ModDate (D:20260811003315Z)
-  /CreationDate (D:20260811003315Z)
+  /ModDate (D:20260811013852Z)
+  /CreationDate (D:20260811013852Z)
 >>
 endobj
 
@@ -88215,7 +88215,7 @@ endobj
   /Subtype /XML
 >>
 stream
-<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="xmp-writer"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"  xmlns:xmp="http://ns.adobe.com/xap/1.0/"  xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"  xmlns:xmpTPg="http://ns.adobe.com/xap/1.0/t/pg/"  xmlns:pdf="http://ns.adobe.com/pdf/1.3/" ><xmp:CreatorTool>Typst 0.14.2</xmp:CreatorTool><dc:language><rdf:Bag><rdf:li>en</rdf:li></rdf:Bag></dc:language><xmp:ModifyDate>2026-08-11T00:33:15+00:00</xmp:ModifyDate><xmp:CreateDate>2026-08-11T00:33:15+00:00</xmp:CreateDate><xmpTPg:NPages>33</xmpTPg:NPages><dc:format>application/pdf</dc:format><xmpMM:InstanceID>yxlFqL+yQkqwPdv8OD4lIw==</xmpMM:InstanceID><xmpMM:DocumentID>yxlFqL+yQkqwPdv8OD4lIw==</xmpMM:DocumentID><xmpMM:RenditionClass>proof</xmpMM:RenditionClass><pdf:PDFVersion>1.7</pdf:PDFVersion></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="r"?>
+<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/" x:xmptk="xmp-writer"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"  xmlns:xmp="http://ns.adobe.com/xap/1.0/"  xmlns:xmpMM="http://ns.adobe.com/xap/1.0/mm/"  xmlns:xmpTPg="http://ns.adobe.com/xap/1.0/t/pg/"  xmlns:pdf="http://ns.adobe.com/pdf/1.3/" ><xmp:CreatorTool>Typst 0.14.2</xmp:CreatorTool><dc:language><rdf:Bag><rdf:li>en</rdf:li></rdf:Bag></dc:language><xmp:ModifyDate>2026-08-11T01:38:52+00:00</xmp:ModifyDate><xmp:CreateDate>2026-08-11T01:38:52+00:00</xmp:CreateDate><xmpTPg:NPages>33</xmpTPg:NPages><dc:format>application/pdf</dc:format><xmpMM:InstanceID>wpIfS5UFZ+QI688D8tNisQ==</xmpMM:InstanceID><xmpMM:DocumentID>wpIfS5UFZ+QI688D8tNisQ==</xmpMM:DocumentID><xmpMM:RenditionClass>proof</xmpMM:RenditionClass><pdf:PDFVersion>1.7</pdf:PDFVersion></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="r"?>
 endstream
 endobj
 
@@ -92860,554 +92860,554 @@ xref
 0000619266 00000 n
 0000619570 00000 n
 0000619865 00000 n
-0000620441 00000 n
-0000620858 00000 n
-0000621641 00000 n
-0000621909 00000 n
-0000622169 00000 n
-0000622451 00000 n
-0000622733 00000 n
-0000622992 00000 n
-0000623259 00000 n
-0000623543 00000 n
-0000623824 00000 n
-0000624150 00000 n
-0000624453 00000 n
-0000624779 00000 n
-0000625084 00000 n
-0000625382 00000 n
-0000625653 00000 n
-0000625954 00000 n
-0000626252 00000 n
-0000626516 00000 n
-0000626834 00000 n
-0000627137 00000 n
-0000627454 00000 n
-0000627723 00000 n
-0000628034 00000 n
-0000628291 00000 n
-0000628647 00000 n
-0000628898 00000 n
-0000629256 00000 n
-0000629513 00000 n
-0000629821 00000 n
-0000630072 00000 n
-0000630418 00000 n
-0000630667 00000 n
-0000631016 00000 n
-0000631269 00000 n
-0000631566 00000 n
-0000631815 00000 n
-0000632136 00000 n
-0000632409 00000 n
-0000632728 00000 n
-0000632993 00000 n
-0000633312 00000 n
-0000633577 00000 n
-0000633886 00000 n
-0000634135 00000 n
-0000634480 00000 n
-0000634745 00000 n
-0000635042 00000 n
-0000635363 00000 n
-0000635688 00000 n
-0000635985 00000 n
-0000636288 00000 n
-0000636569 00000 n
-0000636879 00000 n
-0000637180 00000 n
-0000637488 00000 n
-0000637777 00000 n
-0000638084 00000 n
-0000638397 00000 n
-0000638671 00000 n
-0000638958 00000 n
-0000639230 00000 n
-0000639527 00000 n
-0000639800 00000 n
-0000640079 00000 n
-0000640423 00000 n
-0000640732 00000 n
-0000641032 00000 n
-0000641313 00000 n
-0000641625 00000 n
-0000641866 00000 n
-0000642161 00000 n
-0000642398 00000 n
-0000642697 00000 n
-0000642941 00000 n
-0000643257 00000 n
-0000643566 00000 n
-0000643905 00000 n
-0000644282 00000 n
-0000644568 00000 n
-0000644849 00000 n
-0000645125 00000 n
-0000645412 00000 n
-0000645731 00000 n
-0000646032 00000 n
-0000646299 00000 n
-0000646552 00000 n
-0000646827 00000 n
-0000647138 00000 n
-0000647405 00000 n
-0000647694 00000 n
-0000648003 00000 n
-0000648310 00000 n
-0000648583 00000 n
-0000648866 00000 n
-0000649153 00000 n
-0000649422 00000 n
-0000649733 00000 n
-0000649997 00000 n
-0000650293 00000 n
-0000650550 00000 n
-0000650832 00000 n
-0000651140 00000 n
-0000651418 00000 n
-0000651708 00000 n
-0000652030 00000 n
-0000652308 00000 n
-0000652609 00000 n
-0000652915 00000 n
-0000653225 00000 n
-0000653495 00000 n
-0000653817 00000 n
-0000654095 00000 n
-0000654409 00000 n
-0000654707 00000 n
-0000654965 00000 n
-0000655301 00000 n
-0000655563 00000 n
-0000655885 00000 n
-0000656167 00000 n
-0000656507 00000 n
-0000656777 00000 n
-0000657046 00000 n
-0000657336 00000 n
-0000657602 00000 n
-0000657851 00000 n
-0000658179 00000 n
-0000658463 00000 n
-0000658740 00000 n
-0000660205 00000 n
-0000692874 00000 n
-0000693204 00000 n
-0000693672 00000 n
-0000698509 00000 n
-0000698846 00000 n
-0000712826 00000 n
-0000713188 00000 n
-0000713618 00000 n
-0000713981 00000 n
-0000714448 00000 n
-0000717309 00000 n
-0000717639 00000 n
-0000718059 00000 n
-0000718389 00000 n
-0000718690 00000 n
-0000718986 00000 n
-0000719286 00000 n
-0000719580 00000 n
-0000720024 00000 n
-0000720555 00000 n
-0000725362 00000 n
-0000725662 00000 n
-0000726048 00000 n
-0000726510 00000 n
-0000727073 00000 n
-0000727643 00000 n
-0000728220 00000 n
-0000728752 00000 n
-0000732860 00000 n
-0000733159 00000 n
-0000733478 00000 n
-0000733979 00000 n
-0000734303 00000 n
-0000734852 00000 n
-0000735166 00000 n
-0000735710 00000 n
-0000736073 00000 n
-0000736615 00000 n
-0000736975 00000 n
-0000737517 00000 n
-0000737835 00000 n
-0000738375 00000 n
-0000738989 00000 n
-0000744954 00000 n
-0000745303 00000 n
-0000745842 00000 n
-0000746197 00000 n
-0000746738 00000 n
-0000747035 00000 n
-0000747496 00000 n
-0000747821 00000 n
-0000748294 00000 n
-0000748613 00000 n
-0000749080 00000 n
-0000749405 00000 n
-0000749874 00000 n
-0000750185 00000 n
-0000750621 00000 n
-0000750973 00000 n
-0000751441 00000 n
-0000752120 00000 n
-0000759324 00000 n
-0000759647 00000 n
-0000760059 00000 n
-0000760474 00000 n
-0000760888 00000 n
-0000761356 00000 n
-0000762002 00000 n
-0000762553 00000 n
-0000766741 00000 n
-0000767047 00000 n
-0000767433 00000 n
-0000767849 00000 n
-0000768159 00000 n
-0000768598 00000 n
-0000769093 00000 n
-0000769606 00000 n
-0000771317 00000 n
-0000771625 00000 n
-0000772109 00000 n
-0000772551 00000 n
-0000772858 00000 n
-0000773343 00000 n
-0000773856 00000 n
-0000774369 00000 n
-0000776227 00000 n
-0000776432 00000 n
-0000777726 00000 n
-0000778015 00000 n
-0000778353 00000 n
-0000778548 00000 n
-0000778854 00000 n
-0000779812 00000 n
-0000780774 00000 n
-0000781729 00000 n
-0000782288 00000 n
-0000789059 00000 n
-0000789359 00000 n
-0000790749 00000 n
-0000792188 00000 n
-0000793618 00000 n
-0000793964 00000 n
-0000794453 00000 n
-0000794966 00000 n
-0000797713 00000 n
-0000798017 00000 n
-0000798462 00000 n
-0000798781 00000 n
-0000799227 00000 n
-0000799522 00000 n
-0000800078 00000 n
-0000800384 00000 n
-0000800944 00000 n
-0000801456 00000 n
-0000802480 00000 n
-0000802798 00000 n
-0000803294 00000 n
-0000804010 00000 n
-0000804874 00000 n
-0000805369 00000 n
-0000810614 00000 n
-0000811164 00000 n
-0000811715 00000 n
-0000812261 00000 n
-0000812728 00000 n
-0000817556 00000 n
-0000818168 00000 n
-0000819131 00000 n
-0000819570 00000 n
-0000825623 00000 n
-0000826012 00000 n
-0000826434 00000 n
-0000826769 00000 n
-0000827297 00000 n
-0000827773 00000 n
-0000833016 00000 n
-0000833612 00000 n
-0000833930 00000 n
-0000834788 00000 n
-0000835236 00000 n
-0000843306 00000 n
-0000844645 00000 n
-0000845674 00000 n
-0000846113 00000 n
-0000852738 00000 n
-0000853202 00000 n
-0000853926 00000 n
-0000854365 00000 n
-0000857919 00000 n
-0000858226 00000 n
-0000858853 00000 n
-0000859404 00000 n
-0000859833 00000 n
-0000937999 00000 n
-0000938576 00000 n
-0000938876 00000 n
-0000939239 00000 n
-0000939549 00000 n
-0000939862 00000 n
-0000940063 00000 n
-0000940750 00000 n
-0000941654 00000 n
-0000942166 00000 n
-0000947133 00000 n
-0000947450 00000 n
-0000947913 00000 n
-0000948380 00000 n
-0000948843 00000 n
-0000949310 00000 n
-0000949814 00000 n
-0000951779 00000 n
-0000952075 00000 n
-0000952622 00000 n
-0000952927 00000 n
-0000953377 00000 n
-0000953893 00000 n
-0000954378 00000 n
-0000956824 00000 n
-0000957141 00000 n
-0000957839 00000 n
-0000958533 00000 n
-0000958839 00000 n
-0000959399 00000 n
-0000960101 00000 n
-0000960633 00000 n
-0000963677 00000 n
-0000964008 00000 n
-0000964847 00000 n
-0000965652 00000 n
-0000966458 00000 n
-0000967264 00000 n
-0000967787 00000 n
-0000972882 00000 n
-0000973200 00000 n
-0000973701 00000 n
-0000974144 00000 n
-0000974592 00000 n
-0000977460 00000 n
-0000977795 00000 n
-0000978500 00000 n
-0000979210 00000 n
-0000979639 00000 n
-0000981549 00000 n
-0000982093 00000 n
-0000982623 00000 n
-0000983062 00000 n
-0000986642 00000 n
-0000987813 00000 n
-0000988306 00000 n
-0000997150 00000 n
-0000997518 00000 n
-0000997854 00000 n
-0000998303 00000 n
-0000998666 00000 n
-0000999003 00000 n
-0000999299 00000 n
-0000999675 00000 n
-0001000689 00000 n
-0001001678 00000 n
-0001080624 00000 n
-0001081078 00000 n
-0001127670 00000 n
-0001128124 00000 n
-0001153747 00000 n
-0001154201 00000 n
-0001192760 00000 n
-0001193214 00000 n
-0001241807 00000 n
-0001243473 00000 n
-0001288810 00000 n
-0001289264 00000 n
-0001350615 00000 n
-0001351069 00000 n
-0001406252 00000 n
-0001406706 00000 n
-0001457605 00000 n
-0001458059 00000 n
-0001556444 00000 n
-0001556898 00000 n
-0001599797 00000 n
-0001600251 00000 n
-0001670546 00000 n
-0001671000 00000 n
-0001740110 00000 n
-0001740564 00000 n
-0001801432 00000 n
-0001801886 00000 n
-0001886309 00000 n
-0001886763 00000 n
-0001940956 00000 n
-0001941410 00000 n
-0002031716 00000 n
-0002032170 00000 n
-0002106371 00000 n
-0002106825 00000 n
-0002182795 00000 n
-0002183249 00000 n
-0002254827 00000 n
-0002255281 00000 n
-0002317094 00000 n
-0002317548 00000 n
-0002348690 00000 n
-0002349144 00000 n
-0002379997 00000 n
-0002380451 00000 n
-0002411165 00000 n
-0002411619 00000 n
-0002449856 00000 n
-0002450310 00000 n
-0002485314 00000 n
-0002485768 00000 n
-0002535055 00000 n
-0002535355 00000 n
-0002567776 00000 n
-0002568076 00000 n
-0002596984 00000 n
-0002597284 00000 n
-0002620911 00000 n
-0002621365 00000 n
-0002735599 00000 n
-0002736053 00000 n
-0002860094 00000 n
-0002860462 00000 n
-0002908115 00000 n
-0002908483 00000 n
-0002930295 00000 n
-0002930663 00000 n
-0002990947 00000 n
-0002991315 00000 n
-0003058829 00000 n
-0003059197 00000 n
-0003107665 00000 n
-0003108033 00000 n
-0003156021 00000 n
-0003156389 00000 n
-0003247386 00000 n
-0003247754 00000 n
-0003341510 00000 n
-0003341964 00000 n
-0003547681 00000 n
-0003548135 00000 n
-0003674656 00000 n
-0003675110 00000 n
-0003820587 00000 n
-0003821041 00000 n
-0003963241 00000 n
-0003963572 00000 n
-0004019130 00000 n
-0004019461 00000 n
-0004085387 00000 n
-0004085718 00000 n
-0004139797 00000 n
-0004140251 00000 n
-0004266393 00000 n
-0004266847 00000 n
-0004451490 00000 n
-0004451944 00000 n
-0004507094 00000 n
-0004507548 00000 n
-0004533580 00000 n
-0004534034 00000 n
-0004613982 00000 n
-0004614436 00000 n
-0004687985 00000 n
-0004688439 00000 n
-0004763917 00000 n
-0004764371 00000 n
-0004963414 00000 n
-0004963868 00000 n
-0005168060 00000 n
-0005168514 00000 n
-0005344325 00000 n
-0005344779 00000 n
-0005548056 00000 n
-0005548510 00000 n
-0005737625 00000 n
-0005738079 00000 n
-0005809039 00000 n
-0005809493 00000 n
-0005871661 00000 n
-0005872115 00000 n
-0006155907 00000 n
-0006156361 00000 n
-0006203380 00000 n
-0006203834 00000 n
-0006426376 00000 n
-0006426830 00000 n
-0006661199 00000 n
-0006661653 00000 n
-0006783978 00000 n
-0006784432 00000 n
-0006846508 00000 n
-0006846962 00000 n
-0006984496 00000 n
-0006984950 00000 n
-0007083277 00000 n
-0007083731 00000 n
-0007138866 00000 n
-0007139320 00000 n
-0007304830 00000 n
-0007305284 00000 n
-0007481060 00000 n
-0007481360 00000 n
-0007512827 00000 n
-0007513127 00000 n
-0007546347 00000 n
-0007546647 00000 n
-0007579007 00000 n
-0007579307 00000 n
-0007612137 00000 n
-0007612591 00000 n
-0007720107 00000 n
-0007720561 00000 n
-0007887576 00000 n
-0007888030 00000 n
-0008034952 00000 n
-0008035406 00000 n
-0008122846 00000 n
-0008123214 00000 n
-0008228067 00000 n
-0008228521 00000 n
-0008355836 00000 n
-0008356290 00000 n
-0008477757 00000 n
-0008478211 00000 n
-0008532620 00000 n
-0008533074 00000 n
-0008626754 00000 n
-0008627208 00000 n
-0008689196 00000 n
-0008689650 00000 n
-0008774469 00000 n
-0008774923 00000 n
-0008830199 00000 n
-0008830674 00000 n
-0009100992 00000 n
-0009101467 00000 n
-0009309742 00000 n
-0009310196 00000 n
-0009340315 00000 n
-0009340769 00000 n
-0009374495 00000 n
-0009374949 00000 n
-0009428055 00000 n
-0009428927 00000 n
-0009430812 00000 n
-0009431576 00000 n
-0009433316 00000 n
-0009433434 00000 n
-0009434522 00000 n
+0000620311 00000 n
+0000620728 00000 n
+0000621511 00000 n
+0000621779 00000 n
+0000622039 00000 n
+0000622321 00000 n
+0000622603 00000 n
+0000622862 00000 n
+0000623129 00000 n
+0000623413 00000 n
+0000623694 00000 n
+0000624020 00000 n
+0000624323 00000 n
+0000624649 00000 n
+0000624954 00000 n
+0000625252 00000 n
+0000625523 00000 n
+0000625824 00000 n
+0000626122 00000 n
+0000626386 00000 n
+0000626704 00000 n
+0000627007 00000 n
+0000627324 00000 n
+0000627593 00000 n
+0000627904 00000 n
+0000628161 00000 n
+0000628517 00000 n
+0000628768 00000 n
+0000629126 00000 n
+0000629383 00000 n
+0000629691 00000 n
+0000629942 00000 n
+0000630288 00000 n
+0000630537 00000 n
+0000630886 00000 n
+0000631139 00000 n
+0000631436 00000 n
+0000631685 00000 n
+0000632006 00000 n
+0000632279 00000 n
+0000632598 00000 n
+0000632863 00000 n
+0000633182 00000 n
+0000633447 00000 n
+0000633756 00000 n
+0000634005 00000 n
+0000634350 00000 n
+0000634615 00000 n
+0000634912 00000 n
+0000635233 00000 n
+0000635558 00000 n
+0000635855 00000 n
+0000636158 00000 n
+0000636439 00000 n
+0000636749 00000 n
+0000637050 00000 n
+0000637358 00000 n
+0000637647 00000 n
+0000637954 00000 n
+0000638267 00000 n
+0000638541 00000 n
+0000638828 00000 n
+0000639100 00000 n
+0000639397 00000 n
+0000639670 00000 n
+0000639949 00000 n
+0000640293 00000 n
+0000640602 00000 n
+0000640902 00000 n
+0000641183 00000 n
+0000641495 00000 n
+0000641736 00000 n
+0000642031 00000 n
+0000642268 00000 n
+0000642567 00000 n
+0000642811 00000 n
+0000643127 00000 n
+0000643436 00000 n
+0000643775 00000 n
+0000644152 00000 n
+0000644438 00000 n
+0000644719 00000 n
+0000644995 00000 n
+0000645282 00000 n
+0000645601 00000 n
+0000645902 00000 n
+0000646169 00000 n
+0000646422 00000 n
+0000646697 00000 n
+0000647008 00000 n
+0000647275 00000 n
+0000647564 00000 n
+0000647873 00000 n
+0000648180 00000 n
+0000648453 00000 n
+0000648736 00000 n
+0000649023 00000 n
+0000649292 00000 n
+0000649603 00000 n
+0000649867 00000 n
+0000650163 00000 n
+0000650420 00000 n
+0000650702 00000 n
+0000651010 00000 n
+0000651288 00000 n
+0000651578 00000 n
+0000651900 00000 n
+0000652178 00000 n
+0000652479 00000 n
+0000652785 00000 n
+0000653095 00000 n
+0000653365 00000 n
+0000653687 00000 n
+0000653965 00000 n
+0000654279 00000 n
+0000654577 00000 n
+0000654835 00000 n
+0000655171 00000 n
+0000655433 00000 n
+0000655755 00000 n
+0000656037 00000 n
+0000656377 00000 n
+0000656647 00000 n
+0000656916 00000 n
+0000657206 00000 n
+0000657472 00000 n
+0000657721 00000 n
+0000658049 00000 n
+0000658333 00000 n
+0000658610 00000 n
+0000660075 00000 n
+0000692744 00000 n
+0000693066 00000 n
+0000693534 00000 n
+0000698371 00000 n
+0000698708 00000 n
+0000712688 00000 n
+0000713034 00000 n
+0000713412 00000 n
+0000713749 00000 n
+0000714216 00000 n
+0000717077 00000 n
+0000717407 00000 n
+0000717775 00000 n
+0000718105 00000 n
+0000718406 00000 n
+0000718702 00000 n
+0000719002 00000 n
+0000719296 00000 n
+0000719672 00000 n
+0000720203 00000 n
+0000725010 00000 n
+0000725310 00000 n
+0000725666 00000 n
+0000726058 00000 n
+0000726493 00000 n
+0000726935 00000 n
+0000727384 00000 n
+0000727916 00000 n
+0000732024 00000 n
+0000732323 00000 n
+0000732642 00000 n
+0000733055 00000 n
+0000733379 00000 n
+0000733822 00000 n
+0000734136 00000 n
+0000734574 00000 n
+0000734937 00000 n
+0000735373 00000 n
+0000735733 00000 n
+0000736169 00000 n
+0000736487 00000 n
+0000736921 00000 n
+0000737535 00000 n
+0000743500 00000 n
+0000743849 00000 n
+0000744282 00000 n
+0000744637 00000 n
+0000745072 00000 n
+0000745369 00000 n
+0000745756 00000 n
+0000746081 00000 n
+0000746480 00000 n
+0000746799 00000 n
+0000747192 00000 n
+0000747517 00000 n
+0000747912 00000 n
+0000748223 00000 n
+0000748601 00000 n
+0000748953 00000 n
+0000749351 00000 n
+0000750030 00000 n
+0000757234 00000 n
+0000757557 00000 n
+0000757925 00000 n
+0000758296 00000 n
+0000758666 00000 n
+0000759056 00000 n
+0000759556 00000 n
+0000760107 00000 n
+0000764295 00000 n
+0000764601 00000 n
+0000764955 00000 n
+0000765329 00000 n
+0000765639 00000 n
+0000766014 00000 n
+0000766415 00000 n
+0000766928 00000 n
+0000768639 00000 n
+0000768947 00000 n
+0000769339 00000 n
+0000769719 00000 n
+0000770026 00000 n
+0000770427 00000 n
+0000770844 00000 n
+0000771357 00000 n
+0000773215 00000 n
+0000773420 00000 n
+0000774302 00000 n
+0000774591 00000 n
+0000774929 00000 n
+0000775124 00000 n
+0000775430 00000 n
+0000776086 00000 n
+0000776746 00000 n
+0000777399 00000 n
+0000777958 00000 n
+0000784729 00000 n
+0000785029 00000 n
+0000785961 00000 n
+0000786920 00000 n
+0000787870 00000 n
+0000788216 00000 n
+0000788627 00000 n
+0000789140 00000 n
+0000791887 00000 n
+0000792191 00000 n
+0000792572 00000 n
+0000792891 00000 n
+0000793273 00000 n
+0000793568 00000 n
+0000794002 00000 n
+0000794308 00000 n
+0000794754 00000 n
+0000795266 00000 n
+0000796290 00000 n
+0000796608 00000 n
+0000797104 00000 n
+0000797650 00000 n
+0000798288 00000 n
+0000798783 00000 n
+0000804028 00000 n
+0000804454 00000 n
+0000804881 00000 n
+0000805307 00000 n
+0000805774 00000 n
+0000810602 00000 n
+0000811076 00000 n
+0000811749 00000 n
+0000812188 00000 n
+0000818241 00000 n
+0000818604 00000 n
+0000818976 00000 n
+0000819311 00000 n
+0000819729 00000 n
+0000820205 00000 n
+0000825448 00000 n
+0000825920 00000 n
+0000826238 00000 n
+0000826904 00000 n
+0000827352 00000 n
+0000835422 00000 n
+0000836381 00000 n
+0000837162 00000 n
+0000837601 00000 n
+0000844226 00000 n
+0000844630 00000 n
+0000845168 00000 n
+0000845607 00000 n
+0000849161 00000 n
+0000849468 00000 n
+0000849957 00000 n
+0000850404 00000 n
+0000850833 00000 n
+0000928999 00000 n
+0000929442 00000 n
+0000929742 00000 n
+0000930105 00000 n
+0000930415 00000 n
+0000930728 00000 n
+0000930929 00000 n
+0000931448 00000 n
+0000932104 00000 n
+0000932616 00000 n
+0000937583 00000 n
+0000937900 00000 n
+0000938281 00000 n
+0000938666 00000 n
+0000939047 00000 n
+0000939432 00000 n
+0000939936 00000 n
+0000941901 00000 n
+0000942197 00000 n
+0000942636 00000 n
+0000942941 00000 n
+0000943325 00000 n
+0000943743 00000 n
+0000944228 00000 n
+0000946674 00000 n
+0000946991 00000 n
+0000947517 00000 n
+0000948053 00000 n
+0000948359 00000 n
+0000948823 00000 n
+0000949369 00000 n
+0000949901 00000 n
+0000952945 00000 n
+0000953276 00000 n
+0000953871 00000 n
+0000954468 00000 n
+0000955066 00000 n
+0000955664 00000 n
+0000956187 00000 n
+0000961282 00000 n
+0000961600 00000 n
+0000962029 00000 n
+0000962408 00000 n
+0000962856 00000 n
+0000965724 00000 n
+0000966059 00000 n
+0000966600 00000 n
+0000967146 00000 n
+0000967575 00000 n
+0000969485 00000 n
+0000969921 00000 n
+0000970351 00000 n
+0000970790 00000 n
+0000974370 00000 n
+0000975185 00000 n
+0000975678 00000 n
+0000984522 00000 n
+0000984890 00000 n
+0000985226 00000 n
+0000985675 00000 n
+0000986038 00000 n
+0000986375 00000 n
+0000986671 00000 n
+0000987047 00000 n
+0000988061 00000 n
+0000989050 00000 n
+0001067996 00000 n
+0001068450 00000 n
+0001115042 00000 n
+0001115496 00000 n
+0001141119 00000 n
+0001141573 00000 n
+0001180132 00000 n
+0001180586 00000 n
+0001229179 00000 n
+0001230845 00000 n
+0001276182 00000 n
+0001276636 00000 n
+0001337987 00000 n
+0001338441 00000 n
+0001393624 00000 n
+0001394078 00000 n
+0001444977 00000 n
+0001445431 00000 n
+0001543816 00000 n
+0001544270 00000 n
+0001587169 00000 n
+0001587623 00000 n
+0001657918 00000 n
+0001658372 00000 n
+0001727482 00000 n
+0001727936 00000 n
+0001788804 00000 n
+0001789258 00000 n
+0001873681 00000 n
+0001874135 00000 n
+0001928328 00000 n
+0001928782 00000 n
+0002019088 00000 n
+0002019542 00000 n
+0002093743 00000 n
+0002094197 00000 n
+0002170167 00000 n
+0002170621 00000 n
+0002242199 00000 n
+0002242653 00000 n
+0002304466 00000 n
+0002304920 00000 n
+0002336062 00000 n
+0002336516 00000 n
+0002367369 00000 n
+0002367823 00000 n
+0002398537 00000 n
+0002398991 00000 n
+0002437228 00000 n
+0002437682 00000 n
+0002472686 00000 n
+0002473140 00000 n
+0002522427 00000 n
+0002522727 00000 n
+0002555148 00000 n
+0002555448 00000 n
+0002584356 00000 n
+0002584656 00000 n
+0002608283 00000 n
+0002608737 00000 n
+0002722971 00000 n
+0002723425 00000 n
+0002847466 00000 n
+0002847834 00000 n
+0002895487 00000 n
+0002895855 00000 n
+0002917667 00000 n
+0002918035 00000 n
+0002978319 00000 n
+0002978687 00000 n
+0003046201 00000 n
+0003046569 00000 n
+0003095037 00000 n
+0003095405 00000 n
+0003143393 00000 n
+0003143761 00000 n
+0003234758 00000 n
+0003235126 00000 n
+0003328882 00000 n
+0003329336 00000 n
+0003535053 00000 n
+0003535507 00000 n
+0003662028 00000 n
+0003662482 00000 n
+0003807959 00000 n
+0003808413 00000 n
+0003950613 00000 n
+0003950944 00000 n
+0004006502 00000 n
+0004006833 00000 n
+0004072759 00000 n
+0004073090 00000 n
+0004127169 00000 n
+0004127623 00000 n
+0004253765 00000 n
+0004254219 00000 n
+0004438862 00000 n
+0004439316 00000 n
+0004494466 00000 n
+0004494920 00000 n
+0004520952 00000 n
+0004521406 00000 n
+0004601354 00000 n
+0004601808 00000 n
+0004675357 00000 n
+0004675811 00000 n
+0004751289 00000 n
+0004751743 00000 n
+0004950786 00000 n
+0004951240 00000 n
+0005155432 00000 n
+0005155886 00000 n
+0005331697 00000 n
+0005332151 00000 n
+0005535428 00000 n
+0005535882 00000 n
+0005724997 00000 n
+0005725451 00000 n
+0005796411 00000 n
+0005796865 00000 n
+0005859033 00000 n
+0005859487 00000 n
+0006143279 00000 n
+0006143733 00000 n
+0006190752 00000 n
+0006191206 00000 n
+0006413748 00000 n
+0006414202 00000 n
+0006648571 00000 n
+0006649025 00000 n
+0006771350 00000 n
+0006771804 00000 n
+0006833880 00000 n
+0006834334 00000 n
+0006971868 00000 n
+0006972322 00000 n
+0007070649 00000 n
+0007071103 00000 n
+0007126238 00000 n
+0007126692 00000 n
+0007292202 00000 n
+0007292656 00000 n
+0007468432 00000 n
+0007468732 00000 n
+0007500199 00000 n
+0007500499 00000 n
+0007533719 00000 n
+0007534019 00000 n
+0007566379 00000 n
+0007566679 00000 n
+0007599509 00000 n
+0007599963 00000 n
+0007707479 00000 n
+0007707933 00000 n
+0007874948 00000 n
+0007875402 00000 n
+0008022324 00000 n
+0008022778 00000 n
+0008110218 00000 n
+0008110586 00000 n
+0008215439 00000 n
+0008215893 00000 n
+0008343208 00000 n
+0008343662 00000 n
+0008465129 00000 n
+0008465583 00000 n
+0008519992 00000 n
+0008520446 00000 n
+0008614126 00000 n
+0008614580 00000 n
+0008676568 00000 n
+0008677022 00000 n
+0008761841 00000 n
+0008762295 00000 n
+0008817571 00000 n
+0008818046 00000 n
+0009088364 00000 n
+0009088839 00000 n
+0009297114 00000 n
+0009297568 00000 n
+0009327687 00000 n
+0009328141 00000 n
+0009361867 00000 n
+0009362321 00000 n
+0009415427 00000 n
+0009416299 00000 n
+0009418184 00000 n
+0009418948 00000 n
+0009420688 00000 n
+0009420806 00000 n
+0009421894 00000 n
 trailer
 <<
   /Size 5157
   /Root 5156 0 R
   /Info 5154 0 R
-  /ID [(yxlFqL+yQkqwPdv8OD4lIw==) (yxlFqL+yQkqwPdv8OD4lIw==)]
+  /ID [(wpIfS5UFZ+QI688D8tNisQ==) (wpIfS5UFZ+QI688D8tNisQ==)]
 >>
 startxref
-9434910
+9422282
 %%EOF
