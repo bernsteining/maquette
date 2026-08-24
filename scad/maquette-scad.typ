@@ -1,0 +1,204 @@
+// maquette-scad — OpenSCAD-flavored procedural geometry for Typst.
+//
+// Build a solid with the helpers below, then compile it to a mesh with
+// `openscad(...)`, which returns PLY bytes you pass straight to maquette's
+// `render-ply`:
+//
+//   #import "maquette-scad.typ": *
+//   #import "../maquette/maquette.typ": render-ply
+//   #let part = openscad(difference(cube(20, center: true), sphere(12, fn: 48)))
+//   #render-ply(part, ..)
+//
+// Like OpenSCAD there are two worlds: 2D shapes (square, circle, polygon, …) and
+// 3D solids (cube, sphere, cylinder, …). `linear-extrude`/`rotate-extrude` turn a
+// 2D shape into a 3D solid. Transforms and booleans work in either world; hull
+// and minkowski are 3D. Use Typst's own `for`/`range`/`calc` to place things
+// procedurally.
+//
+// The heavy CSG kernel lives in maquette-scad.wasm; the maquette renderer is a
+// separate wasm. They only exchange the PLY blob — see scad/src/lib.rs.
+
+#let _scad-plugin = plugin("maquette-scad.wasm")
+
+// ---- 3D primitives ----
+// `size` may be a single number (uniform) or a 3-array (x, y, z).
+#let cube(size, center: false) = {
+  let s = if type(size) == array { size } else { (size, size, size) }
+  (op: "cube", size: s, center: center)
+}
+#let sphere(r, fn: none) = (op: "sphere", r: r, ..(if fn != none { (fn: fn) }))
+// Straight cylinder (r) or cone/frustum (r1, r2).
+#let cylinder(h, r: none, r1: none, r2: none, center: false, fn: none) = (
+  op: "cylinder", h: h, center: center,
+  ..(if r != none { (r: r) }),
+  ..(if r1 != none { (r1: r1) }), ..(if r2 != none { (r2: r2) }),
+  ..(if fn != none { (fn: fn) }),
+)
+// Raw mesh: points = ((x,y,z),..), faces = ((i,j,k,..),..).
+#let polyhedron(points, faces) = (op: "polyhedron", points: points, faces: faces)
+
+// ---- 2D primitives ----
+#let square(size, center: false) = (op: "square", size: size, center: center)
+#let circle(r, fn: none) = (op: "circle", r: r, ..(if fn != none { (fn: fn) }))
+#let ellipse(w, h, fn: none) = (op: "ellipse", w: w, h: h, ..(if fn != none { (fn: fn) }))
+// `paths` (optional) are index-rings into `points`: first = outer, rest = holes.
+#let polygon(points, paths: none) = (
+  op: "polygon", points: points, ..(if paths != none { (paths: paths) }),
+)
+// 3D text. Needs a font: pass `font: read("x.ttf", encoding: none)` to openscad().
+#let scad-text(str, size: 10) = (op: "text", text: str, size: size)
+// Import an STL/OBJ mesh. Pass its bytes via openscad(bin: (name: read(...))).
+#let import-mesh(file) = (op: "import", file: file)
+#let ngon(sides, r, fn: none) = (op: "ngon", sides: sides, r: r)
+#let star(points, outer, inner) = (op: "star", points: points, outer: outer, inner: inner)
+#let rounded-square(w, h, r, fn: none) = (
+  op: "rounded_square", w: w, h: h, r: r, ..(if fn != none { (fn: fn) }),
+)
+
+// ---- 2D -> 3D ----
+#let linear-extrude(h, child, center: false, twist: 0, scale: 1, slices: none) = (
+  op: "linear_extrude", h: h, center: center, child: child,
+  ..(if twist != 0 { (twist: twist) }),
+  ..(if scale != 1 { (scale: scale) }),
+  ..(if slices != none { (slices: slices) }),
+)
+// Revolve a 2D profile (in the +x half-plane) around the axis. `angle` degrees.
+#let rotate-extrude(child, angle: 360, fn: none) = (
+  op: "rotate_extrude", angle: angle, child: child, ..(if fn != none { (fn: fn) }),
+)
+// Flatten a 3D solid to its 2D shadow on the Z=0 plane.
+#let projection(child) = (op: "projection", child: child)
+
+// ---- transforms (2D or 3D) ----
+#let translate(v, child) = (op: "translate", v: v, child: child)
+#let rotate(deg, child) = (op: "rotate", deg: deg, child: child)   // Euler degrees (x, y, z)
+#let scale(v, child) = (op: "scale", v: v, child: child)
+#let mirror(v, child) = (op: "mirror", v: v, child: child)         // reflect across plane with normal v
+#let multmatrix(m, child) = (op: "multmatrix", m: m, child: child) // 4x4 / 4x3 affine matrix
+#let resize(v, child) = (op: "resize", v: v, child: child)         // scale a 3D solid to a target bbox
+#let offset(d, child) = (op: "offset", d: d, child: child)         // grow/shrink a 2D shape by d
+// Color a subtree. `rgb` is a 3-array of 0..1 floats (or a 4-array [r,g,b,a]).
+// `alpha` (0..1) makes the subtree translucent — interior features show through
+// when rendered. Survives boolean ops.
+#let color(rgb, child, alpha: none) = (
+  op: "color", rgb: rgb, child: child, ..(if alpha != none { (alpha: alpha) }),
+)
+
+// ---- booleans (variadic) ----
+#let union(..items) = (op: "union", children: items.pos())
+#let difference(..items) = (op: "difference", children: items.pos())      // first minus the rest
+#let intersection(..items) = (op: "intersection", children: items.pos())
+
+// ---- hull / minkowski (3D, variadic) ----
+#let hull(..items) = (op: "hull", children: items.pos())
+#let minkowski(..items) = (op: "minkowski", children: items.pos())
+
+// ---- clash-free aliases ----
+// These OpenSCAD names shadow Typst built-ins under `import *`:
+//   scale, rotate, circle, square, ellipse, polygon, color  (and text → scad-text).
+// The `scad-` aliases below give a non-clashing name so you can keep Typst's too.
+// Alternatively, import the whole module namespaced and skip aliases entirely:
+//   #import "maquette-scad.typ" as scad   →   scad.scale(..), scad.rotate(..)
+#let scad-scale = scale
+#let scad-rotate = rotate
+#let scad-circle = circle
+#let scad-square = square
+#let scad-ellipse = ellipse
+#let scad-polygon = polygon
+#let scad-color = color
+
+// Frame a dict of name -> bytes into one blob: [u32 name_len][name][u32 len][data]…
+#let _u32le(n) = bytes((
+  calc.rem(n, 256),
+  calc.rem(calc.quo(n, 256), 256),
+  calc.rem(calc.quo(n, 65536), 256),
+  calc.rem(calc.quo(n, 16777216), 256),
+))
+#let _pack-bin(items) = {
+  let out = bytes(())
+  for (name, data) in items {
+    let nb = bytes(name)
+    let db = bytes(data)
+    out += _u32le(nb.len()) + nb + _u32le(db.len()) + db
+  }
+  out
+}
+
+// Compile a DSL tree to PLY bytes. `fn` sets the default facet count ($fn).
+// `bin`/`font` supply bytes for `import-mesh`/`scad-text` (same as openscad-text).
+// Feed the result to maquette's `render-ply`.
+#let openscad(node, bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  _scad-plugin.build_ply(
+    bytes(json.encode(node)), bytes(json.encode((fn: fn))), _pack-bin(assets),
+  )
+}
+
+// Compile REAL OpenSCAD source text (a string, or bytes from `read("x.scad")`)
+// to PLY bytes. Supports a substantial subset: primitives, transforms, booleans,
+// hull/minkowski, extrudes (incl. twist/scale), `for`/`if`, list comprehensions,
+// variables, user modules & functions, closures, and an expression language.
+//
+// `files` supplies libraries for `use <path>` / `include <path>` — a dict of
+// path -> source text. Since the wasm sandbox can't read files, YOU read them
+// in Typst and pass them in, e.g.:
+//   openscad-text(read("main.scad"), files: (
+//     "BOSL2/std.scad": read("BOSL2/std.scad"),
+//   ))
+//
+// `fn` is the default facet count when the source omits `$fn`. Feed the result
+// to maquette's `render-ply`.
+
+// `bin` supplies binary assets for `import("x.stl"|.obj|.dxf)` — a dict of
+// filename -> bytes (from `read(..., encoding: none)`). `font` is TTF/OTF bytes
+// used by `text(...)`. Example:
+//   openscad-text(read("main.scad"),
+//     bin: ("part.stl": read("part.stl", encoding: none)),
+//     font: read("Roboto.ttf", encoding: none))
+#let openscad-text(src, files: (:), bin: (:), font: none, fn: 32, trace: none) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  let opts = (fn: fn)
+  if trace != none { opts = opts + (trace: trace) }  // debug: stop before the Nth csgrs op
+  _scad-plugin.build_scad(
+    bytes(src),
+    bytes(json.encode(files)),
+    bytes(json.encode(opts)),
+    _pack-bin(assets),
+  )
+}
+
+// A render-config preset that approximates OpenSCAD's viewport look: the gold
+// model (uncolored geometry already defaults to OpenSCAD's #f9d72c), a flat,
+// matte, front-lit OpenGL style, and a light grey background. Spread it into
+// maquette's render call:  render-ply(model, ..openscad-view, azimuth: 30, …)
+#let openscad-view = (
+  // Match OpenSCAD's viewport: FLAT (per-face) shading — each facet a uniform
+  // tone from its own normal, with NO specular and NO smooth (Gouraud) gradient.
+  // This is why coarse ($fn) cylinders show visible facet bands, exactly like
+  // OpenSCAD's preview. A moderate ambient + one key + one fill light keep the
+  // facets legible without a glossy falloff.
+  shading: "flat",
+  ambient: 0.5,
+  specular: 0.0,
+  background: "#e9e9ec",
+  // OpenSCAD renders two-sided; disabling back-face culling avoids "holes" where
+  // mirror()/negative-scale() flip a part's winding.
+  cull_backface: false,
+  lights: (
+    (type: "directional", vector: (-0.3, -0.4, 1.0), color: "#ffffff", intensity: 0.55),
+    (type: "directional", vector: (0.5, 0.6, 0.5), color: "#ffffff", intensity: 0.22),
+  ),
+)
+
+// Enable OpenSCAD syntax highlighting for ```scad / ```openscad code blocks.
+// Apply as a document show rule:
+//   #import "maquette-scad.typ": scad-highlighting
+//   #show: scad-highlighting
+// The grammar path resolves relative to THIS file (openscad.sublime-syntax
+// ships alongside it).
+#let scad-highlighting(doc) = {
+  set raw(syntaxes: "openscad.sublime-syntax")
+  doc
+}

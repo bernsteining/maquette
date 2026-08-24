@@ -1,0 +1,8 @@
+cyclone-src/
+cyclone-full.ply
+dragon.ply
+dragon-src/
+
+# rendered showcase outputs (regenerate with `make`)
+*.pdf
+*.png

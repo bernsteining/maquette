@@ -45,4 +45,16 @@ demo: wasm demo-assets
 	cp $(WASM_OUT) docs/maquette.wasm
 	@echo "docs/ ready — serve with:  python3 -m http.server -d docs"
 
-.PHONY: wasm build harness doc demo-assets demo
+# --- maquette-scad: optional OpenSCAD/CSG plugin (separate wasm, csgrs kernel) ---
+SCAD_DIR = scad
+SCAD_WASM_TARGET = $(SCAD_DIR)/target/wasm32-unknown-unknown/release/maquette_scad.wasm
+SCAD_WASM_OUT = $(SCAD_DIR)/maquette-scad.wasm
+
+# Build + optimize the scad plugin wasm. Mirrors the core `wasm` recipe (same
+# target features + wasm-opt flags) for consistency.
+scad-wasm:
+	cd $(SCAD_DIR) && RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release
+	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(SCAD_WASM_TARGET) -o $(SCAD_WASM_OUT)
+	@ls -lh $(SCAD_WASM_OUT)
+
+.PHONY: wasm build harness doc demo-assets demo scad-wasm

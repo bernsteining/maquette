@@ -1,0 +1,43 @@
+[package]
+name = "maquette-scad"
+version = "0.1.0"
+edition = "2021"
+description = "OpenSCAD-flavored procedural geometry -> PLY, as a Typst wasm plugin, for maquette."
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]  # rlib so a native repro harness can link it
+
+[dependencies]
+wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }
+# Real .scad text ingestion: parser only (we write the evaluator in src/scad.rs).
+openscad-rs = "0.1.0"
+rpds = "1"
+rustc-hash = "2"   # fast non-cryptographic hasher (FxHashMap) for internal maps
+archery = "1"       # name RcK to give rpds's HashTrieMap the Fx hasher
+
+# CSG kernel = Manifold (elalish/manifold) via safe Rust bindings over its C API.
+# Manifold GUARANTEES watertight, correctly-triangulated boolean output — unlike
+# csgrs 0.20.1, whose BSP union/difference leave ~20% of faces open on any
+# non-trivial face split (bores/notches/partial overlaps). See FIDELITY.md.
+#
+# Features differ by target:
+#  - wasm32: `unstable-wasm-uu` links the C++ runtime IN via wasm-cxx-shim (built
+#    -fno-exceptions), so the module is self-contained (0 host imports) and runs
+#    under Typst's wasmi. OBJ I/O is disabled on this target.
+#  - native (repro/probe harnesses): default serial build, system clang/cmake.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+manifold-csg = { version = "0.4", default-features = false, features = ["unstable-wasm-uu"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+manifold-csg = { version = "0.4", default-features = false }
+
+[profile.release]
+lto = "fat"
+strip = true
+opt-level = 3
+codegen-units = 1
+panic = "abort"
+debug = false
+debug-assertions = false
+overflow-checks = false
