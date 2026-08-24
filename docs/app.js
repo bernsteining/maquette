@@ -441,7 +441,7 @@ function buildTypst() {
   // OpenSCAD models aren't a file on disk — they're compiled in-browser by the
   // maquette-scad plugin. Show that real workflow: read the .scad source, compile
   // it to a mesh with `openscad-text`, then hand the mesh to maquette's renderer.
-  if (model.name === "openscad.ply") {
+  if (model.scad) {
     return `#import "@preview/maquette-scad:0.1.0": openscad-text\n`
       + `#import "@preview/maquette:0.1.3": ${fn}\n\n`
       + `#let model = openscad-text(read("model.scad"))\n\n${body}`;
@@ -984,7 +984,11 @@ $("scad-src").addEventListener("scroll", () => {
 // Render a freshly-compiled mesh without touching the picker (keeps it on
 // "OpenSCAD"), unlike ingest() which syncs the dropdown to the loaded file name.
 function renderScadResult(ply) {
-  model = { name: "openscad.ply", bytes: ply };
+  // These bytes are the LIVE output of maquette-scad.wasm compiling the editor's
+  // .scad source — never a fetched file. `.ply` is the real output format (routes
+  // to render-ply); `scad: true` marks the source so the Typst snippet shows the
+  // real openscad-text(read("model.scad")) workflow instead of a phantom read().
+  model = { name: "model.ply", scad: true, bytes: ply };
   renderOverride = null;
   refreshVisibility(); measure(); onChange();
 }
