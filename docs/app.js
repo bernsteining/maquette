@@ -24,6 +24,36 @@ function callPlugin(fn, ...args) {
   return _result;
 }
 
+// ── maquette-scad plugin (OpenSCAD → PLY) ──────────────────────────────────
+// A second wasm-minimal-protocol module: compiles OpenSCAD text to a watertight
+// PLY mesh (Manifold kernel) entirely in the browser, then the PLY feeds the
+// exact same render path as any other model. Loaded lazily (only when the user
+// picks the OpenSCAD source) so it never delays first paint. Runs on the
+// browser's wasm JIT — an order of magnitude faster than Typst's interpreter.
+const SCAD_WASM_URL = "maquette-scad.wasm";
+let scadInstance, scadMemory;
+const scadImports = { typst_env: {
+  wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
+    new Uint8Array(scadMemory.buffer, ptr, _args.length).set(_args),
+  wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
+    { _result = new Uint8Array(scadMemory.buffer, ptr, len).slice(); },
+}};
+async function ensureScad() {
+  if (scadInstance) return;
+  const bytes = await (await fetch(SCAD_WASM_URL)).arrayBuffer();
+  scadInstance = await WebAssembly.instantiate(await WebAssembly.compile(bytes), scadImports);
+  scadMemory = scadInstance.exports.memory;
+}
+function callScad(fn, ...args) {
+  const total = args.reduce((n, a) => n + a.length, 0);
+  _args = new Uint8Array(total); let o = 0;
+  for (const a of args) { _args.set(a, o); o += a.length; }
+  _result = new Uint8Array();
+  const rc = scadInstance.exports[fn](...args.map((a) => a.length));
+  if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || "OpenSCAD compile failed");
+  return _result;
+}
+
 // ──────────────────────────────── SCHEMA ──────────────────────────────────
 // Field: {k, label, t, def, ...}. t ∈ sel|num|rng|col|bool|txt|vec.
 // Group: {k, label, t:"grp", toggle, bool, def:{}, fields:[]}  (toggle→enable box; bool→`key:true` shorthand)
@@ -442,6 +472,60 @@ function renderCode() {
   ).join("");
 }
 
+// OpenSCAD highlighter for the editable source panel. Hand-rolled (same rationale
+// as the Typst one) and block-comment aware (`/* … */` can span lines), reusing
+// the shared .t-* token classes. Keywords vs built-in modules/functions get
+// distinct colors; `$fn`/`$fa`/… render like directives.
+const SCAD_KW = new Set(["module", "function", "if", "else", "for", "let", "each",
+  "true", "false", "undef", "echo", "assert", "include", "use", "intersection_for", "return"]);
+const SCAD_BUILTIN = new Set(["cube", "sphere", "cylinder", "polyhedron", "square", "circle",
+  "polygon", "text", "translate", "rotate", "scale", "mirror", "resize", "multmatrix", "hull",
+  "minkowski", "union", "difference", "intersection", "linear_extrude", "rotate_extrude", "offset",
+  "projection", "color", "render", "children", "child", "import", "surface", "group",
+  "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "abs", "sign", "floor", "ceil", "round",
+  "ln", "log", "pow", "sqrt", "exp", "min", "max", "norm", "cross", "concat", "len", "str",
+  "chr", "ord", "search", "lookup", "rands", "is_undef", "is_num", "is_list", "is_string", "is_bool"]);
+function highlightScad(text) {
+  let inBlock = false;
+  return text.split("\n").map((line) => {
+    let s = line, out = "", m;
+    while (s.length) {
+      if (inBlock) {                                   // inside /* … */
+        const end = s.indexOf("*/");
+        const seg = end === -1 ? s : s.slice(0, end + 2);
+        out += `<span class="t-comment">${esc(seg)}</span>`;
+        if (end === -1) { s = ""; } else { s = s.slice(end + 2); inBlock = false; }
+        continue;
+      }
+      if (m = /^\s+/.exec(s)) { out += esc(m[0]); s = s.slice(m[0].length); continue; }
+      if (s.startsWith("//")) { out += `<span class="t-comment">${esc(s)}</span>`; s = ""; continue; }
+      if (s.startsWith("/*")) {
+        const end = s.indexOf("*/", 2);
+        const seg = end === -1 ? s : s.slice(0, end + 2);
+        out += `<span class="t-comment">${esc(seg)}</span>`;
+        if (end === -1) { s = ""; inBlock = true; } else { s = s.slice(end + 2); }
+        continue;
+      }
+      if (m = /^"(?:[^"\\]|\\.)*"/.exec(s)) { out += `<span class="t-string">${esc(m[0])}</span>`; s = s.slice(m[0].length); continue; }
+      if (m = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(s)) { out += `<span class="t-number">${esc(m[0])}</span>`; s = s.slice(m[0].length); continue; }
+      if (m = /^\$[A-Za-z_]\w*/.exec(s)) { out += `<span class="t-directive">${esc(m[0])}</span>`; s = s.slice(m[0].length); continue; }
+      if (m = /^[A-Za-z_]\w*/.exec(s)) {
+        const w = m[0];
+        const cls = SCAD_KW.has(w) ? "t-kw" : SCAD_BUILTIN.has(w) ? "t-key" : null;
+        out += cls ? `<span class="${cls}">${esc(w)}</span>` : esc(w);
+        s = s.slice(w.length); continue;
+      }
+      if (m = /^[(){}\[\],:;*+\/=<>!&|%.?-]/.exec(s)) { out += `<span class="t-punct">${esc(m[0])}</span>`; s = s.slice(m[0].length); continue; }
+      out += esc(s[0]); s = s.slice(1);
+    }
+    return out;
+  }).join("\n");
+}
+function updateScadHighlight() {
+  // trailing newline so the final line and the caret past it stay visible
+  $("scad-hl").innerHTML = highlightScad($("scad-src").value) + "\n";
+}
+
 // ─────────────────────────────── DOM engine ───────────────────────────────
 const $ = (id) => document.getElementById(id);
 const ext = (name) => name.split(".").pop().toLowerCase();
@@ -767,12 +851,31 @@ async function copyText(text) {
 // ─────────────────────────────── model I/O ────────────────────────────────
 // Built-in models — fetched lazily (only when picked), same origin as bunny.obj.
 const MODELS = [
+  ["__scad__", "OpenSCAD"],
   ["bunny.obj", "Bunny (OBJ)"],
   ["teapot.obj", "Teapot (OBJ)"],
   ["crankshaft.obj", "Crankshaft (OBJ)"],
   ["brain_skull.obj", "Brain + skull (OBJ)"],
   ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
 ];
+
+// The `__scad__` picker entry opens an editor instead of fetching a file; its
+// output is a mesh, so give it the OpenSCAD viewport look (flat gold, no specular).
+const SCAD_DEFAULTS = { color: "#f9d72c", specular: 0, shading: "flat", cull_backface: false };
+// The canonical OpenSCAD CSG demo — a rounded cube (cube ∩ sphere) bored through
+// on all three axes. OpenSCAD's de-facto showcase model (its "Suzanne").
+const SCAD_EXAMPLE = `// The classic OpenSCAD CSG example, compiled to a watertight
+// mesh in your browser. Edit freely — it recompiles as you type.
+$fn = 64;
+difference() {
+  intersection() {
+    cube(20, center = true);
+    sphere(13);
+  }
+  cylinder(h = 30, r = 6, center = true);
+  rotate([90, 0, 0]) cylinder(h = 30, r = 6, center = true);
+  rotate([0, 90, 0]) cylinder(h = 30, r = 6, center = true);
+}`;
 
 // Per-model "showcase" config, applied when a built-in model is picked so each
 // loads looking like its documentation example. On every preset load these keys
@@ -794,7 +897,10 @@ const MODEL_DEFAULTS = {
     _cam: "spherical", azimuth: -119, elevation: 24.5, up: [0, 1, 0], zoom: 2.254,
   },
 };
-const DEFAULTS_KEYS = [...new Set(Object.values(MODEL_DEFAULTS).flatMap(Object.keys))];
+const DEFAULTS_KEYS = [...new Set([
+  ...Object.values(MODEL_DEFAULTS).flatMap(Object.keys),
+  ...Object.keys(SCAD_DEFAULTS),   // so switching away from OpenSCAD resets its flat look
+])];
 const TOP_FIELDS = Object.fromEntries(SCHEMA.flatMap(s => s.fields.map(f => [f.k, f])));
 function applyModelDefaults(name) {
   for (const k of DEFAULTS_KEYS) {   // reset to the field's starting value (init, else def)
@@ -814,6 +920,8 @@ function ingest(name, bytes) {
   refreshVisibility(); measure(); onChange();
 }
 async function loadFile(file) {
+  if (ext(file.name) === "scad") return enterScadMode(await file.text());
+  $("tab-scad").hidden = true; setTab("typst");
   ingest(file.name, new Uint8Array(await file.arrayBuffer()));
 }
 async function loadPreset(name) {
@@ -835,10 +943,79 @@ function syncPreset(name) {
 (function initPresets() {
   const sel = $("preset");
   for (const [v, t] of MODELS) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.append(o); }
-  sel.onchange = () => { if (sel.value) loadPreset(sel.value); };
+  sel.onchange = () => {
+    if (sel.value === "__scad__") return enterScadMode();
+    $("tab-scad").hidden = true; setTab("typst");
+    if (sel.value) loadPreset(sel.value);
+  };
 })();
 $("browse").onclick = () => $("file").click();
 $("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
+
+// ── OpenSCAD live source ───────────────────────────────────────────────────
+let scadTimer, snippetTab = "typst";
+// The snippet panel has two tabs: the editable OpenSCAD source and the read-only
+// generated Typst (the render params to copy into a document). The OpenSCAD tab is
+// only offered when the model is OpenSCAD-sourced.
+function setTab(which) {
+  if (which === "scad" && $("tab-scad").hidden) which = "typst";
+  snippetTab = which;
+  $("tab-scad").classList.toggle("on", which === "scad");
+  $("tab-typst").classList.toggle("on", which === "typst");
+  $("scad-editor").hidden = which !== "scad";
+  elCode.style.display = which === "typst" ? "" : "none";
+}
+$("tab-scad").onclick = () => setTab("scad");
+$("tab-typst").onclick = () => setTab("typst");
+// Keep the highlight layer scrolled in lockstep with the textarea.
+$("scad-src").addEventListener("scroll", () => {
+  const hl = $("scad-hl"), src = $("scad-src");
+  hl.scrollTop = src.scrollTop; hl.scrollLeft = src.scrollLeft;
+});
+
+// Render a freshly-compiled mesh without touching the picker (keeps it on
+// "OpenSCAD"), unlike ingest() which syncs the dropdown to the loaded file name.
+function renderScadResult(ply) {
+  model = { name: "openscad.ply", bytes: ply };
+  renderOverride = null;
+  refreshVisibility(); measure(); onChange();
+}
+async function compileScad() {
+  const src = $("scad-src").value;
+  const status = $("scad-status");
+  if (!src.trim()) { status.textContent = ""; return; }
+  try {
+    status.textContent = "compiling…";
+    await ensureScad();
+    const t = performance.now();
+    const ply = callScad("build_scad", ENC.encode(src), ENC.encode("{}"),
+      ENC.encode(JSON.stringify({ fn: 32 })), new Uint8Array());
+    status.textContent = `compiled in ${Math.round(performance.now() - t)} ms`;
+    showErr("");
+    renderScadResult(ply);
+  } catch (e) {
+    status.textContent = "error";
+    showErr("OpenSCAD: " + e.message);
+  }
+}
+// Enter the editor (from the picker, or with `initial` text from a dropped .scad).
+async function enterScadMode(initial) {
+  $("preset").value = "__scad__";
+  $("tab-scad").hidden = false;      // reveal the OpenSCAD tab
+  $("snippet-sec").open = true;
+  const ta = $("scad-src");
+  if (initial !== undefined) ta.value = initial;
+  else if (!ta.value.trim()) ta.value = SCAD_EXAMPLE;
+  updateScadHighlight();
+  setTab("scad");
+  for (const k in SCAD_DEFAULTS) state[k] = structuredClone(SCAD_DEFAULTS[k]);
+  buildForm(); refreshVisibility();
+  await compileScad();
+}
+$("scad-src").addEventListener("input", () => {
+  updateScadHighlight();
+  clearTimeout(scadTimer); scadTimer = setTimeout(compileScad, 350);
+});
 
 // ─────────────────────── hover descriptions (tooltips) ─────────────────────
 // Tag an element with its help text; a single delegated listener shows an
