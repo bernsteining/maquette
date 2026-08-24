@@ -35,26 +35,49 @@ doc: build
 # Picker models first, then extras only referenced by documentation deep-links.
 DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj rubi_scan.ply \
               cube.stl colored_cube.stl cube.obj rubi_blender.ply
+# glTF demo models — only the Damaged Helmet ships in the demo. Additional
+# assets (fox, boombox, toycar, cesiumman) live in examples/data/gltf/ for
+# local dev; add them here to include them in the demo's model list.
+DEMO_GLTF_MODELS = helmet.blg
 
 # Copy the demo models into docs/ (gitignored there — regenerated, not committed).
 demo-assets:
 	cp $(addprefix examples/data/,$(DEMO_MODELS)) docs/
+	cp $(addprefix examples/data/gltf/,$(DEMO_GLTF_MODELS)) docs/
 
 # Assemble the demo dir locally: fresh wasm + models, ready to serve.
-demo: wasm demo-assets
+demo: wasm demo-assets scad-wasm gltf-wasm
 	cp $(WASM_OUT) docs/maquette.wasm
+	cp $(SCAD_WASM_OUT) docs/maquette-scad.wasm
+	cp $(GLTF_WASM_OUT) docs/maquette-gltf.wasm
 	@echo "docs/ ready — serve with:  python3 -m http.server -d docs"
 
-# --- maquette-scad: optional OpenSCAD/CSG plugin (separate wasm, csgrs kernel) ---
-SCAD_DIR = scad
-SCAD_WASM_TARGET = $(SCAD_DIR)/target/wasm32-unknown-unknown/release/maquette_scad.wasm
-SCAD_WASM_OUT = $(SCAD_DIR)/maquette-scad.wasm
+# --- maquette-scad: OpenSCAD/CSG plugin (workspace member, Manifold kernel) ---
+SCAD_WASM_TARGET = target/wasm32-unknown-unknown/release/maquette_scad.wasm
+SCAD_WASM_OUT = crates/maquette-scad/maquette-scad.wasm
 
 # Build + optimize the scad plugin wasm. Mirrors the core `wasm` recipe (same
 # target features + wasm-opt flags) for consistency.
 scad-wasm:
-	cd $(SCAD_DIR) && RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release
+	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release -p maquette-scad
 	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(SCAD_WASM_TARGET) -o $(SCAD_WASM_OUT)
 	@ls -lh $(SCAD_WASM_OUT)
 
-.PHONY: wasm build harness doc demo-assets demo scad-wasm
+# --- maquette-gltf: glTF 2.0 plugin (workspace member, shares maquette-core) ---
+GLTF_WASM_TARGET = target/wasm32-unknown-unknown/release/maquette_gltf.wasm
+GLTF_WASM_OUT = crates/maquette-gltf/maquette-gltf.wasm
+GLTF_WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette-gltf/0.1.0/maquette-gltf.wasm
+
+# Build + optimize the glTF plugin wasm. Same flags as maquette itself so the
+# two plugins agree on wasm feature use and file-size discipline.
+gltf-wasm:
+	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release -p maquette-gltf
+	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(GLTF_WASM_TARGET) -o $(GLTF_WASM_OUT)
+	@ls -lh $(GLTF_WASM_OUT)
+
+# Install glTF plugin into the local Typst package dir (mirror of `build`).
+gltf-build: gltf-wasm
+	mkdir -p $(dir $(GLTF_WASM_PKG))
+	cp $(GLTF_WASM_OUT) $(GLTF_WASM_PKG)
+
+.PHONY: wasm build harness doc demo-assets demo scad-wasm gltf-wasm gltf-build

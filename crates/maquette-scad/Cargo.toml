@@ -32,12 +32,7 @@ manifold-csg = { version = "0.4", default-features = false, features = ["unstabl
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 manifold-csg = { version = "0.4", default-features = false }
 
-[profile.release]
-lto = "fat"
-strip = true
-opt-level = 3
-codegen-units = 1
-panic = "abort"
-debug = false
-debug-assertions = false
-overflow-checks = false
+# `[profile.release]` deliberately omitted: this crate is a workspace member
+# now (see the root Cargo.toml). Cargo ignores per-member profile blocks and
+# emits a warning if one is present. The root's release profile (fat LTO,
+# strip, opt-level=3, no panic) already matches what we'd want here.

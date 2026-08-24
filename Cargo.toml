@@ -1,3 +1,20 @@
+[workspace]
+# Root workspace hosts the existing `maquette` crate (STL/OBJ/PLY plugin) plus
+# two new crates:
+#   * maquette-core  — render primitives shared by every plugin: math, colour,
+#                      rasterizer, SSAA/SSAO/FXAA, shadow maps, IBL env, HDR
+#                      + texture decode. Format-agnostic.
+#   * maquette-gltf  — a second Typst plugin that renders glTF 2.0 assets.
+#                      Depends on maquette-core for the render primitives and
+#                      on gltf-rs (+ meshopt-rs) for asset parsing.
+#
+# The root package is still the existing `maquette` (STL/OBJ/PLY) plugin — its
+# `src/` is untouched by this refactor. Migration of `maquette` onto
+# maquette-core is deferred to a follow-up (its rasterizer/shader have their
+# own set of features and the merge needs its own visual-regression pass).
+resolver = "2"
+members = ["crates/maquette-core", "crates/maquette-gltf", "crates/maquette-scad"]
+
 [package]
 name = "maquette"
 version = "0.1.3"
@@ -9,6 +26,8 @@ crate-type = ["cdylib"]
 [dependencies]
 wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }
 
+# `release` on the workspace root applies to every workspace member unless
+# they override it — matches what maquette-gltf needs (fat LTO, no panic).
 [profile.release]
 lto = "fat"
 strip = true

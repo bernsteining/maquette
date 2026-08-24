@@ -1,0 +1,49 @@
+[package]
+name = "maquette-gltf"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Typst plugin that compiles glTF 2.0 assets into raster images at document build time. Sibling to maquette (STL/OBJ/PLY)."
+
+[lib]
+crate-type = ["cdylib"]
+# Explicit name so the produced artefact is `maquette_gltf.wasm` regardless of
+# the crate name's dash-to-underscore conversion.
+name = "maquette_gltf"
+
+[dependencies]
+maquette-core = { path = "../maquette-core" }
+wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+# EXT_meshopt_compression decoder (pure Rust, wasm-friendly).
+meshopt-rs = { version = "0.1", features = ["experimental"] }
+# MikkTSpace: consistent per-vertex tangents when TANGENT attribute is missing.
+mikktspace = { version = "0.3", default-features = false, features = ["glam"] }
+
+[dependencies.gltf]
+# Pinned to a specific `main` rev — 1.4.1 (latest crates.io) doesn't expose
+# KHR_materials_clearcoat / KHR_materials_sheen. Bump when the next crates.io
+# release lands with the features.
+git = "https://github.com/gltf-rs/gltf"
+rev = "50d65229477fe5f785c2c90df21eb59c93ea2261"
+default-features = false
+features = [
+    "utils",
+    "names",
+    "extensions",
+    "KHR_lights_punctual",
+    "KHR_materials_unlit",
+    "KHR_materials_transmission",
+    "KHR_materials_ior",
+    "KHR_materials_specular",
+    "KHR_materials_emissive_strength",
+    "KHR_materials_volume",
+    "KHR_materials_clearcoat",
+    "KHR_materials_sheen",
+    "KHR_texture_transform",
+    "KHR_materials_pbrSpecularGlossiness",
+    "KHR_materials_variants",
+    # KHR_materials_iridescence, KHR_materials_anisotropy, KHR_materials_dispersion
+    # aren't exposed as features by the crate — parsed from the raw extensions
+    # map via the `extensions` feature above.
+]

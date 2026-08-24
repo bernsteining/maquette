@@ -54,6 +54,41 @@ function callScad(fn, ...args) {
   return _result;
 }
 
+// ── maquette-gltf plugin (glTF 2.0 renderer) ───────────────────────────────
+// Third wasm-minimal-protocol module — the glTF plugin lives in its own crate
+// (crates/maquette-gltf) inside this workspace, sharing render primitives
+// (rasterizer, shadow maps, IBL, SSAO/FXAA) with maquette via maquette-core.
+// Loaded lazily on the first glTF model pick so the main demo doesn't pay for
+// a plugin the user may never use.
+const GLTF_WASM_URL = "maquette-gltf.wasm";
+let gltfInstance, gltfMemory;
+const gltfImports = { typst_env: {
+  wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
+    new Uint8Array(gltfMemory.buffer, ptr, _args.length).set(_args),
+  wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
+    { _result = new Uint8Array(gltfMemory.buffer, ptr, len).slice(); },
+}};
+async function ensureGltf() {
+  if (gltfInstance) return;
+  const bytes = await (await fetch(GLTF_WASM_URL)).arrayBuffer();
+  gltfInstance = await WebAssembly.instantiate(await WebAssembly.compile(bytes), gltfImports);
+  gltfMemory = gltfInstance.exports.memory;
+}
+function callGltf(fn, ...args) {
+  const total = args.reduce((n, a) => n + a.length, 0);
+  _args = new Uint8Array(total); let o = 0;
+  for (const a of args) { _args.set(a, o); o += a.length; }
+  _result = new Uint8Array();
+  const rc = gltfInstance.exports[fn](...args.map((a) => a.length));
+  if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || "glTF render failed");
+  return _result;
+}
+
+// glTF-format extensions the maquette-gltf plugin handles. `.blg` is our
+// convention for a GLB renamed with a friendly extension (Damaged Helmet).
+const GLTF_EXTS = new Set(["glb", "gltf", "blg"]);
+const isGltf = (name) => GLTF_EXTS.has(ext(name || ""));
+
 // ──────────────────────────────── SCHEMA ──────────────────────────────────
 // Field: {k, label, t, def, ...}. t ∈ sel|num|rng|col|bool|txt|vec.
 // Group: {k, label, t:"grp", toggle, bool, def:{}, fields:[]}  (toggle→enable box; bool→`key:true` shorthand)
@@ -248,6 +283,96 @@ const SCHEMA = [
   ]},
 ];
 
+// ─────────────────────────────── GLTF SCHEMA ──────────────────────────────
+// Parallel schema for glTF assets rendered via maquette-gltf. Same field
+// shape as SCHEMA so the SAME form builder / renderConfig / renderCode
+// walk works — `getSchema()` swaps between them based on `model.name`'s
+// extension. Field keys match the JSON keys the plugin's config parser
+// accepts (see crates/maquette-gltf/src/config.rs).
+const GLTF_SCHEMA = [
+  { s: "Camera & viewport", fields: [
+    { k: "camera",     label: "Position [x,y,z]", t: "vec", def: [2.5, 1.5, 2.5] },
+    { k: "center",     label: "Look-at",          t: "vec", def: [0, 0, 0] },
+    { k: "up",         label: "Up",               t: "vec", def: [0, 1, 0] },
+    { k: "fov",        label: "Field of view °",  t: "num", def: 40 },
+    { k: "camera_name",  label: "Named camera (from glTF, blank = ignore)", t: "txt", def: "", allowBlank: true },
+    { k: "camera_index", label: "Camera index (-1 = ignore)", t: "num", def: -1, omitIf: v => v === -1 },
+    { k: "background", label: "Background", t: "col", def: "#181820" },
+    { k: "width",      label: "Render width px",  t: "num", def: 700, noExport: true },
+    { k: "height",     label: "Render height px", t: "num", def: 700, noExport: true },
+  ]},
+
+  { s: "Direct lighting", fields: [
+    { k: "light_dir", label: "Sun direction [x,y,z]", t: "vec", def: [0.4, 1.0, 0.5] },
+    { k: "ambient",   label: "Fallback ambient (used only without IBL)", t: "rng", def: 0.05, min: 0, max: 1, step: 0.01 },
+  ]},
+
+  { s: "Image-based lighting", fields: [
+    // IBL is on by default with a deep-blue sky — most glTF assets are
+    // authored expecting IBL, and without it metals look flat.
+    { k: "ibl", label: "IBL env", t: "grp", toggle: true, def: { __on: true, sky: "#20273c", ground: "#403020", intensity: 1.4, rotation: 0 }, fields: [
+      { k: "sky",       label: "Sky colour",    t: "col", def: "#20273c" },
+      { k: "ground",    label: "Ground colour", t: "col", def: "#403020" },
+      { k: "intensity", label: "Intensity",     t: "rng", def: 1.4, min: 0, max: 4, step: 0.05 },
+      { k: "rotation",  label: "Rotation rad",  t: "num", def: 0 },
+    ]},
+  ]},
+
+  { s: "Shadows", fields: [
+    // Shadows on by default — cheap on the small demo helmet and adds a lot
+    // of visual grounding. Turn off for point-cloud-heavy or huge scenes.
+    { k: "shadows", label: "Cast shadows", t: "grp", toggle: true, bool: true, def: {
+        __on: true, resolution: 1024, softness: 2, bias: 0.001, normal_bias: 1.5, slope_bias: 2.0, pcss_light_size: 0
+      }, fields: [
+      { k: "resolution",       label: "Resolution",       t: "num", def: 1024 },
+      { k: "softness",         label: "PCF softness (texels)", t: "num", def: 2 },
+      { k: "bias",             label: "Bias",             t: "num", def: 0.001 },
+      { k: "normal_bias",      label: "Normal bias",      t: "num", def: 1.5 },
+      { k: "slope_bias",       label: "Slope bias",       t: "num", def: 2.0 },
+      { k: "pcss_light_size",  label: "PCSS light size (0 = plain PCF)", t: "num", def: 0 },
+    ]},
+  ]},
+
+  { s: "Ground plane", fields: [
+    { k: "ground", label: "Ground plane", t: "grp", toggle: true, bool: true, def: {
+        color: "#282838", size_scale: 3.0, roughness: 0.9
+      }, fields: [
+      { k: "color",      label: "Colour",     t: "col", def: "#282838" },
+      { k: "size_scale", label: "Size scale × bbox radius", t: "num", def: 3.0 },
+      { k: "roughness",  label: "Roughness",  t: "rng", def: 0.9, min: 0, max: 1, step: 0.01 },
+    ]},
+  ]},
+
+  { s: "Post-processing", fields: [
+    // SSAA off by default — 2× quadruples render cost, way too slow for live
+    // interaction. FXAA alone cleans up most edges. Bump to 2×/4× for finals.
+    { k: "antialias",    label: "SSAA",       t: "sel", def: 1, num: true, opts: [[1, "Off"], [2, "×2"], [4, "×4"]] },
+    { k: "fxaa",         label: "FXAA",       t: "bool", def: true },
+    { k: "tone_mapping", label: "Tone mapping", t: "sel", def: "aces", opts: [["none", "None"], ["reinhard", "Reinhard"], ["aces", "ACES"]] },
+    { k: "exposure",     label: "Exposure",   t: "rng", def: 1.2, min: 0, max: 4, step: 0.05 },
+    { k: "ssao", label: "SSAO", t: "grp", toggle: true, bool: false, def: {
+        samples: 16, radius: 0.4, bias: 0.02, strength: 1.0
+      }, fields: [
+      { k: "samples",  label: "Samples",  t: "num", def: 16 },
+      { k: "radius",   label: "Radius",   t: "num", def: 0.4 },
+      { k: "bias",     label: "Bias",     t: "num", def: 0.02 },
+      { k: "strength", label: "Strength", t: "rng", def: 1.0, min: 0, max: 3, step: 0.05 },
+    ]},
+  ]},
+
+  { s: "Animation & variants", fields: [
+    { k: "time",             label: "Animation time (s)", t: "num", def: 0 },
+    { k: "material_variant", label: "Material variant (KHR_materials_variants)", t: "num", def: 0, omitIf: v => v === 0 },
+    { k: "no_textures",      label: "Skip textures (fast preview)", t: "bool", def: false },
+    { k: "texture_max_size", label: "Texture max size (0 = full)", t: "num", def: 0, omitIf: v => v === 0 },
+  ]},
+];
+
+// Which SCHEMA drives the panel for the current model — swaps in GLTF_SCHEMA
+// when a .glb / .gltf / .blg is selected. Also used by the form builder,
+// renderConfig, buildTypst, refreshVisibility, and applyModelDefaults.
+function getSchema() { return isGltf(model && model.name) ? GLTF_SCHEMA : SCHEMA; }
+
 // Tooltips (hover a label) — keyed by field key. Covers top-level fields and
 // group headers, whose keys are unique. Shown via the native title attribute.
 const HELP = {
@@ -305,9 +430,15 @@ let lastRender = null;    // {kind:"raw"} or {kind:"svg", bytes} of the most rec
 let rafPending = false;
 
 // ──────────────────────────── state (nested) ──────────────────────────────
+// `model` + `ext` are declared before initState/state because getSchema()
+// (called from initState) reads `model.name` via `ext()` via `isGltf()`.
+// Without this hoist we'd hit a TDZ ReferenceError at page load and the
+// script would stop before the form is built ("demo looks incomplete").
+let model = { name: "bunny.obj", bytes: null };
+const ext = (name) => name.split(".").pop().toLowerCase();
 function initState() {
   const st = {};
-  for (const sec of SCHEMA) for (const f of sec.fields) {
+  for (const sec of getSchema()) for (const f of sec.fields) {
     if (f.t === "grp") st[f.k] = { __on: !!f.def.__on, ...structuredClone(f.def) };
     else { const d = f.init !== undefined ? f.init : f.def; st[f.k] = Array.isArray(d) ? d.slice() : d; }
   }
@@ -383,10 +514,14 @@ const hlCollapse = (v) => {
 };
 function buildConfig() {
   const c = {};
-  for (const sec of SCHEMA) for (const f of sec.fields) {
+  // For glTF the ambient/background fields are plain scalars — they come out of
+  // the SCHEMA walk directly, no polymorphic hemispheric-ambient / transparent-
+  // background handling needed. For maquette they're polymorphic and set below.
+  const gltf = isGltf(model.name);
+  for (const sec of getSchema()) for (const f of sec.fields) {
     if (f.when && !f.when(state, state)) continue;
     if (f.k[0] === "_") continue;                     // UI-only fields
-    if (f.k === "ambient" || f.k === "background") continue; // polymorphic — set below
+    if (!gltf && (f.k === "ambient" || f.k === "background")) continue; // polymorphic — set below
     if (f.omitIf && f.omitIf(state[f.k])) continue;
     switch (f.t) {
       case "grp":
@@ -400,24 +535,34 @@ function buildConfig() {
       default: c[f.k] = state[f.k];
     }
   }
-  c.ambient = ambientCfg();          // number, or hemisphere {intensity,sky,ground}
-  c.background = bgCfg();             // color, or "none" (transparent)
+  if (!gltf) {
+    c.ambient = ambientCfg();          // number, or hemisphere {intensity,sky,ground}
+    c.background = bgCfg();             // color, or "none" (transparent)
+  }
   return c;
 }
 
 // ─────────────────────── build Typst snippet (minimal) ────────────────────
 function buildTypst() {
-  const fn = { obj: "render-obj", stl: "render-stl", ply: "render-ply" }[ext(model.name)] || "render-obj";
+  // Different Typst function name + import path for glTF (a different plugin).
+  const gltf = isGltf(model.name);
+  const fn = gltf ? "render-gltf"
+    : ({ obj: "render-obj", stl: "render-stl", ply: "render-ply" }[ext(model.name)] || "render-obj");
   const P = [];
   const push = (k, v) => P.push(`${k}: ${v}`);
-  for (const sec of SCHEMA) for (const f of sec.fields) {
+  for (const sec of getSchema()) for (const f of sec.fields) {
     if (f.when && !f.when(state, state)) continue;
     if (f.noExport || f.k === "_cam" || f.k === "width" || f.k === "height") continue;
     if (f.omitIf && f.omitIf(state[f.k])) continue;
-    if (f.k === "background") { const b = bgCfg(); if (b !== f.def) push("background", b === "none" ? "none" : fmtT(b)); continue; }
-    if (f.k === "_bgNone") continue;   // folded into the background branch above
-    if (f.k === "ambient") { if (!state._hemi.__on && state.ambient !== f.def) push("ambient", num(state.ambient)); continue; }
-    if (f.k === "_hemi") { if (state._hemi.__on) push("ambient", fmtT(ambientCfg())); continue; }
+    // The polymorphic ambient / background handling is maquette-only. For
+    // glTF, ambient/background are plain scalars and go through the default
+    // branch below.
+    if (!gltf) {
+      if (f.k === "background") { const b = bgCfg(); if (b !== f.def) push("background", b === "none" ? "none" : fmtT(b)); continue; }
+      if (f.k === "_bgNone") continue;
+      if (f.k === "ambient") { if (!state._hemi.__on && state.ambient !== f.def) push("ambient", num(state.ambient)); continue; }
+      if (f.k === "_hemi") { if (state._hemi.__on) push("ambient", fmtT(ambientCfg())); continue; }
+    }
     if (f.k[0] === "_") continue;
     switch (f.t) {
       case "grp": {
@@ -445,6 +590,9 @@ function buildTypst() {
     return `#import "@preview/maquette-scad:0.1.0": compile-scad\n`
       + `#import "@preview/maquette:0.1.3": ${fn}\n\n`
       + `#let model = compile-scad(read("model.scad"))\n\n${body}`;
+  }
+  if (gltf) {
+    return `#import "@preview/maquette-gltf:0.1.0": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
   }
   return `#import "@preview/maquette:0.1.3": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
 }
@@ -536,8 +684,8 @@ function updateScadHighlight() {
 
 // ─────────────────────────────── DOM engine ───────────────────────────────
 const $ = (id) => document.getElementById(id);
-const ext = (name) => name.split(".").pop().toLowerCase();
-let model = { name: "bunny.obj", bytes: null };
+// `model` + `ext` declared above `initState()` (in the state section) so that
+// getSchema() can safely read `model.name` during initial state build.
 const conds = []; // {node, when, local} for visibility refresh
 
 // Reused singletons + cached hot DOM nodes (avoid per-call allocation / lookup).
@@ -739,7 +887,7 @@ function buildForm() {
   const root = $("form");
   root.innerHTML = "";
   conds.length = 0; searchItems.length = 0; searchSections.length = 0;
-  for (const sec of SCHEMA) {
+  for (const sec of getSchema()) {
     const d = document.createElement("details"); if (sec.open) d.open = true;
     const sum = document.createElement("summary"); sum.textContent = sec.s; d.append(sum);
     const body = document.createElement("div"); body.className = "body";
@@ -799,10 +947,64 @@ function onChange() {
 let lastUrl = null;
 let renderToken = 0;   // invalidates a pending async overlay draw when a newer render starts
 let outputFormat = "png";   // "png" | "svg" — chosen via the stage toolbar toggle
+// Tracks the last glTF asset we rendered; used to detect "cold" renders (new
+// model or reloaded bytes) so we can run a fast texture-less preview pass first.
+let lastGltfBytes = null;
 const RFN_PNG = { obj: "render_obj_png", stl: "render_stl_png", ply: "render_ply_png" };
 const RFN_SVG = { obj: "render_obj", stl: "render_stl", ply: "render_ply" };
 function render() {
   if (!instance || !model.bytes) return;
+  // glTF assets take a separate code path — different plugin (lazily loaded),
+  // different config schema, always raster output (SVG mode not supported yet
+  // for glTF). All wrapped in an async IIFE because the plugin is loaded on
+  // demand via `ensureGltf()`.
+  if (isGltf(model.name)) {
+    (async () => {
+      try {
+        await ensureGltf();
+        // Paint a decoded RGBA blob straight to the canvas.
+        const paint = (out) => {
+          if (out[0] !== 0x00) throw new Error("unexpected glTF plugin output header");
+          const w = out[1] | out[2] << 8 | out[3] << 16 | out[4] << 24;
+          const h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
+          const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, w * h * 4);
+          elOutc.width = w; elOutc.height = h;
+          elOutc.getContext("2d").putImageData(new ImageData(px, w, h), 0, 0);
+          elOutc.style.display = ""; elOut.style.display = "none";
+          lastRender = { kind: "raw" };
+        };
+        // "Progressive" glTF: on a cold render (new model, or a model whose
+        // textures the plugin's cache hasn't seen yet) do a fast preview
+        // pass with `no_textures: true` and no SSAA. That skips ~4 s of
+        // JPEG decode on the helmet and paints geometry + IBL + material
+        // factors instantly. The second pass (full config) then replaces
+        // it with the textured render. On warm subsequent renders (config
+        // tweaks on the same model) we only do the full pass — the plugin's
+        // scene cache means it's already quick.
+        const cold = lastGltfBytes !== model.bytes;
+        lastGltfBytes = model.bytes;
+        const cfg = renderConfig();
+        const token = ++renderToken;
+        const t0 = performance.now();
+        if (cold) {
+          try {
+            const preview = { ...cfg, no_textures: true, antialias: 1, fxaa: false, ssao: undefined };
+            paint(callGltf("render_gltf", model.bytes, ENC.encode(JSON.stringify(preview))));
+            // Yield to the browser so the preview actually paints before we
+            // block on the (multi-second) full render.
+            await new Promise(r => requestAnimationFrame(r));
+            if (token !== renderToken) return; // superseded by a newer render
+          } catch (e) { /* preview failure isn't fatal — try full pass anyway */ }
+        }
+        paint(callGltf("render_gltf", model.bytes, ENC.encode(JSON.stringify(cfg))));
+        const ms = performance.now() - t0;
+        elRtime.textContent = `rendered in ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
+        elRtime.classList.add("show");
+        showErr(null);
+      } catch (e) { showErr(String(e && e.message || e)); }
+    })();
+    return;
+  }
   const fn = (outputFormat === "svg" ? RFN_SVG : RFN_PNG)[ext(model.name)];
   if (!fn) return showErr(`unsupported file type: .${ext(model.name)}`);
   try {
@@ -858,13 +1060,20 @@ async function copyText(text) {
 
 // ─────────────────────────────── model I/O ────────────────────────────────
 // Built-in models — fetched lazily (only when picked), same origin as bunny.obj.
+// Picker order: bunny (the OBJ showcase) → OpenSCAD (compiled in-browser) →
+// helmet (glTF PBR) → Rubik cloud (PLY point cloud) → the rest. Puts one
+// representative of each renderer at the top.
 const MODELS = [
-  ["__scad__", "OpenSCAD"],
   ["bunny.obj", "Bunny (OBJ)"],
+  ["__scad__", "OpenSCAD"],
+  // glTF asset — routed to the maquette-gltf plugin. One demo model for now;
+  // extras (Fox, BoomBox, ToyCar, CesiumMan) live in examples/data/gltf/ for
+  // local dev but aren't shipped in the demo to keep the download slim.
+  ["helmet.blg", "Damaged Helmet (glTF PBR)"],
+  ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
   ["teapot.obj", "Teapot (OBJ)"],
   ["crankshaft.obj", "Crankshaft (OBJ)"],
   ["brain_skull.obj", "Brain + skull (OBJ)"],
-  ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
 ];
 
 // The `__scad__` picker entry opens an editor instead of fetching a file; its
@@ -904,15 +1113,58 @@ const MODEL_DEFAULTS = {
     point_size: 0.024, point_boundary: 110,
     _cam: "spherical", azimuth: -119, elevation: 24.5, up: [0, 1, 0], zoom: 2.254,
   },
+  // glTF presets — camera + IBL colours matched to each asset's authoring intent.
+  "helmet.blg": {
+    camera: [2.5, 1.5, 2.5], center: [0, 0, 0], up: [0, 1, 0], fov: 40,
+    background: "#181820",
+    // Inherits the GLTF_SCHEMA defaults for ibl/shadows/tone-map/SSAA — only
+    // overrides the fields where the helmet showcase wants something specific
+    // (ground plane on with a matching cool tone, SSAO on for grounding).
+    ground: { __on: true, color: "#282838", size_scale: 3.0, roughness: 0.9 },
+    ssao: { __on: true, samples: 16, radius: 0.4, bias: 0.02, strength: 1.0 },
+  },
+  "fox.glb": {
+    camera: [120, 90, 180], center: [0, 40, 0], up: [0, 1, 0], fov: 40,
+    background: "#1a1a22",
+    ibl: { __on: true, sky: "#c0d0f0", ground: "#503020", intensity: 1.3, rotation: 0 },
+    shadows: { __on: true, resolution: 1024, softness: 1, bias: 0.001, normal_bias: 1.5, slope_bias: 2, pcss_light_size: 0 },
+    ground: { __on: true, color: "#3a2a20", size_scale: 3, roughness: 0.85 },
+  },
+  "boombox.glb": {
+    camera: [0.011, 0.008, 0.017], center: [0, 0, 0], up: [0, 1, 0], fov: 30,
+    background: "#181820",
+    ibl: { __on: true, sky: "#dae4ff", ground: "#403020", intensity: 1.5, rotation: 0 },
+    shadows: { __on: true, resolution: 1024, softness: 1, bias: 0.0005, normal_bias: 1.5, slope_bias: 1.5, pcss_light_size: 0 },
+    ground: { __on: true, color: "#2a2a34", size_scale: 3, roughness: 0.9 },
+    exposure: 1.3,
+  },
+  "toycar.glb": {
+    camera: [0.4, 0.3, 0.55], center: [0, 0.05, 0], up: [0, 1, 0], fov: 30,
+    background: "#181820",
+    ibl: { __on: true, sky: "#dae4ff", ground: "#403020", intensity: 1.4, rotation: 0 },
+    shadows: { __on: true, resolution: 1024, softness: 1, bias: 0.001, normal_bias: 1.5, slope_bias: 2, pcss_light_size: 0 },
+    ground: { __on: true, color: "#282838", size_scale: 3, roughness: 0.9 },
+    exposure: 1.2,
+  },
+  "cesiumman.glb": {
+    camera: [2.5, 1, 2.5], center: [0, 0.9, 0], up: [0, 1, 0], fov: 30,
+    background: "#1a1a22",
+    ibl: { __on: true, sky: "#c0d0f0", ground: "#503020", intensity: 1.3, rotation: 0 },
+    shadows: { __on: true, resolution: 1024, softness: 1, bias: 0.001, normal_bias: 1.5, slope_bias: 2.5, pcss_light_size: 0 },
+    ground: { __on: true, color: "#2a2a34", size_scale: 3, roughness: 0.9 },
+  },
 };
 const DEFAULTS_KEYS = [...new Set([
   ...Object.values(MODEL_DEFAULTS).flatMap(Object.keys),
   ...Object.keys(SCAD_DEFAULTS),   // so switching away from OpenSCAD resets its flat look
 ])];
-const TOP_FIELDS = Object.fromEntries(SCHEMA.flatMap(s => s.fields.map(f => [f.k, f])));
+// Field-by-key lookups. `topFields()` recomputes lazily because which schema
+// is active depends on the current model (glTF vs maquette).
+const topFields = () => Object.fromEntries(getSchema().flatMap(s => s.fields.map(f => [f.k, f])));
 function applyModelDefaults(name) {
+  const TF = topFields();
   for (const k of DEFAULTS_KEYS) {   // reset to the field's starting value (init, else def)
-    const f = TOP_FIELDS[k];
+    const f = TF[k];
     state[k] = structuredClone(f && f.init !== undefined ? f.init : f && f.def);
   }
   const ov = MODEL_DEFAULTS[name];
@@ -921,9 +1173,26 @@ function applyModelDefaults(name) {
 
 // Shared ingestion for both dropped/browsed files and built-in presets.
 function ingest(name, bytes) {
+  const kindChanged = isGltf((model && model.name) || "") !== isGltf(name);
   model = { name, bytes };
   syncPreset(name);
   renderOverride = null;
+  // Switching schema (maquette ↔ glTF) means completely different state
+  // fields exist. Wipe + refill so the form isn't reading undefined slots.
+  if (kindChanged) {
+    for (const k in state) delete state[k];
+    Object.assign(state, initState());
+    buildForm();
+  }
+  // The PNG/SVG format toggle is meaningless for glTF (no vector output —
+  // PBR shading is fundamentally raster). Hide the segmented control and
+  // force PNG in glTF mode; restore both when we're back on a maquette model.
+  const fmtSeg = document.getElementById("fmt");
+  if (fmtSeg) fmtSeg.style.display = isGltf(name) ? "none" : "";
+  if (isGltf(name) && outputFormat !== "png") {
+    outputFormat = "png";
+    document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x.dataset.fmt === "png"));
+  }
   if (location.search || location.hash) history.replaceState(null, "", location.pathname);  // drop a stale share link
   refreshVisibility(); measure(); onChange();
 }
@@ -988,7 +1257,23 @@ function renderScadResult(ply) {
   // .scad source — never a fetched file. `.ply` is the real output format (routes
   // to render-ply); `scad: true` marks the source so the Typst snippet shows the
   // real compile-scad(read("model.scad")) workflow instead of a phantom read().
+  //
+  // Coming from a glTF model (state built for GLTF_SCHEMA), we need to rebuild
+  // state for SCHEMA before rendering — otherwise buildConfig throws on
+  // `state._hemi.__on` (undefined). Same wipe pattern as `ingest()`.
+  const kindChanged = isGltf((model && model.name) || "") !== isGltf("model.ply");
   model = { name: "model.ply", scad: true, bytes: ply };
+  if (kindChanged) {
+    for (const k in state) delete state[k];
+    Object.assign(state, initState());
+    // Re-apply SCAD's flat-shading look after the wipe.
+    for (const k in SCAD_DEFAULTS) state[k] = structuredClone(SCAD_DEFAULTS[k]);
+    buildForm();
+    // The PNG/SVG toggle was hidden while in glTF mode; SCAD renders via
+    // maquette so the toggle is meaningful again.
+    const fmtSeg = document.getElementById("fmt");
+    if (fmtSeg) fmtSeg.style.display = "";
+  }
   renderOverride = null;
   refreshVisibility(); measure(); onChange();
 }
@@ -1126,12 +1411,52 @@ function ensureSpherical() {
   const twoDist = () => { const [a, b] = two(); return Math.hypot(a.x - b.x, a.y - b.y); };
   const twoCent = () => { const [a, b] = two(); return [(a.x + b.x) / 2, (a.y + b.y) / 2]; };
   const seedPinch = () => { pd = twoDist(); [pcx, pcy] = twoCent(); };
+  // glTF path — the glTF plugin's camera is a Cartesian (x,y,z) triple; the
+  // maquette-side spherical (az/el/dist/zoom) model doesn't exist there. Rotate
+  // and scale `state.camera` directly around `state.center` for the same feel.
+  const orbitGltfBy = (dx, dy, ptype) => {
+    const c = state.center || [0, 0, 0], u = state.up || [0, 1, 0];
+    const off = [state.camera[0] - c[0], state.camera[1] - c[1], state.camera[2] - c[2]];
+    const dist = Math.hypot(off[0], off[1], off[2]) || 1;
+    const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+    const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+    const v = norm(off), up = norm(u);
+    // Build a local frame (right/forward/up) from the current view direction.
+    const arb = Math.abs(up[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const right = norm(cross(up, arb));
+    const forward = norm(cross(right, up));
+    let el = Math.asin(Math.max(-1, Math.min(1, dot(v, up))));
+    let az = Math.atan2(dot(v, forward), dot(v, right));
+    const xdir = ptype === "mouse" ? -1 : 1;
+    az += xdir * dx * 0.5 * Math.PI / 180;
+    el = Math.max(-89, Math.min(89, el * 180 / Math.PI + dy * 0.5)) * Math.PI / 180;
+    // Reconstitute the offset from (az, el, dist) in the same basis.
+    const cosEl = Math.cos(el);
+    const nx = right[0]*cosEl*Math.cos(az) + forward[0]*cosEl*Math.sin(az) + up[0]*Math.sin(el);
+    const ny = right[1]*cosEl*Math.cos(az) + forward[1]*cosEl*Math.sin(az) + up[1]*Math.sin(el);
+    const nz = right[2]*cosEl*Math.cos(az) + forward[2]*cosEl*Math.sin(az) + up[2]*Math.sin(el);
+    state.camera = [c[0] + nx * dist, c[1] + ny * dist, c[2] + nz * dist];
+    state.camera = state.camera.map(v => Math.round(v * 1000) / 1000);
+    controlRefs.camera?.(state.camera);
+  };
+  const zoomGltfBy = (f) => {
+    const c = state.center || [0, 0, 0];
+    const off = [state.camera[0] - c[0], state.camera[1] - c[1], state.camera[2] - c[2]];
+    // Inverted convention: wheel-up (f>1) shows more detail → move camera IN.
+    const s = 1 / f;
+    state.camera = [c[0] + off[0]*s, c[1] + off[1]*s, c[2] + off[2]*s].map(v => Math.round(v * 1000) / 1000);
+    controlRefs.camera?.(state.camera);
+  };
+
   const setZoom = (f) => {
+    if (isGltf(model.name)) { zoomGltfBy(f); return; }
     renderOverride = null;                       // zooming unfreezes a deep-link render
     state.zoom = Math.max(0.3, Math.min(4, Math.round(state.zoom * f * 1000) / 1000));
     controlRefs.zoom?.(state.zoom);
   };
   const orbitBy = (dx, dy, ptype) => {
+    if (isGltf(model.name)) { orbitGltfBy(dx, dy, ptype); return; }
     // Touch reads as direct manipulation, so its horizontal orbit is inverted vs a
     // mouse orbit; a mouse keeps the -1 direction.
     const xdir = ptype === "mouse" ? -1 : 1;
@@ -1145,7 +1470,10 @@ function ensureSpherical() {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { stage.setPointerCapture(e.pointerId); } catch {}
-    stage.classList.add("grabbing"); ensureSpherical();
+    stage.classList.add("grabbing");
+    // Maquette side: convert current cartesian→spherical so orbit updates
+    // az/el instead of dropping the user's view. glTF stays cartesian.
+    if (!isGltf(model.name)) ensureSpherical();
     if (pts.size === 2) seedPinch();                        // enter pinch
   });
 
@@ -1310,7 +1638,7 @@ const groupBase = (field) => ({ __on: true, ...structuredClone(field.def) });
 function applyConfig(cfg) {
   for (const k in cfg) {
     let v = cfg[k];
-    const f = TOP_FIELDS[k];
+    const f = topFields()[k];
     if (v === "none" || v === null) {          // Typst `none` = transparent bg / unset default
       if (k === "background") state._bgNone = true;
       continue;
@@ -1329,10 +1657,10 @@ function applyConfig(cfg) {
       continue;
     }
     if (k === "ambient" && v && typeof v === "object" && !Array.isArray(v)) {      // hemisphere ambient
-      state._hemi = { ...groupBase(TOP_FIELDS._hemi), ...v }; continue;
+      state._hemi = { ...groupBase(topFields()._hemi), ...v }; continue;
     }
     if (k === "clip" && v && typeof v === "object" && !Array.isArray(v)) {          // plugin clip → demo state
-      const cl = groupBase(TOP_FIELDS.clip);
+      const cl = groupBase(topFields().clip);
       if ("depth" in v) cl.depth = v.depth;
       if (Array.isArray(v.plane)) { cl.source = "plane"; cl.plane = v.plane.slice(); }   // explicit plane a·x+b·y+c·z+d
       else if (v.from) cl.source = v.from; else if (v.axis) cl.source = v.axis;          // camera | x/y/z
