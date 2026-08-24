@@ -438,6 +438,14 @@ function buildTypst() {
   }
   if (outputFormat === "svg") P.push('format: "svg"');
   const body = P.length ? `#${fn}(model,\n  ${P.join(",\n  ")},\n)` : `#${fn}(model)`;
+  // OpenSCAD models aren't a file on disk — they're compiled in-browser by the
+  // maquette-scad plugin. Show that real workflow: read the .scad source, compile
+  // it to a mesh with `openscad-text`, then hand the mesh to maquette's renderer.
+  if (model.name === "openscad.ply") {
+    return `#import "@preview/maquette-scad:0.1.0": openscad-text\n`
+      + `#import "@preview/maquette:0.1.3": ${fn}\n\n`
+      + `#let model = openscad-text(read("model.scad"))\n\n${body}`;
+  }
   return `#import "@preview/maquette:0.1.3": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
 }
 
