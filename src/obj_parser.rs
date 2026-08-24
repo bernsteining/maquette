@@ -98,6 +98,7 @@ pub fn parse_obj(
                         color: face_color,
                         vertex_colors: None,
                         group_id: current_group,
+                        alpha: None,
                     });
                 }
             }

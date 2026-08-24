@@ -355,6 +355,7 @@ pub(crate) fn pointcloud_to_triangles(
             color,
             vertex_colors,
             group_id: None,
+            alpha: None,
         });
     }
 
@@ -815,7 +816,8 @@ fn project_triangles(
             let vcols = [cache[i0], cache[i1], cache[i2]];
             let (r, g, b) = crate::color::avg3(vcols[0], vcols[1], vcols[2]);
             let opacity = tri.group_id.and_then(|gid| group_styles.get(&gid))
-                .and_then(|a| a.opacity).unwrap_or(config.opacity);
+                .and_then(|a| a.opacity).unwrap_or(config.opacity)
+                * tri.alpha.unwrap_or(1.0) as f64;
             (r, g, b, Some(vcols), opacity)
         } else {
             // Per-group appearance overrides
@@ -842,6 +844,9 @@ fn project_triangles(
                     opacity = cfg_xray_opacity;
                 }
             }
+
+            // Per-face mesh alpha (e.g. PLY `alpha`) multiplies the resolved opacity.
+            opacity *= tri.alpha.unwrap_or(1.0) as f64;
 
             let (fr, fg, fb) = tri.color.unwrap_or((base_r, base_g, base_b));
 

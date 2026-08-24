@@ -193,6 +193,7 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
             color: tri.color,
             vertex_colors,
             group_id: tri.group_id,
+            alpha: tri.alpha,
         });
     }
 

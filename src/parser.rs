@@ -11,6 +11,9 @@ pub struct Triangle {
     pub vertex_colors: Option<[(u8, u8, u8); 3]>,
     /// OBJ group ID. Triangles with the same group_id belong to the same part.
     pub group_id: Option<u32>,
+    /// Per-face opacity (0.0–1.0) from a mesh alpha channel (e.g. PLY `alpha`).
+    /// None = fully opaque. Multiplies with config/group opacity at render time.
+    pub alpha: Option<f32>,
 }
 
 /// Parse STL data — auto-detects ASCII vs binary format.
@@ -61,6 +64,7 @@ fn parse_ascii(data: &[u8]) -> Result<Vec<Triangle>, String> {
                 color: None,
                 vertex_colors: None,
                 group_id: None,
+                alpha: None,
             });
         }
     }
@@ -124,6 +128,7 @@ fn parse_binary(data: &[u8]) -> Result<Vec<Triangle>, String> {
             color,
             vertex_colors: None,
             group_id: None,
+            alpha: None,
         });
     }
     Ok(triangles)
