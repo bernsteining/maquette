@@ -1,4 +1,4 @@
-#import "../../scad/maquette-scad.typ": openscad-text
+#import "../../scad/maquette-scad.typ": compile-scad
 #import "../../maquette/maquette.typ": render-ply
 
 // Renders REAL OpenSCAD .scad source files (examples/scad/data/*.scad) through
@@ -14,7 +14,7 @@
 #set text(font: "DejaVu Sans", size: 13pt)
 
 #let cell(title, file, ..args) = stack(spacing: 8pt,
-  render-ply(openscad-text(read(file)), width: 340pt, ..args),
+  render-ply(compile-scad(read(file)), width: 340pt, ..args),
   align(center, text(weight: "bold", raw(title))),
 )
 

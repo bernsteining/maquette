@@ -1,4 +1,4 @@
-#import "../../scad/maquette-scad.typ": openscad-text, scad-highlighting
+#import "../../scad/maquette-scad.typ": compile-scad, scad-highlighting
 #import "../../maquette/maquette.typ": render-ply
 
 // The maquette-scad module ships an OpenSCAD grammar (openscad.sublime-syntax)
@@ -12,7 +12,7 @@
 #let pair(src, ..args) = grid(
   columns: (1.25fr, 1fr), column-gutter: 18pt, align: horizon,
   raw(src, lang: "scad", block: true),
-  render-ply(openscad-text(src), width: 230pt, ..args),
+  render-ply(compile-scad(src), width: 230pt, ..args),
 )
 
 #pair("// hex nut — module, user function, trig, $fn override

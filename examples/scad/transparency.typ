@@ -14,20 +14,20 @@
 #let cell(title, body) = stack(spacing: 8pt, body, align(center, text(weight: "bold", title)))
 
 // 1. Per-part: opaque core inside a translucent hollow shell.
-#let core-in-shell = openscad(union(
+#let core-in-shell = scadypst(union(
   color((0.90, 0.30, 0.30), sphere(6, fn: 32)),
   color((0.35, 0.55, 0.95), difference(cube(22, center: true), cube(17, center: true)), alpha: 0.28),
 ))
 
 // 2. The `%` ghost modifier in real .scad (translucent gray preview).
-#let ghost = openscad-text("
+#let ghost = compile-scad("
   $fn = 40;
   difference() { cube(20, center=true); cylinder(h=30, r=6, center=true); }
   %cylinder(h=26, r=6, center=true);
 ")
 
 // 3. Whole-model opacity via the render call (config-driven x-ray).
-#let csg = openscad(difference(
+#let csg = scadypst(difference(
   intersection(cube(30, center: true), sphere(20, fn: 40)),
   cylinder(40, r: 10, center: true, fn: 40),
   rotate((90, 0, 0), cylinder(40, r: 10, center: true, fn: 40)),

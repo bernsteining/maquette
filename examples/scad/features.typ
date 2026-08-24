@@ -1,7 +1,7 @@
 // ── maquette-scad — OpenSCAD feature tour (bilingual) ────────────────────────
 // Each feature is shown in BOTH input languages, labelled by zebraw:
-//   • OpenSCAD text  → compiled with `openscad-text`
-//   • Typst DSL      → composed with helper functions + `openscad`
+//   • OpenSCAD text  → compiled with `compile-scad`
+//   • Typst DSL      → composed with helper functions + `scadypst`
 // The render beside them is produced from the OpenSCAD source; the Typst DSL
 // block is the exact equivalent (same result).
 //
@@ -10,7 +10,7 @@
 // path (below) so it compiles here today (maquette-scad isn't published yet).
 
 #import "@preview/zebraw:0.5.5": zebraw
-#import "../../scad/maquette-scad.typ": *          // openscad, openscad-text, scad-highlighting, cube, …
+#import "../../scad/maquette-scad.typ": *          // scadypst, compile-scad, scad-highlighting, cube, …
 #import "../../maquette/maquette.typ": render-ply
 
 #show: scad-highlighting
@@ -33,7 +33,7 @@
       align: (top, horizon),
       stack(spacing: 7pt, os-block(os), dsl-block(dsl)),
       if render {
-        render-ply(openscad-text(os, bin: bin), width: 290pt, up: up, azimuth: az, elevation: el, ..openscad-view)
+        render-ply(compile-scad(os, bin: bin), width: 290pt, up: up, azimuth: az, elevation: el, ..openscad-view)
       } else {
         align(center + horizon, text(fill: luma(140), style: "italic")[needs a font — \ see caption])
       },
@@ -49,21 +49,21 @@ shown on the right.
 
 == Setup — importing the packages
 As published on Typst Universe you'd import them like any package. Pick a
-front-end: `openscad-text` for real `.scad` source, or the DSL helpers + `openscad`.
+front-end: `compile-scad` for real `.scad` source, or the DSL helpers + `scadypst`.
 
 #zebraw(lang: [Typst], numbering: false, raw(
 "// A) run real OpenSCAD source
 #import \"@preview/maquette:0.1.3\": render-ply
-#import \"@preview/maquette-scad:0.1.0\": openscad-text
+#import \"@preview/maquette-scad:0.1.0\": compile-scad
 
-#render-ply(openscad-text(read(\"part.scad\")))", lang: "typ", block: true))
+#render-ply(compile-scad(read(\"part.scad\")))", lang: "typ", block: true))
 
 #zebraw(lang: [Typst], numbering: false, raw(
 "// B) compose with the Typst DSL
 #import \"@preview/maquette:0.1.3\": render-ply
 #import \"@preview/maquette-scad:0.1.0\": *
 
-#render-ply(openscad(difference(
+#render-ply(scadypst(difference(
   cube(20, center: true),
   sphere(12, fn: 48),
 )))", lang: "typ", block: true))
@@ -240,15 +240,15 @@ tower(7, 14)", el: 18)
   scale((12,12,12), import-mesh(\"cube.stl\")),
   translate((6,6,-2), cylinder(20, r: 3.5, fn: 40)),
 )
-// bytes: openscad(node, bin: (\"cube.stl\": read(..)))",
+// bytes: scadypst(node, bin: (\"cube.stl\": read(..)))",
 bin: ("cube.stl": read("../data/cube.stl", encoding: none)), el: 26)
 
 #feat("text (needs a font)",
 "linear_extrude(3) text(\"maquette\", size = 10);",
 "linear-extrude(3, scad-text(\"maquette\", size: 10))
-// font: openscad(node, font: read(\"X.ttf\", encoding: none))",
+// font: scadypst(node, font: read(\"X.ttf\", encoding: none))",
 render: false)
 
 The `text` result isn't rendered here because it needs a font — supply one with
-`openscad-text(src, font: read(\"Font.ttf\", encoding: none))` (or `openscad(node,
+`compile-scad(src, font: read(\"Font.ttf\", encoding: none))` (or `scadypst(node,
 font: ..)` for the DSL).

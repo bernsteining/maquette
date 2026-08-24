@@ -66,7 +66,7 @@
 // ---- render helper ----
 #let cell(title, model, up: (0, 0, 1), az: 35, el: 25, fnn: 32) = {
   stack(spacing: 8pt,
-    render-ply(openscad(model, fn: fnn), width: 260pt, up: up, azimuth: az, elevation: el),
+    render-ply(scadypst(model, fn: fnn), width: 260pt, up: up, azimuth: az, elevation: el),
     align(center, text(weight: "bold", title)),
   )
 }

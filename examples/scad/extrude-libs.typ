@@ -1,4 +1,4 @@
-#import "../../scad/maquette-scad.typ": openscad-text
+#import "../../scad/maquette-scad.typ": compile-scad
 #import "../../maquette/maquette.typ": render-ply
 
 // Kernel + library features:
@@ -9,12 +9,12 @@
 #set text(font: "DejaVu Sans", size: 13pt)
 #let cell(title, body) = stack(spacing: 8pt, body, align(center, text(weight: "bold", title)))
 
-#let twisted = openscad-text("$fn=48; linear_extrude(height=30, twist=180, slices=40) square([12,12], center=true);")
-#let horn = openscad-text("$fn=48; linear_extrude(height=26, twist=360, scale=0.4, slices=60) translate([6,0]) square([5,5], center=true);")
+#let twisted = compile-scad("$fn=48; linear_extrude(height=30, twist=180, slices=40) square([12,12], center=true);")
+#let horn = compile-scad("$fn=48; linear_extrude(height=26, twist=360, scale=0.4, slices=60) translate([6,0]) square([5,5], center=true);")
 
 #let lib = "function golden() = (1+sqrt(5))/2;
 module rounded_box(s, r) { minkowski() { cube(s, center=true); sphere(r, $fn=12); } }"
-#let usebox = openscad-text(
+#let usebox = compile-scad(
   "use <mylib.scad>\n$fn=24;\nrounded_box([16,12,8], 2);\ntranslate([0,26,0]) cylinder(h=golden()*6, r=4);",
   files: ("mylib.scad": lib),
 )

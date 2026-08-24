@@ -1,4 +1,4 @@
-#import "../../scad/maquette-scad.typ": openscad-text
+#import "../../scad/maquette-scad.typ": compile-scad
 #import "../../maquette/maquette.typ": render-ply
 
 // Advanced OpenSCAD language features, evaluated by scad/src/scad.rs:
@@ -11,7 +11,7 @@
 
 #let cell(title, body) = stack(spacing: 8pt, body, align(center, text(weight: "bold", title)))
 
-#let flower = openscad-text("
+#let flower = compile-scad("
 $fn = 64;
 n = 120;
 points = [ for (i = [0:n-1]) let (a = i*360/n, r = 12 + 3*cos(6*a))
@@ -19,7 +19,7 @@ points = [ for (i = [0:n-1]) let (a = i*360/n, r = 12 + 3*cos(6*a))
 linear_extrude(height = 5) polygon(points);
 ")
 
-#let corners = openscad-text("
+#let corners = compile-scad("
 module at_corners(size = 20) {
     for (x = [-1, 1], y = [-1, 1])
         translate([x*size/2, y*size/2, 0]) children();
@@ -36,5 +36,5 @@ union() {
   cell([`children()` \ composition],
        render-ply(corners, width: 320pt, up: (0,0,1), azimuth: 30, elevation: 28)),
   cell([official `list_comprehensions.scad` \ (ngons · rounded · stars)],
-       render-ply(openscad-text(read("data/listcomp.scad")), width: 320pt, up: (0,0,1), azimuth: 0, elevation: 70)),
+       render-ply(compile-scad(read("data/listcomp.scad")), width: 320pt, up: (0,0,1), azimuth: 0, elevation: 70)),
 )

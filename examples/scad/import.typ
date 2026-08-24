@@ -1,4 +1,4 @@
-#import "../../scad/maquette-scad.typ": openscad-text
+#import "../../scad/maquette-scad.typ": compile-scad
 #import "../../maquette/maquette.typ": render-ply
 
 // import() brings external meshes into a .scad scene. The STL bytes are read in
@@ -14,6 +14,6 @@ difference() {
 }
 "
 #render-ply(
-  openscad-text(src, bin: ("cube.stl": read("../data/cube.stl", encoding: none))),
+  compile-scad(src, bin: ("cube.stl": read("../data/cube.stl", encoding: none))),
   width: 340pt, up: (0,0,1), azimuth: 32, elevation: 26,
 )

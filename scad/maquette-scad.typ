@@ -1,12 +1,12 @@
 // maquette-scad — OpenSCAD-flavored procedural geometry for Typst.
 //
 // Build a solid with the helpers below, then compile it to a mesh with
-// `openscad(...)`, which returns PLY bytes you pass straight to maquette's
+// `scadypst(...)`, which returns PLY bytes you pass straight to maquette's
 // `render-ply`:
 //
 //   #import "maquette-scad.typ": *
 //   #import "../maquette/maquette.typ": render-ply
-//   #let part = openscad(difference(cube(20, center: true), sphere(12, fn: 48)))
+//   #let part = scadypst(difference(cube(20, center: true), sphere(12, fn: 48)))
 //   #render-ply(part, ..)
 //
 // Like OpenSCAD there are two worlds: 2D shapes (square, circle, polygon, …) and
@@ -45,9 +45,9 @@
 #let polygon(points, paths: none) = (
   op: "polygon", points: points, ..(if paths != none { (paths: paths) }),
 )
-// 3D text. Needs a font: pass `font: read("x.ttf", encoding: none)` to openscad().
+// 3D text. Needs a font: pass `font: read("x.ttf", encoding: none)` to scadypst().
 #let scad-text(str, size: 10) = (op: "text", text: str, size: size)
-// Import an STL/OBJ mesh. Pass its bytes via openscad(bin: (name: read(...))).
+// Import an STL/OBJ mesh. Pass its bytes via scadypst(bin: (name: read(...))).
 #let import-mesh(file) = (op: "import", file: file)
 #let ngon(sides, r, fn: none) = (op: "ngon", sides: sides, r: r)
 #let star(points, outer, inner) = (op: "star", points: points, outer: outer, inner: inner)
@@ -125,9 +125,9 @@
 }
 
 // Compile a DSL tree to PLY bytes. `fn` sets the default facet count ($fn).
-// `bin`/`font` supply bytes for `import-mesh`/`scad-text` (same as openscad-text).
+// `bin`/`font` supply bytes for `import-mesh`/`scad-text` (same as compile-scad).
 // Feed the result to maquette's `render-ply`.
-#let openscad(node, bin: (:), font: none, fn: 32) = {
+#let scadypst(node, bin: (:), font: none, fn: 32) = {
   let assets = bin
   if font != none { assets = assets + ("__font__": font) }
   _scad-plugin.build_ply(
@@ -143,7 +143,7 @@
 // `files` supplies libraries for `use <path>` / `include <path>` — a dict of
 // path -> source text. Since the wasm sandbox can't read files, YOU read them
 // in Typst and pass them in, e.g.:
-//   openscad-text(read("main.scad"), files: (
+//   compile-scad(read("main.scad"), files: (
 //     "BOSL2/std.scad": read("BOSL2/std.scad"),
 //   ))
 //
@@ -153,10 +153,10 @@
 // `bin` supplies binary assets for `import("x.stl"|.obj|.dxf)` — a dict of
 // filename -> bytes (from `read(..., encoding: none)`). `font` is TTF/OTF bytes
 // used by `text(...)`. Example:
-//   openscad-text(read("main.scad"),
+//   compile-scad(read("main.scad"),
 //     bin: ("part.stl": read("part.stl", encoding: none)),
 //     font: read("Roboto.ttf", encoding: none))
-#let openscad-text(src, files: (:), bin: (:), font: none, fn: 32, trace: none) = {
+#let compile-scad(src, files: (:), bin: (:), font: none, fn: 32, trace: none) = {
   let assets = bin
   if font != none { assets = assets + ("__font__": font) }
   let opts = (fn: fn)
