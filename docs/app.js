@@ -1415,6 +1415,10 @@ function ensureSpherical() {
   // maquette-side spherical (az/el/dist/zoom) model doesn't exist there. Rotate
   // and scale `state.camera` directly around `state.center` for the same feel.
   const orbitGltfBy = (dx, dy, ptype) => {
+    // Any interaction unfreezes a shared-link render override — otherwise the
+    // override keeps pushing the original camera into every render and the
+    // drag has no visible effect.
+    renderOverride = null;
     const c = state.center || [0, 0, 0], u = state.up || [0, 1, 0];
     const off = [state.camera[0] - c[0], state.camera[1] - c[1], state.camera[2] - c[2]];
     const dist = Math.hypot(off[0], off[1], off[2]) || 1;
@@ -1441,6 +1445,7 @@ function ensureSpherical() {
     controlRefs.camera?.(state.camera);
   };
   const zoomGltfBy = (f) => {
+    renderOverride = null;
     const c = state.center || [0, 0, 0];
     const off = [state.camera[0] - c[0], state.camera[1] - c[1], state.camera[2] - c[2]];
     // Inverted convention: wheel-up (f>1) shows more detail → move camera IN.
