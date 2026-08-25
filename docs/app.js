@@ -6,83 +6,54 @@
 // left. Add a field to SCHEMA and it appears in all three.
 
 // ─────────────────────────────── WASM shim ────────────────────────────────
+// Three wasm-minimal-protocol plugins share this shim:
+//   maquette      — main renderer (OBJ / STL / PLY); its Module is fetched
+//                   once at boot, cached in IndexedDB, then bound via .bind().
+//   maquette-scad — OpenSCAD → PLY compiler; lazy (browser JIT is ~10× faster
+//                   than the Typst wasm interpreter for this compile).
+//   maquette-gltf — glTF 2.0 PBR renderer; lazy, only loaded when a .glb /
+//                   .gltf / .blg is picked.
+//
+// `_args` / `_result` are shared globals — safe because JS is single-threaded
+// and each `.call()` body is fully synchronous from _args-set through rc-check.
+// If we ever go multi-worker per-plugin, move these into the closure.
+let _args, _result;
+function makeWasmPlugin(url, errorPrefix) {
+  let inst, mem;
+  const imports = { typst_env: {
+    wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
+      new Uint8Array(mem.buffer, ptr, _args.length).set(_args),
+    wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
+      { _result = new Uint8Array(mem.buffer, ptr, len).slice(); },
+  }};
+  const p = {
+    imports,
+    async ensure() {                  // lazy fetch+compile+instantiate path
+      if (inst) return;
+      const bytes = await (await fetch(url)).arrayBuffer();
+      p.bind(await WebAssembly.instantiate(await WebAssembly.compile(bytes), imports));
+    },
+    bind(i) { inst = i; mem = i.exports.memory; },   // when the caller already has a Module (IDB path)
+    call(fn, ...args) {
+      const total = args.reduce((n, a) => n + a.length, 0);
+      _args = new Uint8Array(total); let o = 0;
+      for (const a of args) { _args.set(a, o); o += a.length; }
+      _result = new Uint8Array();
+      const rc = inst.exports[fn](...args.map((a) => a.length));
+      if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || `${errorPrefix} failed`);
+      return _result;
+    },
+    get instance() { return inst; },
+    get memory() { return mem; },
+  };
+  return p;
+}
+// WASM_URL is also used by the IDB-cache freshness path (HEAD/etag), so we
+// keep it as a top-level const rather than burying it in the factory call.
 const WASM_URL = "maquette.wasm";
-let instance, memory, _args, _result;
-const importObject = { typst_env: {
-  wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
-    new Uint8Array(memory.buffer, ptr, _args.length).set(_args),
-  wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
-    { _result = new Uint8Array(memory.buffer, ptr, len).slice(); },
-}};
-function callPlugin(fn, ...args) {
-  const total = args.reduce((n, a) => n + a.length, 0);
-  _args = new Uint8Array(total); let o = 0;
-  for (const a of args) { _args.set(a, o); o += a.length; }
-  _result = new Uint8Array();
-  const rc = instance.exports[fn](...args.map((a) => a.length));
-  if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || "render failed");
-  return _result;
-}
-
-// ── maquette-scad plugin (OpenSCAD → PLY) ──────────────────────────────────
-// A second wasm-minimal-protocol module: compiles OpenSCAD text to a watertight
-// PLY mesh (Manifold kernel) entirely in the browser, then the PLY feeds the
-// exact same render path as any other model. Loaded lazily (only when the user
-// picks the OpenSCAD source) so it never delays first paint. Runs on the
-// browser's wasm JIT — an order of magnitude faster than Typst's interpreter.
-const SCAD_WASM_URL = "maquette-scad.wasm";
-let scadInstance, scadMemory;
-const scadImports = { typst_env: {
-  wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
-    new Uint8Array(scadMemory.buffer, ptr, _args.length).set(_args),
-  wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
-    { _result = new Uint8Array(scadMemory.buffer, ptr, len).slice(); },
-}};
-async function ensureScad() {
-  if (scadInstance) return;
-  const bytes = await (await fetch(SCAD_WASM_URL)).arrayBuffer();
-  scadInstance = await WebAssembly.instantiate(await WebAssembly.compile(bytes), scadImports);
-  scadMemory = scadInstance.exports.memory;
-}
-function callScad(fn, ...args) {
-  const total = args.reduce((n, a) => n + a.length, 0);
-  _args = new Uint8Array(total); let o = 0;
-  for (const a of args) { _args.set(a, o); o += a.length; }
-  _result = new Uint8Array();
-  const rc = scadInstance.exports[fn](...args.map((a) => a.length));
-  if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || "OpenSCAD compile failed");
-  return _result;
-}
-
-// ── maquette-gltf plugin (glTF 2.0 renderer) ───────────────────────────────
-// Third wasm-minimal-protocol module — the glTF plugin lives in its own crate
-// (crates/maquette-gltf) inside this workspace, sharing render primitives
-// (rasterizer, shadow maps, IBL, SSAO/FXAA) with maquette via maquette-core.
-// Loaded lazily on the first glTF model pick so the main demo doesn't pay for
-// a plugin the user may never use.
-const GLTF_WASM_URL = "maquette-gltf.wasm";
-let gltfInstance, gltfMemory;
-const gltfImports = { typst_env: {
-  wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
-    new Uint8Array(gltfMemory.buffer, ptr, _args.length).set(_args),
-  wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
-    { _result = new Uint8Array(gltfMemory.buffer, ptr, len).slice(); },
-}};
-async function ensureGltf() {
-  if (gltfInstance) return;
-  const bytes = await (await fetch(GLTF_WASM_URL)).arrayBuffer();
-  gltfInstance = await WebAssembly.instantiate(await WebAssembly.compile(bytes), gltfImports);
-  gltfMemory = gltfInstance.exports.memory;
-}
-function callGltf(fn, ...args) {
-  const total = args.reduce((n, a) => n + a.length, 0);
-  _args = new Uint8Array(total); let o = 0;
-  for (const a of args) { _args.set(a, o); o += a.length; }
-  _result = new Uint8Array();
-  const rc = gltfInstance.exports[fn](...args.map((a) => a.length));
-  if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || "glTF render failed");
-  return _result;
-}
+const maquettePlugin = makeWasmPlugin(WASM_URL, "render");
+const scadPlugin     = makeWasmPlugin("maquette-scad.wasm", "OpenSCAD compile");
+const gltfPlugin     = makeWasmPlugin("maquette-gltf.wasm", "glTF render");
 
 // glTF-format extensions the maquette-gltf plugin handles. `.blg` is our
 // convention for a GLB renamed with a friendly extension (Damaged Helmet).
@@ -957,15 +928,15 @@ let lastGltfBytes = null;
 const RFN_PNG = { obj: "render_obj_png", stl: "render_stl_png", ply: "render_ply_png" };
 const RFN_SVG = { obj: "render_obj", stl: "render_stl", ply: "render_ply" };
 function render() {
-  if (!instance || !model.bytes) return;
+  if (!maquettePlugin.instance || !model.bytes) return;
   // glTF assets take a separate code path — different plugin (lazily loaded),
   // different config schema, always raster output (SVG mode not supported yet
   // for glTF). All wrapped in an async IIFE because the plugin is loaded on
-  // demand via `ensureGltf()`.
+  // demand via `gltfPlugin.ensure()`.
   if (isGltf(model.name)) {
     (async () => {
       try {
-        await ensureGltf();
+        await gltfPlugin.ensure();
         // Paint a decoded RGBA blob straight to the canvas.
         const paint = (out) => {
           if (out[0] !== 0x00) throw new Error("unexpected glTF plugin output header");
@@ -993,14 +964,14 @@ function render() {
         if (cold) {
           try {
             const preview = { ...cfg, no_textures: true, antialias: 1, fxaa: false, ssao: undefined };
-            paint(callGltf("render_gltf", model.bytes, ENC.encode(JSON.stringify(preview))));
+            paint(gltfPlugin.call("render_gltf", model.bytes, ENC.encode(JSON.stringify(preview))));
             // Yield to the browser so the preview actually paints before we
             // block on the (multi-second) full render.
             await new Promise(r => requestAnimationFrame(r));
             if (token !== renderToken) return; // superseded by a newer render
           } catch (e) { /* preview failure isn't fatal — try full pass anyway */ }
         }
-        paint(callGltf("render_gltf", model.bytes, ENC.encode(JSON.stringify(cfg))));
+        paint(gltfPlugin.call("render_gltf", model.bytes, ENC.encode(JSON.stringify(cfg))));
         const ms = performance.now() - t0;
         elRtime.textContent = `rendered in ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         elRtime.classList.add("show");
@@ -1014,7 +985,7 @@ function render() {
   try {
     const token = ++renderToken;
     const t0 = performance.now();
-    const out = callPlugin(fn, model.bytes, ENC.encode(JSON.stringify(renderConfig())));
+    const out = maquettePlugin.call(fn, model.bytes, ENC.encode(JSON.stringify(renderConfig())));
     const ms = performance.now() - t0;
     // Raster output is raw RGBA ([0x00][w][h][rgba8…]); grid / turntable / debug /
     // annotations add a transparent vector overlay ([0x02][w][h][rgba8 w*h*4][svg…]).
@@ -1162,9 +1133,50 @@ const DEFAULTS_KEYS = [...new Set([
   ...Object.values(MODEL_DEFAULTS).flatMap(Object.keys),
   ...Object.keys(SCAD_DEFAULTS),   // so switching away from OpenSCAD resets its flat look
 ])];
-// Field-by-key lookups. `topFields()` recomputes lazily because which schema
-// is active depends on the current model (glTF vs maquette).
-const topFields = () => Object.fromEntries(getSchema().flatMap(s => s.fields.map(f => [f.k, f])));
+// Field-by-key lookups. `topFields()` returns the flat {k → field} map for
+// the currently-active schema. Cached per-schema in a WeakMap so hot callers
+// (applyConfig walks it once per config key) don't repeat the flatMap. Both
+// SCHEMA and GLTF_SCHEMA are stable const references, so no invalidation is
+// needed — a schema swap just misses the cache once, then reuses.
+const _topFieldsCache = new WeakMap();
+const topFields = () => {
+  const s = getSchema();
+  let tf = _topFieldsCache.get(s);
+  if (!tf) _topFieldsCache.set(s, tf = Object.fromEntries(s.flatMap(sec => sec.fields.map(f => [f.k, f]))));
+  return tf;
+};
+
+// Wipe every key from `state` and refill from a fresh initState(). Callers:
+//   - kind-switch (glTF ↔ maquette) sites, where the next code path assumes
+//     `state` matches the new schema and `state._hemi` etc. would blow up if
+//     left as the previous schema's shape.
+//   - the Reset button.
+function resetState() {
+  for (const k in state) delete state[k];
+  Object.assign(state, initState());
+}
+// True when the two names route to different renderer schemas (glTF vs
+// maquette). Callers pair with `resetState()` to swap `state` in place.
+const kindDiffers = (a, b) => isGltf(a || "") !== isGltf(b || "");
+
+// The PNG/SVG toggle is meaningless for glTF assets (PBR is raster-only).
+// Hide the control + force PNG when in glTF mode; show + leave alone
+// otherwise. Called from every site that changes `model.name` from outside
+// ingest() (renderScadResult, shared-link boot). ingest() calls this too.
+function syncFmtToggleForKind(name) {
+  const gltf = isGltf(name);
+  const seg = document.getElementById("fmt");
+  if (seg) seg.style.display = gltf ? "none" : "";
+  if (gltf && outputFormat !== "png") {
+    outputFormat = "png";
+    document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x.dataset.fmt === "png"));
+  }
+}
+
+// Cached reference to the Animation-time field descriptor. syncGltfInfo()
+// rewrites its `t`/`min`/`max`/`step` in place when the loaded asset has
+// animations. Caching skips an O(sections × fields) search on every ingest.
+const GLTF_TIME_FIELD = GLTF_SCHEMA.flatMap(s => s.fields).find(f => f.k === "time");
 function applyModelDefaults(name) {
   const TF = topFields();
   for (const k of DEFAULTS_KEYS) {   // reset to the field's starting value (init, else def)
@@ -1177,26 +1189,14 @@ function applyModelDefaults(name) {
 
 // Shared ingestion for both dropped/browsed files and built-in presets.
 function ingest(name, bytes) {
-  const kindChanged = isGltf((model && model.name) || "") !== isGltf(name);
+  const kindChanged = kindDiffers(model && model.name, name);
   model = { name, bytes };
   syncPreset(name);
   renderOverride = null;
-  // Switching schema (maquette ↔ glTF) means completely different state
-  // fields exist. Wipe + refill so the form isn't reading undefined slots.
-  if (kindChanged) {
-    for (const k in state) delete state[k];
-    Object.assign(state, initState());
-    buildForm();
-  }
-  // The PNG/SVG format toggle is meaningless for glTF (no vector output —
-  // PBR shading is fundamentally raster). Hide the segmented control and
-  // force PNG in glTF mode; restore both when we're back on a maquette model.
-  const fmtSeg = document.getElementById("fmt");
-  if (fmtSeg) fmtSeg.style.display = isGltf(name) ? "none" : "";
-  if (isGltf(name) && outputFormat !== "png") {
-    outputFormat = "png";
-    document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x.dataset.fmt === "png"));
-  }
+  // Schema swap (maquette ↔ glTF) has completely different state fields —
+  // wipe + refill so the form isn't reading undefined slots.
+  if (kindChanged) { resetState(); buildForm(); }
+  syncFmtToggleForKind(name);
   // Probe animation length + retype the Animation-time field to a slider
   // when the asset actually has animations. Async: fires alongside the
   // render, doesn't gate it.
@@ -1212,23 +1212,17 @@ function ingest(name, bytes) {
 // (or wherever the user left the value).
 async function syncGltfInfo() {
   try {
-    await ensureGltf();
-    const raw = callGltf("get_gltf_info", model.bytes, ENC.encode("{}"));
+    await gltfPlugin.ensure();
+    const raw = gltfPlugin.call("get_gltf_info", model.bytes, ENC.encode("{}"));
     const info = JSON.parse(DEC.decode(raw));
     const maxT = +info.max_animation_time || 0;
-    // Locate the `time` field in GLTF_SCHEMA and rewrite it in place.
-    for (const sec of GLTF_SCHEMA) {
-      const f = sec.fields.find(f => f.k === "time");
-      if (!f) continue;
-      if (maxT > 0) {
-        f.t = "rng"; f.min = 0; f.max = Math.ceil(maxT * 10) / 10; f.step = Math.max(0.02, maxT / 200);
-      } else {
-        f.t = "num"; delete f.min; delete f.max; delete f.step;
-      }
-      break;
+    const f = GLTF_TIME_FIELD;   // cached at module load — no search per call
+    if (maxT > 0) {
+      f.t = "rng"; f.min = 0; f.max = Math.ceil(maxT * 10) / 10; f.step = Math.max(0.02, maxT / 200);
+    } else {
+      f.t = "num"; delete f.min; delete f.max; delete f.step;
     }
-    // Clamp state.time into the new range so an old value doesn't push the
-    // slider off the end.
+    // Clamp state.time so an old value doesn't push the slider off the end.
     if (typeof state.time === "number" && state.time > maxT) state.time = 0;
     buildForm(); refreshVisibility();
   } catch { /* info fetch failure isn't fatal — the number input stays */ }
@@ -1297,19 +1291,15 @@ function renderScadResult(ply) {
   //
   // Coming from a glTF model (state built for GLTF_SCHEMA), we need to rebuild
   // state for SCHEMA before rendering — otherwise buildConfig throws on
-  // `state._hemi.__on` (undefined). Same wipe pattern as `ingest()`.
-  const kindChanged = isGltf((model && model.name) || "") !== isGltf("model.ply");
+  // `state._hemi.__on` (undefined).
+  const kindChanged = kindDiffers(model && model.name, "model.ply");
   model = { name: "model.ply", scad: true, bytes: ply };
   if (kindChanged) {
-    for (const k in state) delete state[k];
-    Object.assign(state, initState());
+    resetState();
     // Re-apply SCAD's flat-shading look after the wipe.
     for (const k in SCAD_DEFAULTS) state[k] = structuredClone(SCAD_DEFAULTS[k]);
     buildForm();
-    // The PNG/SVG toggle was hidden while in glTF mode; SCAD renders via
-    // maquette so the toggle is meaningful again.
-    const fmtSeg = document.getElementById("fmt");
-    if (fmtSeg) fmtSeg.style.display = "";
+    syncFmtToggleForKind("model.ply");   // show the PNG/SVG toggle again
   }
   renderOverride = null;
   refreshVisibility(); measure(); onChange();
@@ -1320,9 +1310,9 @@ async function compileScad() {
   if (!src.trim()) { status.textContent = ""; return; }
   try {
     status.textContent = "compiling…";
-    await ensureScad();
+    await scadPlugin.ensure();
     const t = performance.now();
-    const ply = callScad("build_scad", ENC.encode(src), ENC.encode("{}"),
+    const ply = scadPlugin.call("build_scad", ENC.encode(src), ENC.encode("{}"),
       ENC.encode(JSON.stringify({ fn: 32 })), new Uint8Array());
     status.textContent = `compiled in ${Math.round(performance.now() - t)} ms`;
     showErr("");
@@ -1380,11 +1370,11 @@ $("copy").onclick = async () => { await copyText(buildTypst()); const o = $("cop
 const INFO_FN = { obj: "get_obj_info", stl: "get_stl_info", ply: "get_ply_info" };
 function measure() {
   elMeasure.innerHTML = "";
-  if (!instance || !model.bytes) return;
+  if (!maquettePlugin.instance || !model.bytes) return;
   const fn = INFO_FN[ext(model.name)];
   if (!fn) return;
   try {
-    const info = JSON.parse(DEC.decode(callPlugin(fn, model.bytes, ENC.encode("{}"))));
+    const info = JSON.parse(DEC.decode(maquettePlugin.call(fn, model.bytes, ENC.encode("{}"))));
     if (Array.isArray(info.bbox_center)) bboxCenter = info.bbox_center;   // for cartesian→spherical orbit
     const n = (x) => Number.isInteger(x) ? x.toLocaleString() : (+x).toPrecision(3);
     const stats = [];
@@ -1675,10 +1665,9 @@ async function applyStateFromUrl() {
   // wipe/rebuild state so applyConfig reads GLTF_SCHEMA via topFields(). The
   // same rebuild fires in the reverse direction so old maquette links still
   // work after we've been in glTF mode.
-  if (name && isGltf(name) !== isGltf(model.name)) {
+  if (name && kindDiffers(name, model.name)) {
     model = { name, bytes: null };
-    for (const k in state) delete state[k];
-    Object.assign(state, initState());
+    resetState();
   }
   applyConfig(raw);
   renderOverride = hadConfig ? structuredClone(raw) : null;   // exact render, until first edit
@@ -1746,9 +1735,7 @@ $("btn-share").onclick = async () => {
 };
 
 $("btn-reset").onclick = () => {
-  const init = initState();
-  for (const k in state) delete state[k];
-  Object.assign(state, init);
+  resetState();
   renderOverride = null;
   history.replaceState(null, "", location.pathname);
   $("search").value = "";
@@ -1839,8 +1826,9 @@ async function loadModule() {
   try {
     const module = await loadModule();
     // With a Module (not bytes), instantiate() resolves to the Instance directly.
-    instance = await WebAssembly.instantiate(module, importObject);
-    memory = instance.exports.memory;
+    // Bind the pre-compiled module into the plugin wrapper (skips its lazy fetch
+    // path — the maquette plugin lives in IndexedDB, not on a fresh HTTP fetch).
+    maquettePlugin.bind(await WebAssembly.instantiate(module, maquettePlugin.imports));
     // Load the model named in the URL (any file present in the demo dir — not
     // just picker built-ins, so documentation deep-links resolve), else bunny.
     const wanted = urlModel || "bunny.obj";
@@ -1851,15 +1839,9 @@ async function loadModule() {
     catch { name = "bunny.obj"; bytes = new Uint8Array(await (await fetch("bunny.obj")).arrayBuffer()); }
     model = { name, bytes };
     syncPreset(name);
-    // PNG/SVG toggle is meaningless for glTF (no vector output) — same
-    // guard as ingest(). Shared-link boot bypasses ingest so we do it here.
-    const fmtSeg = document.getElementById("fmt");
-    if (fmtSeg) fmtSeg.style.display = isGltf(name) ? "none" : "";
-    if (isGltf(name)) {
-      outputFormat = "png";
-      document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x.dataset.fmt === "png"));
-      syncGltfInfo();  // retype Animation-time to a slider when animated
-    }
+    // Shared-link boot bypasses ingest() so we run its glTF-mode setup here.
+    syncFmtToggleForKind(name);
+    if (isGltf(name)) syncGltfInfo();   // retype Animation-time to a slider when animated
     refreshVisibility(); measure(); onChange();
     // Shorten the address bar to the compact form, so even a long readable
     // documentation link becomes short (and copy-ready) once it has loaded.
