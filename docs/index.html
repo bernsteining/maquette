@@ -166,7 +166,7 @@
   #scad-src { background: transparent; color: transparent; caret-color: var(--ink); outline: none; resize: none; }
 
   /* render stage */
-  #stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 28px; min-height: 0; position: relative;
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 28px 28px 44px; min-height: 0; position: relative;
     background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 70%);
     cursor: grab; touch-action: none; }
   #stage.grabbing { cursor: grabbing; }
@@ -219,7 +219,7 @@
         <div class="file-row">
           model: <select id="preset" title="Load a built-in model"></select>
           <button id="browse">Load file…</button>
-          <input id="file" type="file" accept=".obj,.stl,.ply,.scad" hidden>
+          <input id="file" type="file" accept=".obj,.stl,.ply,.scad,.glb" hidden>
         </div>
         <div class="search-row"><input id="search" type="search" placeholder="Search settings…" autocomplete="off"></div>
       </div>
@@ -262,7 +262,7 @@
       <canvas id="outc" style="display:none"></canvas>
       <div id="rtime"></div>
       <div id="err"></div>
-      <div id="hint">drag to orbit · scroll to zoom · drop a .obj/.stl/.ply</div>
+      <div id="hint">drag to orbit · scroll to zoom · drop a .obj/.stl/.ply/.glb</div>
     </section>
   </main>
 
