@@ -361,6 +361,10 @@ const GLTF_SCHEMA = [
   ]},
 
   { s: "Animation & variants", fields: [
+    // Defaults to a bare number input for static assets. When the loaded
+    // glTF has animations, `syncGltfInfo()` retypes this to a slider bounded
+    // to the asset's actual animation duration (see get_gltf_info's
+    // max_animation_time). Same field key either way.
     { k: "time",             label: "Animation time (s)", t: "num", def: 0 },
     { k: "material_variant", label: "Material variant (KHR_materials_variants)", t: "num", def: 0, omitIf: v => v === 0 },
     { k: "no_textures",      label: "Skip textures (fast preview)", t: "bool", def: false },
@@ -1193,8 +1197,41 @@ function ingest(name, bytes) {
     outputFormat = "png";
     document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x.dataset.fmt === "png"));
   }
+  // Probe animation length + retype the Animation-time field to a slider
+  // when the asset actually has animations. Async: fires alongside the
+  // render, doesn't gate it.
+  if (isGltf(name)) syncGltfInfo();
   if (location.search || location.hash) history.replaceState(null, "", location.pathname);  // drop a stale share link
   refreshVisibility(); measure(); onChange();
+}
+
+// Fetch triangle count + animation length from the glTF plugin and, when the
+// asset is animated, retype the `time` field from a bare number input to a
+// slider bounded by the actual animation duration. Rebuilds the form so the
+// new control replaces the old one, then re-runs onChange to render at t=0
+// (or wherever the user left the value).
+async function syncGltfInfo() {
+  try {
+    await ensureGltf();
+    const raw = callGltf("get_gltf_info", model.bytes, ENC.encode("{}"));
+    const info = JSON.parse(DEC.decode(raw));
+    const maxT = +info.max_animation_time || 0;
+    // Locate the `time` field in GLTF_SCHEMA and rewrite it in place.
+    for (const sec of GLTF_SCHEMA) {
+      const f = sec.fields.find(f => f.k === "time");
+      if (!f) continue;
+      if (maxT > 0) {
+        f.t = "rng"; f.min = 0; f.max = Math.ceil(maxT * 10) / 10; f.step = Math.max(0.02, maxT / 200);
+      } else {
+        f.t = "num"; delete f.min; delete f.max; delete f.step;
+      }
+      break;
+    }
+    // Clamp state.time into the new range so an old value doesn't push the
+    // slider off the end.
+    if (typeof state.time === "number" && state.time > maxT) state.time = 0;
+    buildForm(); refreshVisibility();
+  } catch { /* info fetch failure isn't fatal — the number input stays */ }
 }
 async function loadFile(file) {
   if (ext(file.name) === "scad") return enterScadMode(await file.text());
@@ -1821,6 +1858,7 @@ async function loadModule() {
     if (isGltf(name)) {
       outputFormat = "png";
       document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x.dataset.fmt === "png"));
+      syncGltfInfo();  // retype Animation-time to a slider when animated
     }
     refreshVisibility(); measure(); onChange();
     // Shorten the address bar to the compact form, so even a long readable
