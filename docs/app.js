@@ -1626,6 +1626,18 @@ async function applyStateFromUrl() {
       catch (e) { console.warn("ignoring malformed config link", e); }
     }
   }
+  // If the link points at a glTF model but our initial `model` is a maquette
+  // one (defaulted at declaration), state was built from SCHEMA and applyConfig
+  // will keep treating the incoming glTF fields (ibl / shadows / ground / …)
+  // as maquette fields — bogus form + broken render. Switch model.name AND
+  // wipe/rebuild state so applyConfig reads GLTF_SCHEMA via topFields(). The
+  // same rebuild fires in the reverse direction so old maquette links still
+  // work after we've been in glTF mode.
+  if (name && isGltf(name) !== isGltf(model.name)) {
+    model = { name, bytes: null };
+    for (const k in state) delete state[k];
+    Object.assign(state, initState());
+  }
   applyConfig(raw);
   renderOverride = hadConfig ? structuredClone(raw) : null;   // exact render, until first edit
   return { name, hadConfig, raw };
@@ -1797,6 +1809,14 @@ async function loadModule() {
     catch { name = "bunny.obj"; bytes = new Uint8Array(await (await fetch("bunny.obj")).arrayBuffer()); }
     model = { name, bytes };
     syncPreset(name);
+    // PNG/SVG toggle is meaningless for glTF (no vector output) — same
+    // guard as ingest(). Shared-link boot bypasses ingest so we do it here.
+    const fmtSeg = document.getElementById("fmt");
+    if (fmtSeg) fmtSeg.style.display = isGltf(name) ? "none" : "";
+    if (isGltf(name)) {
+      outputFormat = "png";
+      document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x.dataset.fmt === "png"));
+    }
     refreshVisibility(); measure(); onChange();
     // Shorten the address bar to the compact form, so even a long readable
     // documentation link becomes short (and copy-ready) once it has loaded.
