@@ -1,17 +1,18 @@
 /// Parse a glTF or GLB byte slice into a `gltf::Gltf` plus the associated
 /// buffer data.
 ///
-/// The plugin receives a single byte blob (via Typst's `read(..., encoding: none)`),
-/// so the assumption is: either a `.glb` (single-file, JSON + BIN chunk together)
-/// or a `.gltf` (JSON) with every buffer embedded as a `data:` URI. External
-/// `.bin`/image files aren't reachable from inside the wasm sandbox — Typst
-/// controls I/O, not us. Users with a `.gltf` split across multiple files
-/// should convert to `.glb` up-front.
+/// Three input shapes are supported:
+///   1. `.glb` (single file, JSON + BIN chunk together) — pass via `parse`.
+///   2. `.gltf` with every buffer/image embedded as a `data:` URI — `parse`.
+///   3. `.gltf` split into external `.bin`/image files — `parse_split`, with
+///      the sidecar files packed into a bundle by the Typst wrapper.
 ///
-/// Data-URI base64 decoding for embedded `.gltf` buffers is deferred to v2
-/// (needs the `base64` crate or a small hand-rolled decoder). MVP: GLB only.
+/// The wasm sandbox has no filesystem access, so external URIs are resolved
+/// via the sidecar bundle instead. The wrapper walks the glTF JSON, reads
+/// each referenced URI, and hands the plugin a packed `HashMap<uri, bytes>`.
 
 use gltf::Gltf;
+use std::collections::HashMap;
 
 /// Parsed asset ready for scene traversal. Owns the buffer bytes so callers
 /// can pass short-lived byte slices into `parse`.
@@ -21,9 +22,27 @@ pub struct LoadedGltf {
     /// is the BIN chunk. Buffers we couldn't resolve stay empty — the scene
     /// traversal will treat any primitive that references them as unrenderable.
     pub buffers: Vec<Vec<u8>>,
+    /// Sidecar files, keyed by URI. Populated for split `.gltf` inputs;
+    /// consumed by `scene::load_texture` when an image references an external
+    /// URI. Empty for GLB / fully-embedded `.gltf`.
+    pub sidecars: HashMap<String, Vec<u8>>,
 }
 
 pub fn parse(bytes: &[u8]) -> Result<LoadedGltf, String> {
+    parse_impl(bytes, HashMap::new())
+}
+
+/// Split-glTF variant. `sidecars_bundle` is a packed `HashMap<uri, bytes>`
+/// produced by the Typst wrapper walking the glTF JSON. Format:
+///   `[n_files u32 LE]`
+///   `for i in 0..n: [name_len u16 LE][name utf-8][data_off u32 LE][data_len u32 LE]`
+///   `[concatenated file bodies at their offsets]`
+pub fn parse_split(bytes: &[u8], sidecars_bundle: &[u8]) -> Result<LoadedGltf, String> {
+    let sidecars = parse_sidecar_bundle(sidecars_bundle)?;
+    parse_impl(bytes, sidecars)
+}
+
+fn parse_impl(bytes: &[u8], sidecars: HashMap<String, Vec<u8>>) -> Result<LoadedGltf, String> {
     // `from_slice_without_validation` skips the `extensionsRequired`
     // whitelist check — otherwise gltf-rs rejects files declaring
     // EXT_meshopt_compression or KHR_mesh_quantization since they're not in
@@ -44,11 +63,18 @@ pub fn parse(bytes: &[u8]) -> Result<LoadedGltf, String> {
             gltf::buffer::Source::Uri(uri) => {
                 if let Some(bytes) = decode_data_uri(uri) {
                     buffers.push(bytes);
+                } else if let Some(bytes) = sidecars.get(uri) {
+                    // External `.bin` — resolved via the sidecar bundle the
+                    // wrapper packed. Clone into an owned Vec (matches the
+                    // storage of the other two branches).
+                    buffers.push(bytes.clone());
                 } else {
                     return Err(format!(
-                        "glTF buffer {} points to an external file ({}). \
-                         Package the asset as a .glb (single file) or embed \
-                         buffers as data: URIs.",
+                        "glTF buffer {} references external file '{}' but no \
+                         matching sidecar was provided. If you're calling the \
+                         plugin directly, pass the file's bytes in the sidecar \
+                         bundle; if you're using the wrapper, make sure the \
+                         file exists next to the .gltf.",
                         buffer.index(), uri));
                 }
             }
@@ -61,7 +87,44 @@ pub fn parse(bytes: &[u8]) -> Result<LoadedGltf, String> {
     // Runs before scene traversal — gltf-rs never sees the compressed bytes.
     decompress_meshopt(&document, &mut buffers)?;
 
-    Ok(LoadedGltf { document, buffers })
+    Ok(LoadedGltf { document, buffers, sidecars })
+}
+
+/// Decode the packed sidecar bundle produced by the wrapper. Returns an empty
+/// map for a 0-byte input so callers can uniformly pass an empty bundle when
+/// they have no sidecars. Any structural inconsistency (truncation, offsets
+/// past end) is a hard error — the wrapper packs deterministically, so a bad
+/// bundle indicates a bug we want to surface immediately.
+fn parse_sidecar_bundle(bundle: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
+    if bundle.is_empty() { return Ok(HashMap::new()); }
+    if bundle.len() < 4 { return Err("sidecar bundle: header truncated".into()); }
+    let n = u32::from_le_bytes(bundle[0..4].try_into().unwrap()) as usize;
+    let mut entries: Vec<(String, usize, usize)> = Vec::with_capacity(n);
+    let mut pos = 4usize;
+    for _ in 0..n {
+        if pos + 2 > bundle.len() { return Err("sidecar bundle: name_len truncated".into()); }
+        let name_len = u16::from_le_bytes(bundle[pos..pos+2].try_into().unwrap()) as usize;
+        pos += 2;
+        if pos + name_len > bundle.len() { return Err("sidecar bundle: name truncated".into()); }
+        let name = std::str::from_utf8(&bundle[pos..pos+name_len])
+            .map_err(|_| "sidecar bundle: non-utf8 name")?.to_string();
+        pos += name_len;
+        if pos + 8 > bundle.len() { return Err("sidecar bundle: entry offset/length truncated".into()); }
+        let off = u32::from_le_bytes(bundle[pos..pos+4].try_into().unwrap()) as usize;
+        pos += 4;
+        let len = u32::from_le_bytes(bundle[pos..pos+4].try_into().unwrap()) as usize;
+        pos += 4;
+        entries.push((name, off, len));
+    }
+    let mut map = HashMap::with_capacity(entries.len());
+    for (name, off, len) in entries {
+        let end = off.checked_add(len).ok_or("sidecar bundle: offset overflow")?;
+        if end > bundle.len() {
+            return Err(format!("sidecar bundle: entry '{}' body out of range", name));
+        }
+        map.insert(name, bundle[off..end].to_vec());
+    }
+    Ok(map)
 }
 
 /// Walk every bufferView and, if it declares EXT_meshopt_compression, decode
@@ -238,7 +301,7 @@ fn apply_meshopt_filter(filter: &str, stride: usize, count: usize, buf: &mut [u8
 /// else (external paths). Enables split `.gltf` files where buffers or
 /// images are embedded inline. Only base64-encoded data URIs are supported —
 /// URL-encoded ASCII is uncommon in glTF and adds an escape parser.
-fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
+pub(crate) fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
     let rest = uri.strip_prefix("data:")?;
     let (_media, payload) = rest.split_once(',')?;
     // Expect the media prefix to end in `;base64`. Non-base64 payloads

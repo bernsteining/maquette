@@ -932,7 +932,11 @@ fn collect_textures(loaded: &LoadedGltf, opts: TextureLoadOpts) -> Vec<Texture> 
 
 fn load_texture(loaded: &LoadedGltf, t: &gltf::Texture, opts: TextureLoadOpts) -> Result<Texture, String> {
     let image = t.source();
-    let (bytes, mime) = match image.source() {
+    // Bind a Vec outside the match so the data-URI branch can own the decoded
+    // bytes while the View/sidecar branches borrow. Rust's "definitely assigned"
+    // analysis lets us leave it uninitialised until the arm needs it.
+    let data_uri_owned: Vec<u8>;
+    let (bytes, mime): (&[u8], Option<&str>) = match image.source() {
         gltf::image::Source::View { view, mime_type } => {
             let buf = loaded.buffers.get(view.buffer().index())
                 .ok_or("texture: buffer index out of range")?;
@@ -940,8 +944,17 @@ fn load_texture(loaded: &LoadedGltf, t: &gltf::Texture, opts: TextureLoadOpts) -
             let end = start + view.length();
             (buf.get(start..end).ok_or("texture: buffer view out of range")?, Some(mime_type))
         }
-        gltf::image::Source::Uri { .. } => {
-            return Err("external texture URIs not supported yet (package as GLB)".into());
+        gltf::image::Source::Uri { uri, mime_type } => {
+            if let Some(decoded) = crate::gltf_loader::decode_data_uri(uri) {
+                data_uri_owned = decoded;
+                (data_uri_owned.as_slice(), mime_type)
+            } else {
+                let bytes = loaded.sidecars.get(uri)
+                    .ok_or_else(|| format!(
+                        "texture references external URI '{}' but no matching \
+                         sidecar was provided", uri))?;
+                (bytes.as_slice(), mime_type)
+            }
         }
     };
     let decoded = texture_decode::decode(bytes, mime)?;

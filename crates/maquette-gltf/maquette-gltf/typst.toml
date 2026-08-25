@@ -1,0 +1,26 @@
+[package]
+name = "maquette-gltf"
+version = "0.1.0"
+entrypoint = "maquette-gltf.typ"
+authors = ["https://github.com/bernsteining"]
+repository = "https://github.com/bernsteining/maquette"
+license = "MIT"
+description = "Render glTF 2.0 assets (.gltf / .glb) as raster images in Typst."
+keywords = [
+  "3D",
+  "glTF",
+  "GLB",
+  "PBR",
+  "render",
+  "IBL",
+  "shading",
+  "mesh",
+]
+categories = ["visualization"]
+compiler = "0.14.0"
+disciplines = [
+  "architecture",
+  "computer-science",
+  "design",
+  "engineering",
+]
