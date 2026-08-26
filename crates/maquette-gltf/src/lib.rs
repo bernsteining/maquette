@@ -13,6 +13,44 @@ mod pbr;
 mod render;
 mod scene;
 
+// ── panic diagnostics ─────────────────────────────────────────────────────
+//
+// Rust's `panic = "abort"` on `wasm32-unknown-unknown` compiles a panic into
+// the `unreachable` wasm instruction — the host sees a bare `TrapCode
+// (UnreachableCodeReached)` and nothing else. We install a hook (once, at
+// wasm-func entry) that captures the panic location + message into a
+// thread-local buffer, and expose `get_last_panic` so callers can retrieve
+// it after a trap. Between entry-point installation and the trap the buffer
+// gets populated; the trap itself doesn't clear it.
+use std::cell::RefCell;
+use std::sync::Once;
+thread_local! {
+    static LAST_PANIC: RefCell<String> = const { RefCell::new(String::new()) };
+}
+static PANIC_HOOK: Once = Once::new();
+fn install_panic_hook() {
+    PANIC_HOOK.call_once(|| {
+        std::panic::set_hook(Box::new(|info| {
+            let loc = info.location()
+                .map(|l| format!("{}:{}", l.file(), l.line()))
+                .unwrap_or_else(|| "?".into());
+            let msg = if let Some(s) = info.payload().downcast_ref::<&str>() { (*s).to_string() }
+                else if let Some(s) = info.payload().downcast_ref::<String>() { s.clone() }
+                else { "(non-string panic payload)".into() };
+            LAST_PANIC.with(|p| *p.borrow_mut() = format!("panic at {}: {}", loc, msg));
+        }));
+    });
+}
+
+/// Fetch the last panic message captured by our hook. Empty string when the
+/// hook never fired. Callers use this after a trap to figure out what blew up.
+#[wasm_func]
+fn get_last_panic() -> Vec<u8> {
+    install_panic_hook();
+    LAST_PANIC.with(|p| p.borrow().clone().into_bytes())
+}
+
+
 /// Render a glTF (JSON) or GLB (binary) file to raw RGBA bytes.
 ///
 /// Wire format returned to the Typst wrapper:
@@ -49,6 +87,7 @@ fn render_gltf_split(gltf_data: &[u8], config_json: &[u8], sidecars_bundle: &[u8
 }
 
 fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_bundle: &[u8]) -> Result<Vec<u8>, String> {
+    install_panic_hook();
     maquette_core::color::init_color_luts();
     let mut config = config::parse(config_json)?;
     if !hdr_data.is_empty() {
@@ -92,6 +131,7 @@ fn get_gltf_info_split(gltf_data: &[u8], _config_json: &[u8], sidecars_bundle: &
 }
 
 fn info_impl(gltf_data: &[u8], sidecars_bundle: &[u8]) -> Result<Vec<u8>, String> {
+    install_panic_hook();
     let loaded = if sidecars_bundle.is_empty() {
         gltf_loader::parse(gltf_data)?
     } else {

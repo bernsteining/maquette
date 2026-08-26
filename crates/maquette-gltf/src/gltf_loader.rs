@@ -440,47 +440,69 @@ fn decompress_draco(
                     .ok_or_else(|| format!("draco: attribute id {} not present in decoded stream", draco_id))?;
 
                 let value_size = attr.get_component_type().size() * attr.get_num_components();
-                let n_points = attr.len();
+                // Draco keeps two counts: `num_unique_values()` (deduplicated
+                // attribute values) and `len()` (points, where multiple
+                // points can alias one unique value via `point_to_att_val_map`).
+                // glTF expects the accessor to contain exactly the unique
+                // values, with face indices reading directly into them —
+                // Draco's point-to-value map is applied when generating the
+                // indices below. Real-world assets exercise this: three.js's
+                // `forest_house.glb` mesh 5 has 188 points but only 183
+                // uniques, and its accessor.count is 183.
+                let n_unique = attr.num_unique_values();
                 let unique = attr.get_data_as_bytes();
-                let mut bytes = Vec::with_capacity(n_points * value_size);
-                if let Some(map) = attr.point_map_as_slice() {
-                    // Non-identity point→unique-value map: index into `unique`.
-                    for &val_idx in map {
-                        let i = usize::from(val_idx);
-                        bytes.extend_from_slice(&unique[i * value_size .. (i + 1) * value_size]);
-                    }
-                } else {
-                    // Identity map: `unique` already lays out one value per point.
-                    bytes.extend_from_slice(&unique[..n_points * value_size]);
-                }
+                let mut bytes = Vec::with_capacity(n_unique * value_size);
+                bytes.extend_from_slice(&unique[..n_unique * value_size]);
                 patches.push((target_bv.buffer().index(), target_bv.offset() + accessor.offset(), bytes));
             }
 
-            // Indices: flatten faces into u16 or u32 depending on the
+            // Indices: flatten faces into u16 / u32 / u8 depending on the
             // accessor's component type. glTF indices are always UNSIGNED_*.
+            //
+            // Faces store `PointIdx` — indices into the pre-dedup point
+            // list. We wrote unique values only to the attribute bufferViews
+            // above, so remap each point index through the attribute's
+            // `point_to_att_val_map` to land on the correct value slot.
+            // Every Draco-attached attribute shares the same map when the
+            // stream is a glTF-conformant single-primitive mesh (they must,
+            // else no single index buffer can address all attributes), so
+            // any attribute works — pick the first one with a map.
             if let Some(idx_accessor) = prim.indices() {
                 let target_bv = idx_accessor.view()
                     .ok_or("draco: indices accessor has no bufferView")?;
+                // Point-to-value map from the first attribute that has one
+                // (all attached attributes share the map in glTF-conformant
+                // streams). Falls back to identity when every attribute is
+                // already deduped 1:1.
+                let map = decoded.attributes.iter()
+                    .find_map(|a| a.point_map_as_slice());
+                // Remap in place — build a flat Vec<u32> of value-indices,
+                // then narrow to the accessor's declared width.
+                let mut flat: Vec<u32> = Vec::with_capacity(decoded.faces.len() * 3);
+                for f in &decoded.faces {
+                    for p in f {
+                        let pi = usize::from(*p);
+                        let idx = match map {
+                            Some(m) if pi < m.len() => usize::from(m[pi]) as u32,
+                            _ => pi as u32,
+                        };
+                        flat.push(idx);
+                    }
+                }
                 let bytes = match idx_accessor.data_type() {
                     gltf::accessor::DataType::U16 => {
-                        let mut b = Vec::with_capacity(decoded.faces.len() * 6);
-                        for f in &decoded.faces {
-                            for &p in f { b.extend_from_slice(&(usize::from(p) as u16).to_le_bytes()); }
-                        }
+                        let mut b = Vec::with_capacity(flat.len() * 2);
+                        for i in &flat { b.extend_from_slice(&(*i as u16).to_le_bytes()); }
                         b
                     }
                     gltf::accessor::DataType::U32 => {
-                        let mut b = Vec::with_capacity(decoded.faces.len() * 12);
-                        for f in &decoded.faces {
-                            for &p in f { b.extend_from_slice(&(usize::from(p) as u32).to_le_bytes()); }
-                        }
+                        let mut b = Vec::with_capacity(flat.len() * 4);
+                        for i in &flat { b.extend_from_slice(&i.to_le_bytes()); }
                         b
                     }
                     gltf::accessor::DataType::U8 => {
-                        let mut b = Vec::with_capacity(decoded.faces.len() * 3);
-                        for f in &decoded.faces {
-                            for &p in f { b.push(usize::from(p) as u8); }
-                        }
+                        let mut b = Vec::with_capacity(flat.len());
+                        for i in &flat { b.push(*i as u8); }
                         b
                     }
                     other => return Err(format!("draco: indices accessor unsupported type {:?}", other)),

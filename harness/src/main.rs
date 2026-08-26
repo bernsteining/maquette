@@ -106,9 +106,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut results = [Val::I32(0)];
 
         let start = Instant::now();
-        func.call(&mut store, &params, &mut results)?;
+        let call_result = func.call(&mut store, &params, &mut results);
         let elapsed = start.elapsed();
         times.push(elapsed);
+
+        // If the wasm trapped, ask the plugin's panic hook for the message.
+        if let Err(e) = call_result {
+            eprintln!("[diag] trap: {:?}", e);
+            match instance.get_func(&store, "get_last_panic") {
+                Some(panic_fn) => {
+                    eprintln!("[diag] found get_last_panic");
+                    // wasm-minimal-protocol wraps every #[wasm_func] to return
+                    // an i32 (0 = ok, negative = err), so we need a 1-slot
+                    // results buffer even for a zero-arg getter.
+                    let mut r = [Val::I32(0)];
+                    store.data_mut().args = Vec::new();
+                    match panic_fn.call(&mut store, &[], &mut r) {
+                        Ok(()) => {
+                            let msg = std::mem::take(&mut store.data_mut().result);
+                            eprintln!("[diag] get_last_panic returned {} bytes", msg.len());
+                            if !msg.is_empty() {
+                                eprintln!("wasm panic captured: {}", String::from_utf8_lossy(&msg));
+                            }
+                        }
+                        Err(pe) => eprintln!("[diag] get_last_panic call errored: {:?}", pe),
+                    }
+                }
+                None => eprintln!("[diag] get_last_panic export not found"),
+            }
+            return Err(Box::new(e) as Box<dyn std::error::Error>);
+        }
 
         let ret = results[0].i32().unwrap_or(-1);
         let result_bytes = std::mem::take(&mut store.data_mut().result);

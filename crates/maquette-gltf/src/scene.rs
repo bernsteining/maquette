@@ -1159,7 +1159,11 @@ fn collect_textures(loaded: &LoadedGltf, opts: TextureLoadOpts) -> Vec<Texture> 
 }
 
 fn load_texture(loaded: &LoadedGltf, t: &gltf::Texture, opts: TextureLoadOpts) -> Result<Texture, String> {
-    let image = t.source();
+    // `allow_empty_texture` returns `Option<Image>` — None means the texture
+    // references an image via an extension we didn't build gltf-rs to
+    // understand (EXT_texture_avif, KHR_texture_basisu). Fall through to the
+    // placeholder texture rather than panicking.
+    let image = t.source().ok_or("texture has no primary source (unsupported ext?)")?;
     // Bind a Vec outside the match so the data-URI branch can own the decoded
     // bytes while the View/sidecar branches borrow. Rust's "definitely assigned"
     // analysis lets us leave it uninitialised until the arm needs it.

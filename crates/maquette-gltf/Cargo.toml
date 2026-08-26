@@ -36,6 +36,12 @@ features = [
     "utils",
     "names",
     "extensions",
+    # Allows `Texture::source()` to return `Option<Image>` instead of
+    # unwrapping — critical for extensions gltf-rs doesn't recognize
+    # (EXT_texture_avif, KHR_texture_basisu) where the texture's top-level
+    # `source` is absent and the extension provides the image via its own
+    # `source` field. Without this feature the texture accessor panics.
+    "allow_empty_texture",
     "KHR_lights_punctual",
     "KHR_materials_unlit",
     "KHR_materials_transmission",
@@ -48,7 +54,13 @@ features = [
     "KHR_texture_transform",
     "KHR_materials_pbrSpecularGlossiness",
     "KHR_materials_variants",
-    # KHR_materials_iridescence, KHR_materials_anisotropy, KHR_materials_dispersion
-    # aren't exposed as features by the crate — parsed from the raw extensions
-    # map via the `extensions` feature above.
+    # EXT_texture_webp: makes `Texture::primary_source()` respect the WebP
+    # extension source override. Assets that ship both a fallback PNG and a
+    # webp variant will now pick the webp path (which our texture decoder
+    # handles). Without this feature, gltf-rs uses the top-level source only.
+    "EXT_texture_webp",
+    # KHR_materials_iridescence, KHR_materials_anisotropy, KHR_materials_dispersion,
+    # KHR_materials_diffuse_transmission aren't exposed as features by the
+    # crate — parsed from the raw extensions map via the `extensions` feature
+    # above.
 ]
