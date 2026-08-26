@@ -137,15 +137,15 @@
 
 = Introduction
 
-*maquette-scad* takes an OpenSCAD-flavored expression (or a `.scad` source string), compiles it to a watertight mesh via the *Manifold* CSG kernel, and hands the result to `maquette` for rendering — all inside Typst's wasm sandbox. No external OpenSCAD install, no shell-out, no intermediate `.stl` on disk.
+*maquette-scad* extends #link("maquette-documentation.pdf")[`maquette`] with procedural geometry: takes an OpenSCAD-flavored expression (or a `.scad` source string), compiles it to a watertight mesh via the *Manifold* CSG kernel, and returns PLY bytes that plug straight into maquette's `render-ply` — all inside Typst's wasm sandbox. No external OpenSCAD install, no shell-out, no intermediate `.stl` on disk.
 
 Two entry points:
 - *Typst DSL* — write geometry as Typst expressions using `cube`, `sphere`, `translate`, `difference` etc. Terse, composable, uses Typst's own `for` / `range` / `calc` for procedural placement.
 - *`.scad` ingestion* — hand in the text of an existing `.scad` file (`read("part.scad")`). Full OpenSCAD language surface: `function`, `module`, `for`, list comprehensions, `include` / `use`, `$fn` / `$fa` / `$fs`.
 
-Both entry points return a `bytes` blob of PLY that plugs straight into `maquette`'s `render-ply`. The CSG kernel guarantees watertight boolean output — none of the "20% of faces open on any non-trivial cut" issue you get from BSP-based kernels.
+The CSG kernel guarantees watertight boolean output — none of the "20% of faces open on any non-trivial cut" issue you get from BSP-based kernels.
 
-See `crates/maquette-scad/FIDELITY.md` for the exhaustive OpenSCAD language coverage tracker.
+This document only covers the *geometry* layer — primitives, booleans, transforms, `.scad` ingestion, language coverage. Once you have PLY bytes, everything downstream (camera, lighting, materials, shadows, tone mapping, ...) is maquette's job — see #link("maquette-documentation.pdf")[maquette's documentation] for those knobs. See `crates/maquette-scad/FIDELITY.md` for the exhaustive OpenSCAD language coverage tracker.
 
 #pagebreak(weak: true)
 

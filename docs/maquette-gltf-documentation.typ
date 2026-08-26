@@ -128,11 +128,9 @@
 
 = Introduction
 
-*maquette-gltf* is a Typst plugin that renders glTF 2.0 assets — `.glb` or `.gltf` — directly into your documents. It sits alongside `maquette` (STL/OBJ/PLY) and `maquette-scad` (OpenSCAD → mesh) in the same workspace, sharing render primitives via `maquette-core`.
+*maquette-gltf* extends #link("maquette-documentation.pdf")[`maquette`] with glTF 2.0 support: `.glb` or `.gltf` in, rendered frame out. The plugin adds a PBR pipeline (Cook-Torrance GGX + Karis split-sum IBL + WBOIT translucency) on top of maquette's shared rasterizer, plus glTF-specific machinery for authored cameras/lights/materials/animations and the ecosystem's compression + texture extensions.
 
-The rendering is a software PBR pipeline: Cook-Torrance GGX + Karis split-sum IBL + shadow maps with PCF/PCSS + WBOIT for translucency, running entirely in Typst's wasm sandbox. No GPU, no network, no external tooling. Same input → same PDF, every time.
-
-Because glTF assets carry authored materials + cameras + lights + animations, most of the value is in exposing those to the shader knobs without asking you to re-author anything. Drop a `.glb` in, pick an environment map, get a rendered frame.
+This document only covers what maquette-gltf *adds*. The shared rendering knobs — camera framing, background, shadows, ground plane, SSAO/FXAA/SSAA, tone mapping — are already documented in maquette's manual and behave identically here. `render-gltf` accepts the same option dicts.
 
 #pagebreak(weak: true)
 
@@ -164,61 +162,16 @@ The `read:` lambda has to be an *inline lambda*, not a bare `read` reference. Ty
 
 #pagebreak(weak: true)
 
-= Camera
+= Shared rendering config
 
-Two ways to frame a shot: give an explicit Cartesian position, or (rare for glTF) drive it spherically. When a `.glb` ships an authored camera and you don't override framing, that authored camera wins.
+Camera framing (`camera` / `center` / `up` / `fov` / `azimuth` / `elevation`), `background`, `shadows`, `ground`, `ssao`, `antialias`, `tone_mapping` — all inherited from #link("maquette-documentation.pdf")[maquette] and behave the same on `render-gltf`. Don't repeat the tour here; refer to that manual.
 
-== Cartesian
-
-```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5),
-  center: (0, 0, 0),
-  up: (0, 1, 0),
-  fov: 40,
-)
-```
-
-== Spherical
-
-```example
-#render-gltf(helmet, read: R,
-  azimuth: 30, elevation: 15,
-  up: (0, 1, 0),
-  fov: 40,
-)
-```
-
-== Auto-camera
-
-Set `camera_auto_use: false` to force the orbit fallback even when the asset ships a camera. Default is `true` (viewer convention).
+One glTF-only knob to note: *`camera_auto_use: false`*. If the loaded asset ships an authored camera, `render-gltf` uses it by default (glTF viewer convention). Set this to `false` to force your Cartesian/spherical arguments to win instead.
 
 ```example
 #render-gltf(helmet, read: R,
   camera_auto_use: false,
-  camera: (0, 0, 3),
-  up: (0, 1, 0),
-  fov: 60,
-)
-```
-
-#pagebreak(weak: true)
-
-= Backgrounds
-
-Solid color, `"none"` for transparent, or `#hex`.
-
-```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
-  background: "#334",
-)
-```
-
-```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
-  background: "none",
+  camera: (0, 0, 3), up: (0, 1, 0), fov: 60,
 )
 ```
 
@@ -257,69 +210,6 @@ The `rotation` field spins the environment around the up axis (radians). Useful 
   camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
   background: "#181820",
   ibl: (intensity: 1.2, rotation: 1.2),
-)
-```
-
-#pagebreak(weak: true)
-
-= Shadows
-
-Shadow maps per punctual light with PCF or PCSS. `shadows` on its own applies safe defaults; the dict form exposes every knob.
-
-```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
-  background: "#181820",
-  ibl: (intensity: 1.0),
-  shadows: (resolution: 1024, softness: 1, bias: 0.001),
-  ground: (color: "#282838", size_scale: 3.0, roughness: 0.9),
-)
-```
-
-Bumping `pcss_light_size` from 0 to a small value switches to PCSS soft shadows — occluder search + penumbra estimate per pixel, larger `light_size` gives softer edges.
-
-#pagebreak(weak: true)
-
-= Ground plane
-
-An axis-aligned rectangle beneath the model that catches shadows + reflects the environment. Materialized as a matte dielectric with configurable colour + roughness.
-
-```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
-  background: "#181820",
-  ibl: (intensity: 1.2),
-  ground: (color: "#282838", size_scale: 3.0, roughness: 0.9),
-)
-```
-
-#pagebreak(weak: true)
-
-= Post-processing
-
-SSAO (screen-space ambient occlusion), FXAA, and SSAA (2×/4×). Ambient-occlusion has the biggest visual lift for cheap.
-
-```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
-  background: "#181820",
-  ibl: (intensity: 1.2),
-  ssao: (samples: 16, radius: 0.4, strength: 1.0),
-)
-```
-
-`antialias`: `0` off, `1` FXAA, `2` SSAA×2, `4` SSAA×4. FXAA is cheap; SSAA quadruples render cost per level.
-
-= Tone mapping
-
-HDR → LDR mapping for physically-motivated exposure. `"aces"` matches film response; `"reinhard"` is softer.
-
-```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
-  background: "#181820",
-  ibl: (intensity: 1.5),
-  tone_mapping: (method: "aces", exposure: 1.2),
 )
 ```
 
