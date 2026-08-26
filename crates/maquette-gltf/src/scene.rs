@@ -494,11 +494,28 @@ pub struct SceneOpts {
     /// variant; if the variant isn't mapped, we fall back to the primitive's
     /// default material.
     pub variant: u32,
+    /// Which glTF scene to render — an index into `document.scenes()`. When
+    /// `None`, uses `document.default_scene()` (or scene 0 as a fallback).
+    /// Assets that ship multiple scenes as switchable roots (rare but legal)
+    /// need this to reach the non-default ones.
+    pub scene_index: Option<usize>,
+    /// Which animation clip to play — an index into `document.animations()`.
+    /// glTF assets typically ship multiple clips (idle, walk, run, ...) as
+    /// independent playable animations. `None` stacks every clip (last-write-
+    /// wins per node channel) which is rarely what you want; `Some(i)` picks
+    /// the i-th clip. Out-of-range indices fall back to the stacked path.
+    pub animation_index: Option<usize>,
 }
 
 impl SceneOpts {
     pub fn from_config(c: &crate::config::RenderConfig) -> Self {
-        Self { textures: TextureLoadOpts::from_config(c), time: c.time as f32, variant: c.material_variant }
+        Self {
+            textures: TextureLoadOpts::from_config(c),
+            time: c.time as f32,
+            variant: c.material_variant,
+            scene_index: c.scene_index,
+            animation_index: c.animation_index,
+        }
     }
 }
 
@@ -509,8 +526,8 @@ pub fn flatten_with_cached_textures(loaded: &LoadedGltf, opts: SceneOpts, bytes:
     let mut scene = Scene::empty();
     scene.textures = crate::cache::textures_for(bytes, loaded, opts.textures);
     scene.materials = collect_materials(loaded);
-    let anim = sample_animations(loaded, opts.time);
-    fill_scene(&mut scene, loaded, &anim, opts.variant);
+    let anim = sample_animations(loaded, opts.time, opts.animation_index);
+    fill_scene(&mut scene, loaded, &anim, opts.variant, opts.scene_index);
     scene
 }
 
@@ -612,12 +629,12 @@ pub fn flatten_geometry_only(loaded: &LoadedGltf) -> Scene {
     // `get_gltf_info` doesn't sample textures, but material paths may still
     // index into them — leak placeholder Vec once and reuse.
     scene.textures = placeholder_textures_for(loaded.document.textures().len());
-    let anim = sample_animations(loaded, 0.0);
-    fill_scene(&mut scene, loaded, &anim, 0);
+    let anim = sample_animations(loaded, 0.0, None);
+    fill_scene(&mut scene, loaded, &anim, 0, None);
     scene
 }
 
-fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], variant: u32) {
+fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], variant: u32, scene_index: Option<usize>) {
     // Phase 1: resolve every node's world-space transform (needed up front
     // for skinning, which references joint node transforms possibly outside
     // the current mesh's parent chain).
@@ -629,7 +646,14 @@ fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], varia
 
     // Phase 2: emit meshes. Skinned meshes ignore their owning node's
     // transform per the glTF spec — only the joint palette matters.
-    let root_scene = loaded.document.default_scene()
+    // Scene selection: explicit `scene_index` wins; otherwise the document's
+    // authored default; otherwise the first scene. glTF assets can declare
+    // multiple scenes as alternative composition roots — animations, cameras
+    // and node hierarchies attach to nodes, but only nodes reachable from
+    // the chosen root are rendered.
+    let root_scene = scene_index
+        .and_then(|i| loaded.document.scenes().nth(i))
+        .or_else(|| loaded.document.default_scene())
         .or_else(|| loaded.document.scenes().next());
     let Some(root_scene) = root_scene else { return; };
 
@@ -949,8 +973,15 @@ fn parse_anisotropy(m: &gltf::Material) -> AnisotropyCfg {
 
 #[inline]
 fn clamp_texcoord(n: u32) -> u8 {
-    // glTF allows arbitrary TEXCOORD_N indices; we only wire 0 and 1. Anything
-    // else silently degrades to TEXCOORD_0 (would need bigger vertex to carry).
+    // glTF allows arbitrary TEXCOORD_N — the spec puts no upper bound on N.
+    // We only wire slots 0 and 1 through the `Vertex` struct; anything with
+    // `texCoord: 2` or higher silently falls back to slot 1 (which is the
+    // closer approximation than falling back to slot 0 — a material that
+    // authored TEXCOORD_2 will have TEXCOORD_1 too more often than not).
+    //
+    // Widening the vertex to carry more slots is a real change (~200 LOC
+    // through `Vertex` + shader + rasterizer barycentric interp). Deferred
+    // — very few real-world assets use TEXCOORD_N for N ≥ 2.
     if n >= 1 { 1 } else { 0 }
 }
 
@@ -1161,16 +1192,25 @@ impl AnimSample {
     }
 }
 
-/// Sample every animation channel at `time` (seconds) and produce a per-node
-/// TRS override table. When multiple animations target the same node
-/// (unusual but spec-legal), the last one wins for each component.
-/// MorphTargetWeights / cubic-spline are on the roadmap; linear + step cover
-/// the common case.
-fn sample_animations(loaded: &LoadedGltf, time: f32) -> Vec<AnimSample> {
+/// Sample animation channels at `time` (seconds) and produce a per-node TRS
+/// override table.
+///
+/// `animation_index` picks a specific clip; when `None` we play every
+/// animation stacked (last-write-wins on shared channels — the legacy
+/// behaviour). glTF assets ship animations as independent playable clips
+/// (idle, walk, run, ...) so the picker is what users normally want.
+/// Missing / out-of-range indices fall back to the stacked path.
+fn sample_animations(loaded: &LoadedGltf, time: f32, animation_index: Option<usize>) -> Vec<AnimSample> {
     let n_nodes = loaded.document.nodes().count();
     let mut samples = vec![AnimSample::default(); n_nodes];
 
-    for anim in loaded.document.animations() {
+    let animations: Box<dyn Iterator<Item = gltf::Animation>> = match animation_index {
+        Some(i) if i < loaded.document.animations().len() => {
+            Box::new(loaded.document.animations().nth(i).into_iter())
+        }
+        _ => Box::new(loaded.document.animations()),
+    };
+    for anim in animations {
         for channel in anim.channels() {
             let node_idx = channel.target().node().index();
             if node_idx >= n_nodes { continue; }
@@ -1406,35 +1446,46 @@ fn emit_mesh(
             loaded.buffers.get(buffer.index()).map(|v| v.as_slice())
         });
 
-        let Some(pos_iter) = reader.read_positions() else { continue; };
-        let mut positions_bind: Vec<Vec3> = pos_iter.map(Vec3::from).collect();
-        let mut normals_bind: Option<Vec<Vec3>> = reader.read_normals()
-            .map(|iter| iter.map(Vec3::from).collect());
-        let mut tangents_bind: Option<Vec<[f32; 4]>> = reader.read_tangents()
-            .map(|iter| iter.collect());
+        // gltf-rs's typed readers (`read_positions/normals/tangents`) work
+        // by reinterpreting raw accessor bytes as `f32` — which is wrong
+        // for KHR_mesh_quantization assets where POSITION/NORMAL/TANGENT
+        // are stored as normalized i8/u8/i16/u16 integers. We route
+        // through a helper that dispatches on `data_type()` and covers
+        // every spec-legal componentType.
+        let Some(pos_acc) = primitive.get(&gltf::Semantic::Positions) else { continue; };
+        let positions_raw = match read_vec3_f32(&pos_acc, loaded) {
+            Ok(v) => v, Err(_) => continue,
+        };
+        let mut positions_bind: Vec<Vec3> = positions_raw.iter()
+            .map(|p| Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64)).collect();
+        let mut normals_bind: Option<Vec<Vec3>> = primitive
+            .get(&gltf::Semantic::Normals)
+            .and_then(|acc| read_vec3_f32(&acc, loaded).ok())
+            .map(|v| v.iter()
+                .map(|n| Vec3::new(n[0] as f64, n[1] as f64, n[2] as f64)).collect());
+        let mut tangents_bind: Option<Vec<[f32; 4]>> = primitive
+            .get(&gltf::Semantic::Tangents)
+            .and_then(|acc| read_vec4_f32(&acc, loaded).ok());
 
         // Apply morph-target deltas in bind space (per glTF spec: morph
         // targets add position/normal/tangent deltas weighted by
         // node/mesh/animation weights, THEN skinning transforms the result).
+        // Morph deltas may be quantized under KHR_mesh_quantization too,
+        // so we go through the same f32-dispatch helpers as the base attrs.
         if let Some(weights) = morph_weights.filter(|w| !w.is_empty()) {
             for (i, target) in primitive.morph_targets().enumerate() {
                 let w = weights.get(i).copied().unwrap_or(0.0);
                 if w == 0.0 { continue; }
-                let target_reader = |acc: gltf::Accessor| {
-                    gltf::accessor::Iter::<[f32; 3]>::new(acc, |buf| {
-                        loaded.buffers.get(buf.index()).map(|v| v.as_slice())
-                    })
-                };
-                if let Some(iter) = target.positions().and_then(target_reader) {
-                    for (v, d) in positions_bind.iter_mut().zip(iter) {
+                if let Some(deltas) = target.positions().and_then(|acc| read_vec3_f32(&acc, loaded).ok()) {
+                    for (v, d) in positions_bind.iter_mut().zip(deltas.iter()) {
                         v.x += w as f64 * d[0] as f64;
                         v.y += w as f64 * d[1] as f64;
                         v.z += w as f64 * d[2] as f64;
                     }
                 }
                 if let Some(ns) = normals_bind.as_mut() {
-                    if let Some(iter) = target.normals().and_then(target_reader) {
-                        for (v, d) in ns.iter_mut().zip(iter) {
+                    if let Some(deltas) = target.normals().and_then(|acc| read_vec3_f32(&acc, loaded).ok()) {
+                        for (v, d) in ns.iter_mut().zip(deltas.iter()) {
                             v.x += w as f64 * d[0] as f64;
                             v.y += w as f64 * d[1] as f64;
                             v.z += w as f64 * d[2] as f64;
@@ -1442,8 +1493,11 @@ fn emit_mesh(
                     }
                 }
                 if let Some(ts) = tangents_bind.as_mut() {
-                    if let Some(iter) = target.tangents().and_then(target_reader) {
-                        for (t, d) in ts.iter_mut().zip(iter) {
+                    if let Some(deltas) = target.tangents().and_then(|acc| read_vec3_f32(&acc, loaded).ok()) {
+                        // Morph target tangent deltas are vec3 per spec
+                        // (the .w handedness is inherited from the base
+                        // tangent, not morphed).
+                        for (t, d) in ts.iter_mut().zip(deltas.iter()) {
                             t[0] += w * d[0];
                             t[1] += w * d[1];
                             t[2] += w * d[2];
@@ -1484,13 +1538,16 @@ fn emit_mesh(
             (pos, nrm, tan)
         };
 
-        let uvs: Vec<[f32; 2]> = reader
-            .read_tex_coords(0)
-            .map(|tc| tc.into_f32().collect())
+        // Texcoord accessors go through the same quantization-aware helper
+        // as positions/normals — gltf-rs's `.into_f32()` divides u16 by
+        // 65535 even when the accessor is `normalized: false`, which
+        // corrupts KHR_mesh_quantization texcoords (they're paired with a
+        // KHR_texture_transform that expects raw ints).
+        let uvs: Vec<[f32; 2]> = primitive.get(&gltf::Semantic::TexCoords(0))
+            .and_then(|acc| read_vec2_f32(&acc, loaded).ok())
             .unwrap_or_default();
-        let uvs1: Vec<[f32; 2]> = reader
-            .read_tex_coords(1)
-            .map(|tc| tc.into_f32().collect())
+        let uvs1: Vec<[f32; 2]> = primitive.get(&gltf::Semantic::TexCoords(1))
+            .and_then(|acc| read_vec2_f32(&acc, loaded).ok())
             .unwrap_or_default();
         // COLOR_0 may be vec3 or vec4 per glTF spec — the utils reader
         // hands us `[f32; 4]` in either case (alpha=1 padded for vec3).
@@ -1526,13 +1583,23 @@ fn apply_skinning(
     for i in 0..n {
         // Sum the (weight · joint_matrix) into one matrix, then apply. Loops
         // over both influence sets — up to 8 joints/weights per vertex per
-        // glTF spec (JOINTS_0/WEIGHTS_0 and JOINTS_1/WEIGHTS_1).
+        // glTF spec (JOINTS_0/WEIGHTS_0 and JOINTS_1/WEIGHTS_1). Renormalise
+        // the raw weights to sum to 1 first — the spec requires it, but
+        // exporters (Blender, gltfpack) sometimes emit slightly-off sums
+        // (float drift, or quantized u8/u16 weights that don't quite hit
+        // 255/65535). Un-normalised weights leave the blended matrix
+        // shorter/longer than a pure rotation, which visibly shrinks or
+        // stretches deformed verts.
+        let raw_sum: f64 =
+            weights.get(i).copied().unwrap_or([0.0; 4]).iter().map(|w| *w as f64).sum::<f64>()
+          + weights1.get(i).copied().unwrap_or([0.0; 4]).iter().map(|w| *w as f64).sum::<f64>();
+        let norm = if raw_sum > 1e-9 { 1.0 / raw_sum } else { 1.0 };
         let mut m = [[0.0f64; 4]; 4];
         for (js_arr, ws_arr) in [(joints, weights), (joints1, weights1)] {
             let js = js_arr.get(i).copied().unwrap_or([0; 4]);
             let ws = ws_arr.get(i).copied().unwrap_or([0.0; 4]);
             for k in 0..4 {
-                let w = ws[k] as f64;
+                let w = ws[k] as f64 * norm;
                 if w == 0.0 { continue; }
                 let idx = js[k] as usize;
                 let Some(jm) = palette.get(idx) else { continue; };
@@ -1766,6 +1833,98 @@ impl<'a, N: Fn(usize, usize) -> Vec3> mikktspace::Geometry for MikkTGeom<'a, N> 
 /// (already-unit) face normal. Returns `[t.x, t.y, t.z, w]` where `w = ±1`
 /// is the bitangent handedness (matches glTF's TANGENT convention so the
 /// shader path is the same as pre-shipped tangents).
+/// Read a vec2 vertex-attribute accessor (TEXCOORD_N). Same dispatch as
+/// `read_vec_f32` — needed because gltf-rs's typed texcoord reader
+/// UNCONDITIONALLY divides u8/u16 by their max, which is wrong for
+/// KHR_mesh_quantization assets where texcoords are stored as raw
+/// non-normalized integers and dequantized by a paired KHR_texture_transform.
+fn read_vec2_f32(accessor: &gltf::Accessor, loaded: &LoadedGltf) -> Result<Vec<[f32; 2]>, String> {
+    read_vec_f32::<2>(accessor, loaded)
+}
+
+/// Read a vec3 vertex-attribute accessor (POSITION, NORMAL, TANGENT delta,
+/// morph-target delta) as tightly-packed `[f32; 3]` per point, dispatching
+/// on `KHR_mesh_quantization` component types. See `read_vec_f32` for the
+/// full dequantization rules and the sparse-accessor caveat.
+fn read_vec3_f32(accessor: &gltf::Accessor, loaded: &LoadedGltf) -> Result<Vec<[f32; 3]>, String> {
+    read_vec_f32::<3>(accessor, loaded)
+}
+
+/// Read a vec4 vertex-attribute accessor (TANGENT). Same story as
+/// `read_vec3_f32` — only shape and stride differ.
+fn read_vec4_f32(accessor: &gltf::Accessor, loaded: &LoadedGltf) -> Result<Vec<[f32; 4]>, String> {
+    read_vec_f32::<4>(accessor, loaded)
+}
+
+/// Read a vec-N vertex attribute as `[f32; N]` per element, dequantizing
+/// per glTF 2.0 §3.6.2.2 for any of the componentTypes KHR_mesh_quantization
+/// legalises for POSITION / NORMAL / TANGENT (BYTE, UNSIGNED_BYTE, SHORT,
+/// UNSIGNED_SHORT — normalized) as well as the base `FLOAT` case.
+///
+///   normalized `u8`  →  `f = i / 255`
+///   normalized `u16` →  `f = i / 65535`
+///   normalized `i8`  →  `f = max(i / 127,  −1.0)`  (clamps −128 to −1)
+///   normalized `i16` →  `f = max(i / 32767, −1.0)`
+///   non-normalized   →  `f = i as f32`
+///
+/// gltf-rs's typed readers reinterpret bytes as `f32` and produce garbage
+/// on quantized attributes; this helper is the single point of correctness.
+///
+/// Sparse accessors: not overlaid here. `KHR_mesh_quantization` + sparse
+/// combined is spec-legal but essentially unheard-of in the wild (sparse
+/// is mostly used for morph targets, which typically stay `F32`). Callers
+/// hit gltf-rs's typed reader when the accessor is `F32` non-sparse and
+/// this helper only for the quantized case — sparse-quantized will render
+/// wrong; open an issue if you see it.
+fn read_vec_f32<const N: usize>(accessor: &gltf::Accessor, loaded: &LoadedGltf) -> Result<Vec<[f32; N]>, String> {
+    use gltf::accessor::DataType;
+    let view = accessor.view().ok_or("attribute accessor missing bufferView")?;
+    let buf = loaded.buffers.get(view.buffer().index())
+        .ok_or("attribute buffer index out of range")?;
+    let count = accessor.count();
+    let dt = accessor.data_type();
+    let comp_size = dt.size();
+    let elem_size = comp_size * N;
+    let stride = view.stride().unwrap_or(elem_size);
+    let base = view.offset() + accessor.offset();
+    let normalized = accessor.normalized();
+
+    // Scale factor per glTF §3.6.2.2. Non-normalized integer paths use 1.0
+    // and produce plain integer-to-float casts (rarely used for these
+    // attributes but spec-legal).
+    let scale = match (dt, normalized) {
+        (DataType::I8,  true) => 1.0 / 127.0,
+        (DataType::U8,  true) => 1.0 / 255.0,
+        (DataType::I16, true) => 1.0 / 32767.0,
+        (DataType::U16, true) => 1.0 / 65535.0,
+        _ => 1.0,
+    };
+    let signed_clamp = normalized && matches!(dt, DataType::I8 | DataType::I16);
+
+    let mut out: Vec<[f32; N]> = Vec::with_capacity(count);
+    for i in 0..count {
+        let o = base + i * stride;
+        if o + elem_size > buf.len() {
+            return Err("attribute read overruns buffer".into());
+        }
+        let mut elem = [0.0f32; N];
+        for k in 0..N {
+            let ko = o + k * comp_size;
+            let f: f32 = match dt {
+                DataType::F32 => f32::from_le_bytes(buf[ko..ko+4].try_into().unwrap()),
+                DataType::I8  => (buf[ko] as i8 as f32) * scale,
+                DataType::U8  => (buf[ko] as f32) * scale,
+                DataType::I16 => i16::from_le_bytes(buf[ko..ko+2].try_into().unwrap()) as f32 * scale,
+                DataType::U16 => u16::from_le_bytes(buf[ko..ko+2].try_into().unwrap()) as f32 * scale,
+                DataType::U32 => u32::from_le_bytes(buf[ko..ko+4].try_into().unwrap()) as f32,
+            };
+            elem[k] = if signed_clamp { f.max(-1.0) } else { f };
+        }
+        out.push(elem);
+    }
+    Ok(out)
+}
+
 fn compute_flat_tangent(
     p0: Vec3, p1: Vec3, p2: Vec3,
     uv0: [f32; 2], uv1: [f32; 2], uv2: [f32; 2],

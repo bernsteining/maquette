@@ -418,7 +418,20 @@ fn shade_triangle(
     // Each texture then converts this to its own mip level as
     // `0.5 · log2(lod_scale · width · height)`. Big screen area / small UV
     // means "oversampled — use mip 0"; the reverse means "use a smaller mip".
-    let lod_scale = compute_lod_scale(&prepared.pts, tri) as f32;
+    //
+    // KHR_texture_transform correction: the raw UV area assumes UVs live in
+    // roughly `[0, 1]`. Under KHR_mesh_quantization + gltfpack the vertex UV
+    // may be a raw 12-bit integer (0..~4095) meant to be dequantized by the
+    // material's `KHR_texture_transform.scale`. Without the correction below
+    // the raw UV area is ~4095² × the true area, driving LOD into the
+    // highest mip and blurring texture detail catastrophically. We fold the
+    // base-color transform's scale in — assets almost always use one
+    // transform across all textures, so this correction is applied uniformly.
+    let xform_area_scale = {
+        let s = material.xform_base.scale;
+        (s[0] * s[1]).abs()
+    };
+    let lod_scale = compute_lod_scale(&prepared.pts, tri) as f32 * xform_area_scale;
 
     let shader = MaterialShader::new(pbr, material, &prepared.textures, mask_cutoff, lod_scale);
     buffer.rasterize_triangle_shaded(
@@ -570,7 +583,25 @@ fn pick_glb_camera<'a>(scene: &'a Scene, config: &RenderConfig) -> Option<&'a cr
     if let Some(idx) = config.camera_index {
         return scene.cameras.get(idx);
     }
+    // Auto-pick the first authored camera when the caller didn't ask for a
+    // specific one and hasn't overridden the framing (position, azimuth,
+    // distance, fov). Matches viewer convention — an asset that ships a
+    // camera almost always expects you to use it. Callers that want the
+    // orbit fallback pass `camera: [x, y, z]` or a spherical override; the
+    // check on `camera_auto_use` (default true) is the opt-out.
+    if config.camera_auto_use && scene.cameras.first().is_some() && !user_overrode_framing(config) {
+        return scene.cameras.first();
+    }
     None
+}
+
+/// Did the caller explicitly override camera framing? If so, `pick_glb_camera`
+/// shouldn't silently override with a glTF-authored camera on top.
+fn user_overrode_framing(cfg: &RenderConfig) -> bool {
+    cfg.camera.is_some()
+        || cfg.azimuth != 0.0
+        || cfg.elevation != 0.0
+        || cfg.distance.is_some()
 }
 
 /// Per-triangle LOD scale: `|Δuv × Δuv| / |Δp × Δp|` — the ratio of the

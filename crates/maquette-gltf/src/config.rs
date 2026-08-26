@@ -149,6 +149,19 @@ pub struct RenderConfig {
     /// Pick a glTF-authored camera by its index in `document.cameras()`.
     /// Falls back to `camera_name` matching if that's also set (name wins).
     pub camera_index: Option<usize>,
+    /// When neither `camera_name` nor `camera_index` is set (and the caller
+    /// hasn't overridden framing via `camera`/`azimuth`/`elevation`/`distance`),
+    /// auto-pick the first camera declared in the asset. Default true — matches
+    /// mainstream viewer convention. Set false to force the orbit fallback.
+    pub camera_auto_use: bool,
+    /// glTF scene selector — index into `document.scenes()`. `None` picks the
+    /// document's authored default scene (or scene 0 as a fallback). Only
+    /// useful for assets that declare more than one scene as switchable roots.
+    pub scene_index: Option<usize>,
+    /// Animation clip selector — index into `document.animations()`. `None`
+    /// plays every clip stacked (last-write-wins per node channel). Assets
+    /// typically ship separate clips (idle/walk/run/...); set this to pick one.
+    pub animation_index: Option<usize>,
 
     // Shading
     pub light_dir: [f64; 3],
@@ -227,6 +240,9 @@ impl Default for RenderConfig {
             auto_fit: true,
             camera_name: None,
             camera_index: None,
+            camera_auto_use: true,
+            scene_index: None,
+            animation_index: None,
             light_dir: [1.0, 2.0, 3.0],
             ambient: 0.2,
             cull_backface: true,
@@ -273,6 +289,9 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
             "auto_fit"      => if let Some(b) = v.as_bool() { cfg.auto_fit = b; }
             "camera_name"   => if let Some(s) = v.as_str()  { cfg.camera_name = Some(s.to_string()); }
             "camera_index"  => if let Some(n) = as_usize(v) { cfg.camera_index = Some(n); }
+            "camera_auto_use" => if let Some(b) = v.as_bool() { cfg.camera_auto_use = b; }
+            "scene_index"   => if let Some(n) = as_usize(v) { cfg.scene_index = Some(n); }
+            "animation_index" => if let Some(n) = as_usize(v) { cfg.animation_index = Some(n); }
             "light_dir"     => if let Some(a) = as_vec3(v) { cfg.light_dir = a; }
             "ambient"       => if let Some(f) = v.as_f64() { cfg.ambient = f.clamp(0.0, 1.0); }
             "cull_backface" => if let Some(b) = v.as_bool() { cfg.cull_backface = b; }
