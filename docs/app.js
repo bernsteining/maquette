@@ -1187,6 +1187,29 @@ function applyModelDefaults(name) {
   if (ov) for (const k in ov) state[k] = structuredClone(ov[k]);
 }
 
+// Curated "get more models" targets, picked by file kind. Each is the
+// smallest useful landing page for that format — canonical/curated first
+// (Khronos, Stanford, official OpenSCAD examples), broader libraries
+// second (Sketchfab, Thingiverse) via the docs' own "Where to find
+// sample models" sections.
+const GET_MODELS_LINKS = {
+  gltf: { label: "More glTF assets →",     url: "https://github.com/KhronosGroup/glTF-Sample-Assets" },
+  scad: { label: "More OpenSCAD examples →", url: "https://github.com/openscad/openscad/tree/master/examples" },
+  obj:  { label: "More OBJ models →",      url: "https://github.com/alecjacobson/common-3d-test-models" },
+  stl:  { label: "More STL models →",      url: "https://www.thingiverse.com/" },
+  ply:  { label: "More PLY scans →",       url: "https://graphics.stanford.edu/data/3Dscanrep/" },
+};
+function refreshGetModelsLink() {
+  const el = $("get-models"); if (!el) return;
+  const kind = $("preset").value === "__scad__" ? "scad"
+             : isGltf(model && model.name)      ? "gltf"
+             : ext(model && model.name || "");
+  const spec = GET_MODELS_LINKS[kind];
+  if (!spec) { el.textContent = ""; el.removeAttribute("href"); return; }
+  el.textContent = spec.label;
+  el.href = spec.url;
+}
+
 // Shared ingestion for both dropped/browsed files and built-in presets.
 function ingest(name, bytes) {
   const kindChanged = kindDiffers(model && model.name, name);
@@ -1197,6 +1220,7 @@ function ingest(name, bytes) {
   // wipe + refill so the form isn't reading undefined slots.
   if (kindChanged) { resetState(); buildForm(); }
   syncFmtToggleForKind(name);
+  refreshGetModelsLink();
   // Probe animation length + retype the Animation-time field to a slider
   // when the asset actually has animations. Async: fires alongside the
   // render, doesn't gate it.
@@ -1334,6 +1358,7 @@ async function enterScadMode(initial) {
   setTab("scad");
   for (const k in SCAD_DEFAULTS) state[k] = structuredClone(SCAD_DEFAULTS[k]);
   buildForm(); refreshVisibility();
+  refreshGetModelsLink();
   await compileScad();
 }
 $("scad-src").addEventListener("input", () => {
