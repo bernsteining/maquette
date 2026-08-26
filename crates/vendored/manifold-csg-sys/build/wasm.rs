@@ -142,11 +142,21 @@ fn bail_with_diagnostics(ctx: &BuildContext, stage: &str, build_dir: &Path) -> !
 fn find_llvm() -> (PathBuf, PathBuf, Vec<PathBuf>) {
     let candidates = candidate_llvm_bin_dirs();
 
+    // Header override path: still prefer clang++ from the candidate list
+    // (which honors WASM_CXX_SHIM_LLVM_BIN_DIR), only falling back to
+    // PATH `which` as a last resort. Otherwise on Debian, setting
+    // LIBCXX_HEADERS=<emsdk-libcxx> alone silently pairs those headers
+    // with `/usr/bin/clang++` (clang-14), whose builtin stdint.h clashes
+    // with a modern libc++.
     if let Ok(headers) = env::var("WASM_CXX_SHIM_LIBCXX_HEADERS") {
         let headers = PathBuf::from(headers);
-        let clangpp = which("clang++")
+        let clangpp = candidates
+            .iter()
+            .map(|d| d.join("clang++"))
+            .find(|p| p.exists())
+            .or_else(|| which("clang++"))
             .or_else(|| which("clang"))
-            .expect("clang++/clang not found on PATH");
+            .expect("clang++/clang not found on PATH or in candidate LLVM dirs");
         warn_if_system_libcxx(&headers);
         return (clangpp, headers, candidates);
     }
