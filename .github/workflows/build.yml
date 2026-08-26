@@ -1,0 +1,199 @@
+name: Build plugins
+
+# Verifies all three Typst plugins compile from source on every push + PR.
+# One matrix job per plugin, each running the Makefile target that is the
+# single source of truth for the local build. Artifacts are uploaded so
+# maintainers can inspect the wasm shipped by CI (byte-diff vs the copy
+# committed at docs/ catches drift between local + CI).
+#
+# The scad plugin has extra dependencies (cmake + LLVM + emsdk) because
+# manifold-csg-sys builds the Manifold C++ CSG kernel from source via the
+# wasm-cxx-shim helper. See the scad job for details.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BINARYEN_VERSION: version_128 # matches local wasm-opt v128
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - name: maquette
+            make_target: wasm
+            wasm_path: maquette/maquette.wasm
+          - name: maquette-gltf
+            make_target: gltf-wasm
+            wasm_path: crates/maquette-gltf/maquette-gltf.wasm
+          - name: maquette-scad
+            make_target: scad-wasm
+            wasm_path: crates/maquette-scad/maquette-scad.wasm
+
+    name: ${{ matrix.plugin.name }}
+    runs-on: ubuntu-latest
+    container: rust:1.94.1-slim-bookworm
+
+    steps:
+      - name: System deps (git, curl, make; scad also needs cmake+clang+libc++)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates make
+          if [ "${{ matrix.plugin.name }}" = "maquette-scad" ]; then
+            # cmake fetches Manifold+Clipper2 sources; clang/lld/libc++ back
+            # the wasm-cxx-shim toolchain for the wasm32-unknown-unknown build.
+            # System clang here is LLVM 19 on bookworm — used for the fallback
+            # (non-LTO) build path. Emsdk (installed below) provides LLVM 23
+            # for the LTO path via the Makefile's EMSDK_WASMLD switch.
+            apt-get install -y --no-install-recommends \
+              cmake clang lld libc++-dev libc++abi-dev python3
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Ensure wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo & target
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/cargo/registry
+            /usr/local/cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.plugin.name }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.plugin.name }}-
+
+      - name: Install binaryen ${{ env.BINARYEN_VERSION }}
+        run: |
+          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar -xz
+          echo "$PWD/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
+
+      # Emsdk provides LLVM 22+/clang++/wasm-ld for scad's LTO recipe (see
+      # Makefile scad-wasm target). Pinned + cached so we don't re-download
+      # ~400 MB every job.
+      - name: Cache emsdk (scad LTO)
+        if: matrix.plugin.name == 'maquette-scad'
+        id: cache-emsdk
+        uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}
+        env:
+          EMSDK_VERSION: 6.0.8
+
+      - name: Install emsdk (scad LTO)
+        if: matrix.plugin.name == 'maquette-scad' && steps.cache-emsdk.outputs.cache-hit != 'true'
+        env:
+          EMSDK_VERSION: 6.0.8
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          ~/emsdk/emsdk install "$EMSDK_VERSION"
+          ~/emsdk/emsdk activate "$EMSDK_VERSION"
+
+      - name: Versions
+        shell: bash
+        run: |
+          rustc --version
+          wasm-opt --version
+          if [ "${{ matrix.plugin.name }}" = "maquette-scad" ]; then
+            cmake --version | head -1
+            clang++ --version | head -1
+            [ -d ~/emsdk ] && echo "emsdk: $(cat ~/emsdk/.emscripten_version 2>/dev/null || echo present)"
+          fi
+
+      - name: Build (via Makefile — single source of truth for flags)
+        shell: bash
+        run: |
+          # For scad: point EMSDK at the emsdk root so the wasm-cxx-shim
+          # toolchain probes $EMSDK/upstream/bin for clang++/wasm-ld, and
+          # the Makefile's EMSDK_WASMLD switch enables the LTO recipe.
+          # Same env-var contract as local dev — no CI-specific logic.
+          if [ "${{ matrix.plugin.name }}" = "maquette-scad" ] && [ -d ~/emsdk ]; then
+            export EMSDK=$HOME/emsdk
+          fi
+          # Path remaps: strip container-specific prefixes so nothing leaks into the wasm.
+          make ${{ matrix.plugin.make_target }} REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
+
+      - name: Verify no build paths leaked into wasm
+        run: |
+          if grep -aE '/(home|root|Users)/[A-Za-z0-9._-]' ${{ matrix.plugin.wasm_path }}; then
+            echo "::error::build path leaked into ${{ matrix.plugin.wasm_path }}"
+            exit 1
+          fi
+          echo "no path leaks ✓"
+
+      # Functional drift check. Byte-identical wasms across machines are
+      # impractical (LLVM patch-version drift, temp-path hashes, non-
+      # deterministic optimization passes) — so instead we run BOTH the
+      # CI-built wasm and the committed docs/ copy through the harness on
+      # a canonical asset and compare their outputs. Same output bytes ⇒
+      # functionally equivalent, even if the wasm binaries differ. This
+      # catches real regressions (algorithm changes) while ignoring cosmetic
+      # ones (compiler-generated symbol names, .rodata ordering).
+      - name: Build harness (for functional drift check)
+        run: cargo build --release --manifest-path harness/Cargo.toml
+      - name: Functional drift check vs committed copy
+        shell: bash
+        env:
+          PLUGIN: ${{ matrix.plugin.name }}
+          WASM: ${{ matrix.plugin.wasm_path }}
+        run: |
+          committed="docs/$(basename $WASM)"
+          if [ ! -f "$committed" ]; then
+            echo "no committed copy at $committed — skipping drift check"
+            exit 0
+          fi
+          # Per-plugin canonical smoke input (small, fast, deterministic).
+          # If we get bit-identical output on this input from both wasms,
+          # they're functionally the same — regardless of binary drift.
+          case "$PLUGIN" in
+            maquette)
+              cfg=$(mktemp); echo '{"width":128,"height":128,"azimuth":0,"elevation":0,"background":"#f0f0f0","antialias":1}' > "$cfg"
+              args=(render_obj_png examples/data/teapot.obj "$cfg")
+              ;;
+            maquette-gltf)
+              cfg=$(mktemp); echo '{"width":128,"height":128,"camera":[2.5,1.5,2.5],"center":[0,0,0],"up":[0,1,0],"fov":40,"background":"#181820"}' > "$cfg"
+              args=(render_gltf examples/data/gltf/helmet.blg "$cfg")
+              ;;
+            maquette-scad)
+              cfg=$(mktemp); echo '{"fn":32}' > "$cfg"
+              params=$(mktemp); echo '{}' > "$params"
+              extras=$(mktemp); : > "$extras"
+              args=(build_scad examples/scad/data/nut.scad "$cfg" "$params" "$extras")
+              ;;
+          esac
+          ci_out=$(mktemp); co_out=$(mktemp)
+          harness/target/release/harness "$WASM"       "${args[@]}" > "$ci_out"
+          harness/target/release/harness "$committed"  "${args[@]}" > "$co_out"
+          ci_sha=$(sha1sum "$ci_out" | cut -c1-12)
+          co_sha=$(sha1sum "$co_out" | cut -c1-12)
+          if [ "$ci_sha" = "$co_sha" ]; then
+            echo "output sha match ($ci_sha) — functionally equivalent ✓"
+          else
+            echo "::error::functional drift: CI wasm output sha=$ci_sha vs committed output sha=$co_sha"
+            exit 1
+          fi
+
+      - name: Report size + sha
+        run: |
+          echo "### ${{ matrix.plugin.name }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls -la ${{ matrix.plugin.wasm_path }} >> $GITHUB_STEP_SUMMARY
+          sha1sum ${{ matrix.plugin.wasm_path }} >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.plugin.name }}-wasm
+          path: ${{ matrix.plugin.wasm_path }}
+          retention-days: 14
