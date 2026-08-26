@@ -7,7 +7,7 @@
 <style>
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --line: #e7e8ec; --ink: #1a1c22; --ink-soft: #40434d;
-    --muted: #8a909c; --accent: #4f46e5; --accent-soft: #eef0fe;
+    --muted: #6b7280; --accent: #4f46e5; --accent-soft: #eef0fe;  /* was #8a909c — sub-WCAG contrast on --bg (3.5:1); #6b7280 is 4.9:1 */
     --code-bg: #fbfbfd; --err: #dc2626; --shadow: 0 1px 2px rgba(20,22,30,.05), 0 8px 24px -12px rgba(20,22,30,.14);
     --s-dir: #7c3aed; --s-str: #0e9f6e; --s-num: #d97706; --s-key: #2563eb; --s-kw: #db2777; --s-punct: #9aa0ac;
   }
@@ -18,6 +18,12 @@
       --code-bg: #121319; --err: #f87171; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.6);
       --s-dir: #c792ea; --s-str: #9ece6a; --s-num: #ff9e64; --s-key: #7aa2f7; --s-kw: #f7768e; --s-punct: #565f7a;
     }
+  }
+  /* Respect reduced-motion — kill all transitions/animations for users who ask.
+     Helps with vestibular disorders (motion sickness, migraines) triggered by
+     unexpected UI movement. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -58,7 +64,9 @@
     margin-left: auto; font: inherit; font-size: 11.5px; font-weight: 500;
     border: 1px solid var(--line); background: transparent; color: var(--ink-soft);
     padding: 3px 10px; border-radius: 7px; cursor: pointer; transition: .12s;
+    white-space: nowrap; flex: none;    /* long picker labels (Damaged Helmet...) squeezed this to 2 lines */
   }
+  .file-row select { min-width: 0; flex: 0 1 auto; }   /* let the picker shrink instead of stealing space from the button */
   .file-row button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
   /* "get more models" link — sits inside #tools, stacked under Download so it
      reads as an extension of that button rather than picker-adjacent. Empty
@@ -186,6 +194,7 @@
   #tools button { font: inherit; font-size: 11.5px; font-weight: 500; border: 1px solid var(--line);
     background: var(--panel); color: var(--ink-soft); padding: 4px 10px; border-radius: 7px; cursor: pointer; box-shadow: var(--shadow); transition: .12s; }
   #tools button:hover { color: var(--accent); border-color: var(--accent); }
+  #tools button:focus-visible, .file-row button:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   #tools .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; box-shadow: var(--shadow); }
   #tools .seg button { flex: 1; border: none; border-radius: 0; box-shadow: none; padding: 4px 11px; }
   #tools .seg button + button { border-left: 1px solid var(--line); }
@@ -224,9 +233,10 @@
     <section id="panel">
       <div class="panel-head">
         <div class="file-row">
-          model: <select id="preset" title="Load a built-in model"></select>
-          <button id="browse">Load file…</button>
-          <input id="file" type="file" accept=".obj,.stl,.ply,.scad,.glb" hidden>
+          <label for="preset">model:</label>
+          <select id="preset" title="Load a built-in model" aria-label="Model preset"></select>
+          <button id="browse" aria-label="Load a .obj/.stl/.ply/.scad/.glb file from disk">Load file…</button>
+          <input id="file" type="file" accept=".obj,.stl,.ply,.scad,.glb" aria-hidden="true" tabindex="-1" hidden>
         </div>
         <div class="search-row"><input id="search" type="search" placeholder="Search settings…" autocomplete="off"></div>
       </div>
@@ -268,8 +278,8 @@
       </div>
       <img id="out" alt="render" draggable="false">
       <canvas id="outc" style="display:none"></canvas>
-      <div id="rtime"></div>
-      <div id="err"></div>
+      <div id="rtime" aria-live="polite" aria-atomic="true"></div>
+      <div id="err" role="alert" aria-live="assertive" aria-atomic="true"></div>
       <div id="hint">drag to orbit · scroll to zoom · drop a .obj/.stl/.ply/.glb</div>
     </section>
   </main>
