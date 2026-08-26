@@ -193,6 +193,20 @@ pub struct Material {
     // wavelength (blue) refracts more. Zero factor = no dispersion.
     pub dispersion: f32,
 
+    // KHR_materials_diffuse_transmission — light diffusely transmitted through
+    // the surface (thin cloth, backlit leaves, paper). Distinct from
+    // `KHR_materials_transmission` which is refractive (glass). At the shader,
+    // adds a `max(0, -N·L)` back-lit lambertian term tinted by
+    // `diffuse_transmission_color`. Zero factor = disabled (no perf cost).
+    pub diffuse_transmission_factor:  f32,
+    pub diffuse_transmission_color:   [f32; 3],
+    pub diffuse_transmission_texture: Option<u32>,
+    pub diffuse_transmission_color_texture: Option<u32>,
+    pub texcoord_diffuse_transmission:       u8,
+    pub texcoord_diffuse_transmission_color: u8,
+    pub xform_diffuse_transmission:       TextureTransform,
+    pub xform_diffuse_transmission_color: TextureTransform,
+
     /// Values derived from the fields above that don't change per-triangle.
     /// Populated once at scene flatten and read by `MaterialShader::new` so
     /// per-triangle setup skips transcendentals (`.cos()`, `.sin()`, `.powf()`)
@@ -369,6 +383,14 @@ impl Material {
             anisotropy_texture:  None,
             texcoord_anisotropy: 0,
             dispersion: 0.0,
+            diffuse_transmission_factor:  0.0,
+            diffuse_transmission_color:   [1.0, 1.0, 1.0],
+            diffuse_transmission_texture: None,
+            diffuse_transmission_color_texture: None,
+            texcoord_diffuse_transmission:       0,
+            texcoord_diffuse_transmission_color: 0,
+            xform_diffuse_transmission:       TextureTransform::IDENTITY,
+            xform_diffuse_transmission_color: TextureTransform::IDENTITY,
             precomp: MaterialPrecomp::default(),
         };
         m.recompute_precomp();
@@ -739,6 +761,7 @@ fn collect_materials(loaded: &LoadedGltf) -> Vec<Material> {
         let iridescence = parse_iridescence(&m);
         let anisotropy = parse_anisotropy(&m);
         let dispersion = parse_dispersion(&m);
+        let diffuse_transmission = parse_diffuse_transmission(&m);
         // KHR_materials_pbrSpecularGlossiness — legacy alternative to the
         // metallic-roughness workflow. Convert to MR at load time so the shader
         // only needs one code path. When present, overrides pbr_metallic_roughness.
@@ -834,6 +857,16 @@ fn collect_materials(loaded: &LoadedGltf) -> Vec<Material> {
             texcoord_anisotropy: anisotropy.texcoord,
 
             dispersion,
+
+            diffuse_transmission_factor:  diffuse_transmission.factor,
+            diffuse_transmission_color:   diffuse_transmission.color,
+            diffuse_transmission_texture: diffuse_transmission.texture,
+            diffuse_transmission_color_texture: diffuse_transmission.color_texture,
+            texcoord_diffuse_transmission:       diffuse_transmission.texcoord,
+            texcoord_diffuse_transmission_color: diffuse_transmission.texcoord_color,
+            xform_diffuse_transmission:       diffuse_transmission.xform,
+            xform_diffuse_transmission_color: diffuse_transmission.xform_color,
+
             precomp: MaterialPrecomp::default(),
         });
     }
@@ -912,6 +945,91 @@ struct AnisotropyCfg {
     rotation: f32,
     texture: Option<u32>,
     texcoord: u8,
+}
+
+/// Parsed KHR_materials_diffuse_transmission bundle (defaults per spec).
+struct DiffuseTransmissionCfg {
+    factor: f32,
+    color: [f32; 3],
+    texture: Option<u32>,
+    color_texture: Option<u32>,
+    texcoord: u8,
+    texcoord_color: u8,
+    xform: TextureTransform,
+    xform_color: TextureTransform,
+}
+
+impl Default for DiffuseTransmissionCfg {
+    fn default() -> Self {
+        Self {
+            factor: 0.0,
+            color: [1.0, 1.0, 1.0],
+            texture: None,
+            color_texture: None,
+            texcoord: 0,
+            texcoord_color: 0,
+            xform: TextureTransform::IDENTITY,
+            xform_color: TextureTransform::IDENTITY,
+        }
+    }
+}
+
+/// Extract KHR_materials_diffuse_transmission from a material. Not in gltf-rs's
+/// feature list — parsed from the raw JSON extension map. Spec:
+///   https://github.com/KhronosGroup/glTF/tree/main/extensions/2.0/Khronos/KHR_materials_diffuse_transmission
+///
+/// The extension adds a diffuse lobe for light passing THROUGH the surface
+/// (thin cloth, backlit leaves, paper). `diffuseTransmissionTexture` sampled
+/// from the .a channel; `diffuseTransmissionColorTexture` from RGB.
+fn parse_diffuse_transmission(m: &gltf::Material) -> DiffuseTransmissionCfg {
+    let mut cfg = DiffuseTransmissionCfg::default();
+    let Some(ext) = m.extension_value("KHR_materials_diffuse_transmission") else { return cfg; };
+    if let Some(v) = ext.get("diffuseTransmissionFactor").and_then(|x| x.as_f64()) {
+        cfg.factor = (v as f32).clamp(0.0, 1.0);
+    }
+    if let Some(arr) = ext.get("diffuseTransmissionColorFactor").and_then(|x| x.as_array()) {
+        if arr.len() >= 3 {
+            cfg.color = [
+                arr[0].as_f64().unwrap_or(1.0) as f32,
+                arr[1].as_f64().unwrap_or(1.0) as f32,
+                arr[2].as_f64().unwrap_or(1.0) as f32,
+            ];
+        }
+    }
+    if let Some(t) = ext.get("diffuseTransmissionTexture") {
+        if let Some(idx) = t.get("index").and_then(|x| x.as_u64()) { cfg.texture = Some(idx as u32); }
+        if let Some(tc)  = t.get("texCoord").and_then(|x| x.as_u64()) { cfg.texcoord = clamp_texcoord(tc as u32); }
+        cfg.xform = parse_texture_transform_json(t);
+    }
+    if let Some(t) = ext.get("diffuseTransmissionColorTexture") {
+        if let Some(idx) = t.get("index").and_then(|x| x.as_u64()) { cfg.color_texture = Some(idx as u32); }
+        if let Some(tc)  = t.get("texCoord").and_then(|x| x.as_u64()) { cfg.texcoord_color = clamp_texcoord(tc as u32); }
+        cfg.xform_color = parse_texture_transform_json(t);
+    }
+    cfg
+}
+
+/// Extract `KHR_texture_transform` from a raw JSON `textureInfo` (used by
+/// the extension parsers that go through `extension_value` rather than
+/// gltf-rs's typed API). Returns identity when the transform is missing.
+fn parse_texture_transform_json(t: &serde_json::Value) -> TextureTransform {
+    let Some(tt) = t.get("extensions").and_then(|e| e.get("KHR_texture_transform")) else {
+        return TextureTransform::IDENTITY;
+    };
+    let scale = tt.get("scale").and_then(|s| s.as_array()).map(|a| [
+        a.get(0).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+        a.get(1).and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+    ]).unwrap_or([1.0, 1.0]);
+    let offset = tt.get("offset").and_then(|s| s.as_array()).map(|a| [
+        a.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+        a.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32,
+    ]).unwrap_or([0.0, 0.0]);
+    let rot = tt.get("rotation").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    TextureTransform {
+        scale, offset,
+        rot_cos: rot.cos(),
+        rot_sin: rot.sin(),
+    }
 }
 
 /// Extract KHR_materials_iridescence from a material's raw extension map.

@@ -496,6 +496,18 @@ pub struct MaterialShader<'a> {
     anisotropy_sin_rot: v128,
     has_anisotropy: bool,
 
+    // KHR_materials_diffuse_transmission — matte back-side transmission (thin
+    // cloth, backlit leaves). Adds a lambertian lobe on `max(0, -N·L)` tinted
+    // by `dt_color`. Textures modulate the factor / color per pixel. Zero
+    // factor → skip the whole lobe.
+    diffuse_transmission_tex:       Option<&'a Texture>,
+    diffuse_transmission_color_tex: Option<&'a Texture>,
+    lod_diffuse_transmission:       f32,
+    lod_diffuse_transmission_color: f32,
+    diffuse_transmission_factor: v128,
+    dt_color_r: v128, dt_color_g: v128, dt_color_b: v128,
+    has_diffuse_transmission: bool,
+
     unlit: bool,
     /// glTF `doubleSided` — the shader flips the interpolated normal on
     /// back-facing lanes so lighting works either side. Culling still happens
@@ -631,6 +643,16 @@ impl<'a> MaterialShader<'a> {
             anisotropy_strength:          f32x4_splat(material.anisotropy_strength),
             anisotropy_cos_rot:           f32x4_splat(material.precomp.anisotropy_cos_rot),
             anisotropy_sin_rot:           f32x4_splat(material.precomp.anisotropy_sin_rot),
+
+            diffuse_transmission_tex:       tex(material.diffuse_transmission_texture),
+            diffuse_transmission_color_tex: tex(material.diffuse_transmission_color_texture),
+            lod_diffuse_transmission:       lod_for(tex(material.diffuse_transmission_texture)),
+            lod_diffuse_transmission_color: lod_for(tex(material.diffuse_transmission_color_texture)),
+            diffuse_transmission_factor:    f32x4_splat(material.diffuse_transmission_factor),
+            dt_color_r: f32x4_splat(material.diffuse_transmission_color[0]),
+            dt_color_g: f32x4_splat(material.diffuse_transmission_color[1]),
+            dt_color_b: f32x4_splat(material.diffuse_transmission_color[2]),
+            has_diffuse_transmission:       material.diffuse_transmission_factor > 0.0,
             has_anisotropy:               material.anisotropy_strength > 0.0,
 
             unlit: material.unlit,
@@ -1023,6 +1045,22 @@ impl<'a> PixelShader for MaterialShader<'a> {
             let mut base_r = f32x4_mul(f32x4_mul(f32x4_mul(f32x4_add(diff_r, spec_r), atten_r), n_dot_l), shadow_v);
             let mut base_g = f32x4_mul(f32x4_mul(f32x4_mul(f32x4_add(diff_g, spec_g), atten_g), n_dot_l), shadow_v);
             let mut base_b = f32x4_mul(f32x4_mul(f32x4_mul(f32x4_add(diff_b, spec_b), atten_b), n_dot_l), shadow_v);
+
+            // KHR_materials_diffuse_transmission — matte back-lit lambertian.
+            // Uses the flipped normal (max(0, -N·L)) so backlit surfaces glow
+            // even when the visible face is in shadow. Tinted by
+            // `diffuse_transmission_color`; the front-side kd already includes
+            // `(1 - metallic)` so the transmitted term does too — an all-metal
+            // surface has no transmission per spec.
+            if self.has_diffuse_transmission {
+                let ndl_back = f32x4_max(zero, f32x4_neg(dot_v3(nx_final, ny_final, nz_final, lx, ly, lz)));
+                let scale = f32x4_mul(
+                    f32x4_mul(one_minus_metallic, self.diffuse_transmission_factor),
+                    f32x4_mul(inv_pi, f32x4_mul(ndl_back, shadow_v)));
+                base_r = f32x4_add(base_r, f32x4_mul(f32x4_mul(self.dt_color_r, atten_r), scale));
+                base_g = f32x4_add(base_g, f32x4_mul(f32x4_mul(self.dt_color_g, atten_g), scale));
+                base_b = f32x4_add(base_b, f32x4_mul(f32x4_mul(self.dt_color_b, atten_b), scale));
+            }
 
             // KHR_materials_clearcoat — per-light layered attenuation + spec.
             // Uses clearcoat's own N + independent light dot products.
