@@ -61,12 +61,6 @@ make doc         # compile examples/documentation.pdf (a full walkthrough)
 
 Requires `cargo`, the `wasm32-unknown-unknown` target, and `wasm-opt` from [binaryen](https://github.com/WebAssembly/binaryen).
 
-## Design notes
-
-- **Everything runs in Typst's wasm sandbox at compile time.** No GPU, no network, no filesystem outside the `.typ` file's tree. Each render is deterministic — same input, same PDF, no external state.
-- **Shared render primitives.** Rasterizer, mipmapped texture sampler, SIMD scanline fill, shadow maps, SSAO/FXAA, HDR + IBL environments all live in `maquette-core`. `maquette-gltf` adds a PBR shader (Cook-Torrance GGX + Karis split-sum + WBOIT for translucents + every KHR_materials_* extension); `maquette-scad` adds a Manifold-based CSG evaluator; `maquette` (the root package) adds a Blinn-Phong / Gooch / cel / normal / wireframe pipeline with CAD-style feature toggles.
-- **Wasm SIMD (`v128`) throughout the hot paths.** Bilinear texture taps, IBL polynomial approximations, scanline coverage tests, RGB→RGBA output. The size-conscious build flags live in the [Makefile](Makefile).
-
 ## License
 
 MIT.
