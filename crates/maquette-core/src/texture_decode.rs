@@ -17,20 +17,26 @@ pub fn decode(bytes: &[u8], mime: Option<&str>) -> Result<DecodedImage, String> 
     let kind = match mime {
         Some("image/png")  => ImageKind::Png,
         Some("image/jpeg") => ImageKind::Jpeg,
+        Some("image/webp") => ImageKind::Webp,
         Some(other)        => return Err(format!("unsupported image MIME type: {}", other)),
         None => sniff(bytes).ok_or_else(|| "unrecognised image format".to_string())?,
     };
     match kind {
-        ImageKind::Png => decode_png(bytes),
+        ImageKind::Png  => decode_png(bytes),
         ImageKind::Jpeg => decode_jpeg(bytes),
+        ImageKind::Webp => decode_webp(bytes),
     }
 }
 
-enum ImageKind { Png, Jpeg }
+enum ImageKind { Png, Jpeg, Webp }
 
 fn sniff(bytes: &[u8]) -> Option<ImageKind> {
     if bytes.len() >= 8 && &bytes[0..8] == b"\x89PNG\r\n\x1a\n" { return Some(ImageKind::Png); }
     if bytes.len() >= 3 && &bytes[0..3] == b"\xff\xd8\xff"    { return Some(ImageKind::Jpeg); }
+    // WebP magic: `RIFF????WEBP` — 4 bytes RIFF, 4 bytes size, 4 bytes "WEBP".
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some(ImageKind::Webp);
+    }
     None
 }
 
@@ -75,6 +81,25 @@ fn decode_jpeg(bytes: &[u8]) -> Result<DecodedImage, String> {
         height: info.height as u32,
         rgba,
     })
+}
+
+/// Decode `EXT_texture_webp` payloads. `image-webp` is pure-Rust, supports
+/// lossy (VP8) and lossless (VP8L) variants and returns straight RGB / RGBA
+/// depending on whether the image has an alpha channel. We normalise to
+/// RGBA8 for the sampler.
+fn decode_webp(bytes: &[u8]) -> Result<DecodedImage, String> {
+    use image_webp::WebPDecoder;
+    let mut decoder = WebPDecoder::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("webp decode init: {:?}", e))?;
+    let (width, height) = decoder.dimensions();
+    let has_alpha = decoder.has_alpha();
+    let out_size = decoder.output_buffer_size()
+        .ok_or("webp: image too large for output buffer")?;
+    let mut pixels = vec![0u8; out_size];
+    decoder.read_image(&mut pixels)
+        .map_err(|e| format!("webp decode: {:?}", e))?;
+    let rgba = if has_alpha { pixels } else { expand_rgb_to_rgba(&pixels) };
+    Ok(DecodedImage { width, height, rgba })
 }
 
 fn expand_rgb_to_rgba(rgb: &[u8]) -> Vec<u8> {

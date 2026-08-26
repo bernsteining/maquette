@@ -13,3 +13,7 @@ description = "Format-agnostic render primitives shared by the maquette plugin f
 # (JPEG/PNG for glTF textures). Pure Rust, wasm-friendly.
 zune-jpeg = { version = "0.5", default-features = false, features = ["std"] }
 zune-png  = { version = "0.5", default-features = false, features = ["std"] }
+# WebP decoder — `EXT_texture_webp` is emitted by gltfpack + Blender + gltf-
+# transform, and is second only to KTX2/Basis in real-world usage. Pure Rust,
+# minimal deps (byteorder-lite + quick-error).
+image-webp = "0.2"

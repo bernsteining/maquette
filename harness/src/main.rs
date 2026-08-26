@@ -25,8 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if positional.len() != 4 {
-        eprintln!("usage: harness [--fuel] [--bench=N] <wasm> <func> <file1> <file2>");
+    if positional.len() < 4 || positional.len() > 5 {
+        eprintln!("usage: harness [--fuel] [--bench=N] <wasm> <func> <file1> <file2> [<file3>]");
         std::process::exit(1);
     }
 
@@ -34,6 +34,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let func_name = &positional[1];
     let file1 = std::fs::read(&positional[2])?;
     let file2 = std::fs::read(&positional[3])?;
+    let file3: Option<Vec<u8>> = if positional.len() == 5 {
+        Some(std::fs::read(&positional[4])?)
+    } else { None };
 
     let wasm_bytes = std::fs::read(wasm_path)?;
 
@@ -53,7 +56,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut store = Store::new(
             &engine,
             HostState {
-                args: [file1.as_slice(), file2.as_slice()].concat(),
+                args: {
+                    let mut a: Vec<u8> = Vec::new();
+                    a.extend_from_slice(&file1);
+                    a.extend_from_slice(&file2);
+                    if let Some(f3) = &file3 { a.extend_from_slice(f3); }
+                    a
+                },
                 result: Vec::new(),
             },
         );
@@ -91,7 +100,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .get_func(&store, func_name)
             .ok_or_else(|| format!("function '{}' not found", func_name))?;
 
-        let params = [Val::I32(file1.len() as i32), Val::I32(file2.len() as i32)];
+        let mut params_v = vec![Val::I32(file1.len() as i32), Val::I32(file2.len() as i32)];
+        if let Some(f3) = &file3 { params_v.push(Val::I32(f3.len() as i32)); }
+        let params = params_v;
         let mut results = [Val::I32(0)];
 
         let start = Instant::now();
