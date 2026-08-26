@@ -1193,11 +1193,11 @@ function applyModelDefaults(name) {
 // second (Sketchfab, Thingiverse) via the docs' own "Where to find
 // sample models" sections.
 const GET_MODELS_LINKS = {
-  gltf: { label: "More glTF assets →",     url: "https://github.com/KhronosGroup/glTF-Sample-Assets" },
-  scad: { label: "More OpenSCAD examples →", url: "https://github.com/openscad/openscad/tree/master/examples" },
-  obj:  { label: "More OBJ models →",      url: "https://github.com/alecjacobson/common-3d-test-models" },
-  stl:  { label: "More STL models →",      url: "https://www.thingiverse.com/" },
-  ply:  { label: "More PLY scans →",       url: "https://graphics.stanford.edu/data/3Dscanrep/" },
+  gltf: { label: "More glTF on Sketchfab →",   url: "https://sketchfab.com/3d-models?features=downloadable" },
+  obj:  { label: "More OBJ on Sketchfab →",    url: "https://sketchfab.com/3d-models?features=downloadable" },
+  ply:  { label: "More PLY on Sketchfab →",    url: "https://sketchfab.com/3d-models?features=downloadable" },
+  stl:  { label: "More STL on Thingiverse →",  url: "https://www.thingiverse.com/" },
+  scad: { label: "More SCAD on Thingiverse →", url: "https://www.thingiverse.com/tag:openscad" },
 };
 function refreshGetModelsLink() {
   const el = $("get-models"); if (!el) return;
@@ -1867,6 +1867,7 @@ async function loadModule() {
     // Shared-link boot bypasses ingest() so we run its glTF-mode setup here.
     syncFmtToggleForKind(name);
     if (isGltf(name)) syncGltfInfo();   // retype Animation-time to a slider when animated
+    refreshGetModelsLink();
     refreshVisibility(); measure(); onChange();
     // Shorten the address bar to the compact form, so even a long readable
     // documentation link becomes short (and copy-ready) once it has loaded.

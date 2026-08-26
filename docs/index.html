@@ -60,9 +60,13 @@
     padding: 3px 10px; border-radius: 7px; cursor: pointer; transition: .12s;
   }
   .file-row button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-  .file-row #get-models { font-size: 11.5px; color: var(--muted); text-decoration: none; padding: 2px 4px; transition: color .12s; }
-  .file-row #get-models:hover { color: var(--accent); }
-  .file-row #get-models:empty { display: none; }
+  /* "get more models" link — sits inside #tools, stacked under Download so it
+     reads as an extension of that button rather than picker-adjacent. Empty
+     when the current model kind has no configured target — collapse to nothing. */
+  #tools #get-models { font: inherit; font-size: 10.5px; text-align: center; color: var(--muted);
+    text-decoration: none; padding: 3px 6px 0; transition: color .12s; }
+  #tools #get-models:hover { color: var(--accent); }
+  #tools #get-models:empty { display: none; }
   .search-row { padding: 0 13px 9px; }
   #search {
     width: 100%; font: inherit; font-size: 12px; padding: 6px 9px;
@@ -223,7 +227,6 @@
           model: <select id="preset" title="Load a built-in model"></select>
           <button id="browse">Load file…</button>
           <input id="file" type="file" accept=".obj,.stl,.ply,.scad,.glb" hidden>
-          <a id="get-models" href="#" target="_blank" rel="noopener" title="Browse external asset libraries"></a>
         </div>
         <div class="search-row"><input id="search" type="search" placeholder="Search settings…" autocomplete="off"></div>
       </div>
@@ -260,6 +263,7 @@
         </div>
         <button id="btn-reset" title="Reset all settings to defaults">Reset</button>
         <button id="btn-download" title="Download the current render">Download</button>
+        <a id="get-models" href="#" target="_blank" rel="noopener" title="Browse external asset libraries"></a>
         <button id="btn-share" title="Copy a shareable link with this configuration">Share</button>
       </div>
       <img id="out" alt="render" draggable="false">
