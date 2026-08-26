@@ -56,7 +56,7 @@ make build       # compile maquette (STL/OBJ/PLY) wasm, install into your Typst 
 make gltf-build  # same for maquette-gltf
 make scad-build  # same for maquette-scad
 make demo        # assemble the browser demo — three wasm modules + assets in docs/
-make doc         # compile examples/documentation.pdf (a full walkthrough)
+make docs        # compile docs/maquette-documentation.pdf + -gltf-doc + -scad-doc
 ```
 
 Requires `cargo`, the `wasm32-unknown-unknown` target, and `wasm-opt` from [binaryen](https://github.com/WebAssembly/binaryen).

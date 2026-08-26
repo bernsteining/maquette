@@ -14,7 +14,7 @@ Everything runs as a single WASM plugin (~505 KB), with focus on speed.
 
 **[Try it live in your browser →](https://bernsteining.github.io/maquette/)** — drag to orbit, tweak every setting, and copy the generated Typst code. It runs the exact same WASM as the plugin, fully client-side. Because your browser JIT-compiles the WASM (Typst runs it in an interpreter), the demo is dramatically faster to iterate on — the quickest way to dial in a camera angle and lighting before pasting the code into your document, with no recompile between tweaks.
 
-Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.3/examples/documentation.pdf) to see examples of all the features.
+Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.3/docs/maquette-documentation.pdf) to see examples of all the features.
 
 ## Example
 
@@ -76,7 +76,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 </tr>
 </table>
 
-Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.3/examples/documentation.pdf) has many examples covering all the features offered by `maquette`.
+Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0.1.3/docs/maquette-documentation.pdf) has many examples covering all the features offered by `maquette`.
 
 ## Rendering Techniques
 
@@ -134,7 +134,7 @@ Once again, the [documentation](https://github.com/bernsteining/maquette/blob/v0
 
 ## Documentation
 
-See [examples/documentation.pdf](https://github.com/bernsteining/maquette/blob/v0.1.3/examples/documentation.pdf) for a full walkthrough with examples, or compile it:
+See [docs/maquette-documentation.pdf](https://github.com/bernsteining/maquette/blob/v0.1.3/docs/maquette-documentation.pdf) for a full walkthrough with examples, or compile it:
 
 ```sh
 make demo
@@ -437,7 +437,7 @@ Returns JSON with model metadata (triangle count, vertex count, bounding box, gr
 
 ```sh
 make build    # cargo build → wasm-opt -O3 → deploy
-make doc      # build + compile examples/documentation.pdf
+make doc      # build + compile docs/maquette-documentation.pdf
 ```
 
 Requires `cargo`, `wasm32-unknown-unknown` target, and `wasm-opt` (from [binaryen](https://github.com/WebAssembly/binaryen)).

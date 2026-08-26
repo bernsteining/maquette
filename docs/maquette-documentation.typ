@@ -10,15 +10,15 @@
 #set par(justify: true)
 #show: zebraw.with(lang: false, numbering: false)
 
-#let bunny = read("data/bunny.obj")
-#let cube = read("data/cube.stl", encoding: none)
-#let colored = read("data/colored_cube.stl", encoding: none)
-#let obj-cube = read("data/cube.obj")
-#let teapot = read("data/teapot.obj")
-#let crankshaft = read("data/crankshaft.obj")
-#let skull-brain = read("data/brain_skull.obj")
-#let rubi = read("data/rubi_blender.ply", encoding: none)
-#let rubi_scan = read("data/rubi_scan.ply", encoding: none)
+#let bunny = read("/examples/data/bunny.obj")
+#let cube = read("/examples/data/cube.stl", encoding: none)
+#let colored = read("/examples/data/colored_cube.stl", encoding: none)
+#let obj-cube = read("/examples/data/cube.obj")
+#let teapot = read("/examples/data/teapot.obj")
+#let crankshaft = read("/examples/data/crankshaft.obj")
+#let skull-brain = read("/examples/data/brain_skull.obj")
+#let rubi = read("/examples/data/rubi_blender.ply", encoding: none)
+#let rubi_scan = read("/examples/data/rubi_scan.ply", encoding: none)
 
 // Inline tag marking features that only apply to PNG (raster) output.
 #let png-only = box(fill: luma(225), inset: (x: 4pt, y: 1.5pt), radius: 3pt, baseline: 0.15em,
@@ -1183,7 +1183,7 @@ Some binary STL files encode per-face colors in the attribute bytes using the RG
 
 ```example
 // hl: 1
-#let colored = read("data/colored_cube.stl", encoding: none)
+#let colored = read("/examples/data/colored_cube.stl", encoding: none)
 
 #render-stl(colored, projection: "isometric", width: 60%)
 ```
@@ -1196,7 +1196,7 @@ Maquette handles PLY files in ASCII and binary (little/big-endian) formats — a
 
 ```example
 // hl: 1
-#let rubi = read("data/rubi_blender.ply", encoding: none)
+#let rubi = read("/examples/data/rubi_blender.ply", encoding: none)
 
 #render-ply(rubi,
   azimuth: 45,
@@ -1215,7 +1215,7 @@ PLY files can also contain clouds of points. 3D scanning apps usually allow to e
 
 ```example
 // hl: 8-9
-#let rubi_scan = read("data/rubi_scan.ply", encoding: none)
+#let rubi_scan = read("/examples/data/rubi_scan.ply", encoding: none)
 
 #render-ply(rubi_scan,
   azimuth: -197,
@@ -1254,7 +1254,7 @@ usemtl face6
 
   ```example
 // hl: 5-9
-#let obj-cube = read("data/cube.obj")
+#let obj-cube = read("/examples/data/cube.obj")
 
 #render-obj(obj-cube,
   camera: (3,3,3),
@@ -1394,7 +1394,7 @@ Pass `annotations: true` to label all groups with default styling, or pass an ob
 Nothing new, since it's the default mode we saw earlier, but it allows me to introduce this beautiful low poly `brain_skull.obj`.
 
 ```example
-#let skull-brain = read("data/brain_skull.obj")
+#let skull-brain = read("/examples/data/brain_skull.obj")
 
 #render-obj(skull-brain,
   azimuth: 270,

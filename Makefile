@@ -20,13 +20,30 @@ wasm:
 
 # Local: build + install into the typst local package dir.
 build: wasm
+	mkdir -p $(dir $(WASM_PKG))
 	cp $(WASM_OUT) $(WASM_PKG)
 
 harness:
 	cargo build --release --manifest-path harness/Cargo.toml
 
-doc: build
-	typst compile examples/documentation.typ examples/documentation.pdf --root .
+# Documentation. One PDF per plugin, all under docs/ (same dir GitHub Pages
+# publishes — the browser demo + the docs sit next to each other, easy to
+# cross-link). `make docs` builds all three; each target only depends on the
+# wasm the doc's own examples exercise, so a scad-only edit doesn't force a
+# maquette-gltf rebuild.
+doc-maquette: build
+	typst compile docs/maquette-documentation.typ docs/maquette-documentation.pdf --root .
+
+doc-gltf: gltf-build
+	typst compile docs/maquette-gltf-documentation.typ docs/maquette-gltf-documentation.pdf --root .
+
+doc-scad: scad-build
+	typst compile docs/maquette-scad-documentation.typ docs/maquette-scad-documentation.pdf --root .
+
+docs: doc-maquette doc-gltf doc-scad
+
+# Back-compat: `make doc` still builds the maquette PDF (the historical target).
+doc: doc-maquette
 
 # Model files the browser demo ships. Canonical copies live once in
 # examples/data/; the demo needs them under docs/ (the only dir Pages
@@ -83,4 +100,10 @@ gltf-build: gltf-wasm
 	mkdir -p $(dir $(GLTF_WASM_PKG))
 	cp $(GLTF_WASM_OUT) $(GLTF_WASM_PKG)
 
-.PHONY: wasm build harness doc demo-assets demo scad-wasm gltf-wasm gltf-build
+# Install SCAD plugin into the local Typst package dir.
+SCAD_WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette-scad/0.1.0/maquette-scad.wasm
+scad-build: scad-wasm
+	mkdir -p $(dir $(SCAD_WASM_PKG))
+	cp $(SCAD_WASM_OUT) $(SCAD_WASM_PKG)
+
+.PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build
