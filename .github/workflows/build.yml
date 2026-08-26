@@ -55,7 +55,7 @@ jobs:
             # (non-LTO) build path. Emsdk (installed below) provides LLVM 23
             # for the LTO path via the Makefile's EMSDK_WASMLD switch.
             apt-get install -y --no-install-recommends \
-              cmake clang lld libc++-dev libc++abi-dev python3
+              cmake clang lld libc++-dev libc++abi-dev python3 xz-utils
           fi
 
       - uses: actions/checkout@v4
