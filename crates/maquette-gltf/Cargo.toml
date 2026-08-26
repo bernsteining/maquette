@@ -17,6 +17,11 @@ wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-p
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 # EXT_meshopt_compression decoder (pure Rust, wasm-friendly).
 meshopt-rs = { version = "0.1", features = ["experimental"] }
+# KHR_draco_mesh_compression decoder (pure Rust; targets wasm32-unknown-unknown
+# with a self-reported ~137 KB decode-only wasm slice). We depend on the
+# decoder crate directly, not on `draco-oxide`, so the encoder never links.
+# Alpha pre-release — pin the exact version to insulate against API drift.
+draco-oxide-decoder = { version = "=0.1.0-alpha.10", default-features = false, features = ["dequantize"] }
 # MikkTSpace: consistent per-vertex tangents when TANGENT attribute is missing.
 mikktspace = { version = "0.3", default-features = false, features = ["glam"] }
 
