@@ -90,18 +90,28 @@ SCAD_WASM_OUT = crates/maquette-scad/maquette-scad.wasm
 #
 # Ship both — no override defaults, but if EMSDK is not set we fall back
 # to the non-LTO path (rust-lld). CI runners without emsdk still work.
-EMSDK_WASMLD := $(if $(EMSDK),$(EMSDK)/upstream/bin/wasm-ld,)
+#
+# When EMSDK is set, we ALSO point WASM_CXX_SHIM_LIBCXX_HEADERS at emsdk's
+# bundled libc++ headers. Without this, the shim falls through to system
+# libc++ (Debian bookworm's is too old for shim v0.5.0's __config_site
+# override — errors like `use of undeclared identifier 'wcschr'`). Emsdk's
+# headers are guaranteed compatible with the clang++ we're pairing with.
+EMSDK_WASMLD  := $(if $(EMSDK),$(EMSDK)/upstream/bin/wasm-ld,)
+EMSDK_LIBCXX  := $(if $(EMSDK),$(EMSDK)/upstream/emscripten/system/lib/libcxx/include,)
 ifeq ($(strip $(EMSDK_WASMLD)),)
 SCAD_CXX_FLAGS =
 SCAD_RUSTFLAGS_EXTRA =
+SCAD_ENV =
 else
 SCAD_CXX_FLAGS = -flto
 SCAD_RUSTFLAGS_EXTRA = -Clinker=$(EMSDK_WASMLD) -Clink-arg=--lto-O3
+SCAD_ENV = WASM_CXX_SHIM_LIBCXX_HEADERS=$(EMSDK_LIBCXX)
 endif
 
 # Build + optimize the scad plugin wasm. Mirrors the core `wasm` recipe (same
 # target features + wasm-opt flags) for consistency; adds the LTO recipe above.
 scad-wasm:
+	$(SCAD_ENV) \
 	MANIFOLD_WASM_CXX_FLAGS="$(SCAD_CXX_FLAGS)" \
 	RUSTFLAGS="$(RUSTFLAGS_WASM) $(SCAD_RUSTFLAGS_EXTRA)" \
 	  cargo build --target wasm32-unknown-unknown --release -p maquette-scad
