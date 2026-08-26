@@ -6,54 +6,44 @@
 // left. Add a field to SCHEMA and it appears in all three.
 
 // ─────────────────────────────── WASM shim ────────────────────────────────
-// Three wasm-minimal-protocol plugins share this shim:
-//   maquette      — main renderer (OBJ / STL / PLY); its Module is fetched
-//                   once at boot, cached in IndexedDB, then bound via .bind().
-//   maquette-scad — OpenSCAD → PLY compiler; lazy (browser JIT is ~10× faster
-//                   than the Typst wasm interpreter for this compile).
-//   maquette-gltf — glTF 2.0 PBR renderer; lazy, only loaded when a .glb /
-//                   .gltf / .blg is picked.
+// Three wasm-minimal-protocol plugins — maquette (OBJ/STL/PLY), maquette-scad
+// (OpenSCAD → PLY compile), maquette-gltf (glTF 2.0 PBR) — all live in
+// docs/worker.js. The main thread holds only thin async proxies here.
 //
-// `_args` / `_result` are shared globals — safe because JS is single-threaded
-// and each `.call()` body is fully synchronous from _args-set through rc-check.
-// If we ever go multi-worker per-plugin, move these into the closure.
-let _args, _result;
-function makeWasmPlugin(url, errorPrefix) {
-  let inst, mem;
-  const imports = { typst_env: {
-    wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
-      new Uint8Array(mem.buffer, ptr, _args.length).set(_args),
-    wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
-      { _result = new Uint8Array(mem.buffer, ptr, len).slice(); },
-  }};
+// Why a worker: `.call()` is synchronous inside the wasm, and a heavy render
+// (helmet.glb at 512² PBR + IBL + shadow-maps + WBOIT) can take seconds. On
+// the main thread that stalls scroll, sliders, the picker, everything. In a
+// worker only the render canvas waits for its bytes; the rest of the UI stays
+// live. See worker.js for the ensure/call message protocol + IDB module cache.
+
+const worker = new Worker("worker.js");
+let _wReqId = 0;
+const _wPending = new Map();
+worker.onmessage = (e) => {
+  const { id, ok, result, error } = e.data;
+  const p = _wPending.get(id); if (!p) return; _wPending.delete(id);
+  ok ? p.resolve(result) : p.reject(new Error(error));
+};
+function wReq(kind, plugin, fn, args) {
+  return new Promise((resolve, reject) => {
+    const id = ++_wReqId;
+    _wPending.set(id, { resolve, reject });
+    worker.postMessage({ id, kind, plugin, fn, args });
+  });
+}
+// Proxy shape mirrors the old sync plugin — swap `.call()` for `await
+// .call()` at every callsite, everything else stays the same.
+function makeWorkerPlugin(name) {
   const p = {
-    imports,
-    async ensure() {                  // lazy fetch+compile+instantiate path
-      if (inst) return;
-      const bytes = await (await fetch(url)).arrayBuffer();
-      p.bind(await WebAssembly.instantiate(await WebAssembly.compile(bytes), imports));
-    },
-    bind(i) { inst = i; mem = i.exports.memory; },   // when the caller already has a Module (IDB path)
-    call(fn, ...args) {
-      const total = args.reduce((n, a) => n + a.length, 0);
-      _args = new Uint8Array(total); let o = 0;
-      for (const a of args) { _args.set(a, o); o += a.length; }
-      _result = new Uint8Array();
-      const rc = inst.exports[fn](...args.map((a) => a.length));
-      if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || `${errorPrefix} failed`);
-      return _result;
-    },
-    get instance() { return inst; },
-    get memory() { return mem; },
+    ready: false,
+    async ensure() { if (p.ready) return; await wReq("ensure", name); p.ready = true; },
+    async call(fn, ...args) { return await wReq("call", name, fn, args); },
   };
   return p;
 }
-// WASM_URL is also used by the IDB-cache freshness path (HEAD/etag), so we
-// keep it as a top-level const rather than burying it in the factory call.
-const WASM_URL = "maquette.wasm";
-const maquettePlugin = makeWasmPlugin(WASM_URL, "render");
-const scadPlugin     = makeWasmPlugin("maquette-scad.wasm", "OpenSCAD compile");
-const gltfPlugin     = makeWasmPlugin("maquette-gltf.wasm", "glTF render");
+const maquettePlugin = makeWorkerPlugin("maquette");
+const scadPlugin     = makeWorkerPlugin("maquette-scad");
+const gltfPlugin     = makeWorkerPlugin("maquette-gltf");
 
 // glTF-format extensions the maquette-gltf plugin handles. `.blg` is our
 // convention for a GLB renamed with a friendly extension (Damaged Helmet).
@@ -927,57 +917,58 @@ let outputFormat = "png";   // "png" | "svg" — chosen via the stage toolbar to
 let lastGltfBytes = null;
 const RFN_PNG = { obj: "render_obj_png", stl: "render_stl_png", ply: "render_ply_png" };
 const RFN_SVG = { obj: "render_obj", stl: "render_stl", ply: "render_ply" };
-function render() {
-  if (!maquettePlugin.instance || !model.bytes) return;
+async function render() {
+  if (!maquettePlugin.ready || !model.bytes) return;
   // glTF assets take a separate code path — different plugin (lazily loaded),
   // different config schema, always raster output (SVG mode not supported yet
-  // for glTF). All wrapped in an async IIFE because the plugin is loaded on
-  // demand via `gltfPlugin.ensure()`.
+  // for glTF).
   if (isGltf(model.name)) {
-    (async () => {
-      try {
-        await gltfPlugin.ensure();
-        // Paint a decoded RGBA blob straight to the canvas.
-        const paint = (out) => {
-          if (out[0] !== 0x00) throw new Error("unexpected glTF plugin output header");
-          const w = out[1] | out[2] << 8 | out[3] << 16 | out[4] << 24;
-          const h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
-          const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, w * h * 4);
-          elOutc.width = w; elOutc.height = h;
-          elOutc.getContext("2d").putImageData(new ImageData(px, w, h), 0, 0);
-          elOutc.style.display = ""; elOut.style.display = "none";
-          lastRender = { kind: "raw" };
-        };
-        // "Progressive" glTF: on a cold render (new model, or a model whose
-        // textures the plugin's cache hasn't seen yet) do a fast preview
-        // pass with `no_textures: true` and no SSAA. That skips ~4 s of
-        // JPEG decode on the helmet and paints geometry + IBL + material
-        // factors instantly. The second pass (full config) then replaces
-        // it with the textured render. On warm subsequent renders (config
-        // tweaks on the same model) we only do the full pass — the plugin's
-        // scene cache means it's already quick.
-        const cold = lastGltfBytes !== model.bytes;
-        lastGltfBytes = model.bytes;
-        const cfg = renderConfig();
-        const token = ++renderToken;
-        const t0 = performance.now();
-        if (cold) {
-          try {
-            const preview = { ...cfg, no_textures: true, antialias: 1, fxaa: false, ssao: undefined };
-            paint(gltfPlugin.call("render_gltf", model.bytes, ENC.encode(JSON.stringify(preview))));
-            // Yield to the browser so the preview actually paints before we
-            // block on the (multi-second) full render.
-            await new Promise(r => requestAnimationFrame(r));
-            if (token !== renderToken) return; // superseded by a newer render
-          } catch (e) { /* preview failure isn't fatal — try full pass anyway */ }
-        }
-        paint(gltfPlugin.call("render_gltf", model.bytes, ENC.encode(JSON.stringify(cfg))));
-        const ms = performance.now() - t0;
-        elRtime.textContent = `rendered in ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
-        elRtime.classList.add("show");
-        showErr(null);
-      } catch (e) { showErr(String(e && e.message || e)); }
-    })();
+    try {
+      await gltfPlugin.ensure();
+      // Paint a decoded RGBA blob straight to the canvas.
+      const paint = (out) => {
+        if (out[0] !== 0x00) throw new Error("unexpected glTF plugin output header");
+        const w = out[1] | out[2] << 8 | out[3] << 16 | out[4] << 24;
+        const h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
+        const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, w * h * 4);
+        elOutc.width = w; elOutc.height = h;
+        elOutc.getContext("2d").putImageData(new ImageData(px, w, h), 0, 0);
+        elOutc.style.display = ""; elOut.style.display = "none";
+        lastRender = { kind: "raw" };
+      };
+      // "Progressive" glTF: on a cold render (new model, or a model whose
+      // textures the plugin's cache hasn't seen yet) do a fast preview
+      // pass with `no_textures: true` and no SSAA. That skips ~4 s of
+      // JPEG decode on the helmet and paints geometry + IBL + material
+      // factors instantly. The second pass (full config) then replaces
+      // it with the textured render. On warm subsequent renders (config
+      // tweaks on the same model) we only do the full pass — the plugin's
+      // scene cache means it's already quick.
+      const cold = lastGltfBytes !== model.bytes;
+      lastGltfBytes = model.bytes;
+      const cfg = renderConfig();
+      const token = ++renderToken;
+      const t0 = performance.now();
+      if (cold) {
+        try {
+          const preview = { ...cfg, no_textures: true, antialias: 1, fxaa: false, ssao: undefined };
+          const previewOut = await gltfPlugin.call("render_gltf", model.bytes, ENC.encode(JSON.stringify(preview)));
+          if (token !== renderToken) return;   // superseded by a newer render while awaiting the worker
+          paint(previewOut);
+          // Yield to the browser so the preview actually paints before we
+          // start the (multi-second) full render.
+          await new Promise(r => requestAnimationFrame(r));
+          if (token !== renderToken) return;
+        } catch (e) { /* preview failure isn't fatal — try full pass anyway */ }
+      }
+      const fullOut = await gltfPlugin.call("render_gltf", model.bytes, ENC.encode(JSON.stringify(cfg)));
+      if (token !== renderToken) return;
+      paint(fullOut);
+      const ms = performance.now() - t0;
+      elRtime.textContent = `rendered in ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
+      elRtime.classList.add("show");
+      showErr(null);
+    } catch (e) { showErr(String(e && e.message || e)); }
     return;
   }
   const fn = (outputFormat === "svg" ? RFN_SVG : RFN_PNG)[ext(model.name)];
@@ -985,7 +976,8 @@ function render() {
   try {
     const token = ++renderToken;
     const t0 = performance.now();
-    const out = maquettePlugin.call(fn, model.bytes, ENC.encode(JSON.stringify(renderConfig())));
+    const out = await maquettePlugin.call(fn, model.bytes, ENC.encode(JSON.stringify(renderConfig())));
+    if (token !== renderToken) return;   // superseded while awaiting the worker
     const ms = performance.now() - t0;
     // Raster output is raw RGBA ([0x00][w][h][rgba8…]); grid / turntable / debug /
     // annotations add a transparent vector overlay ([0x02][w][h][rgba8 w*h*4][svg…]).
@@ -1237,7 +1229,7 @@ function ingest(name, bytes) {
 async function syncGltfInfo() {
   try {
     await gltfPlugin.ensure();
-    const raw = gltfPlugin.call("get_gltf_info", model.bytes, ENC.encode("{}"));
+    const raw = await gltfPlugin.call("get_gltf_info", model.bytes, ENC.encode("{}"));
     const info = JSON.parse(DEC.decode(raw));
     const maxT = +info.max_animation_time || 0;
     const f = GLTF_TIME_FIELD;   // cached at module load — no search per call
@@ -1336,7 +1328,7 @@ async function compileScad() {
     status.textContent = "compiling…";
     await scadPlugin.ensure();
     const t = performance.now();
-    const ply = scadPlugin.call("build_scad", ENC.encode(src), ENC.encode("{}"),
+    const ply = await scadPlugin.call("build_scad", ENC.encode(src), ENC.encode("{}"),
       ENC.encode(JSON.stringify({ fn: 32 })), new Uint8Array());
     status.textContent = `compiled in ${Math.round(performance.now() - t)} ms`;
     showErr("");
@@ -1393,13 +1385,13 @@ $("copy").onclick = async () => { await copyText(buildTypst()); const o = $("cop
 
 // ── measurements (model-intrinsic; get-*-info) ─────────────────────────────
 const INFO_FN = { obj: "get_obj_info", stl: "get_stl_info", ply: "get_ply_info" };
-function measure() {
+async function measure() {
   elMeasure.innerHTML = "";
-  if (!maquettePlugin.instance || !model.bytes) return;
+  if (!maquettePlugin.ready || !model.bytes) return;
   const fn = INFO_FN[ext(model.name)];
   if (!fn) return;
   try {
-    const info = JSON.parse(DEC.decode(maquettePlugin.call(fn, model.bytes, ENC.encode("{}"))));
+    const info = JSON.parse(DEC.decode(await maquettePlugin.call(fn, model.bytes, ENC.encode("{}"))));
     if (Array.isArray(info.bbox_center)) bboxCenter = info.bbox_center;   // for cartesian→spherical orbit
     const n = (x) => Number.isInteger(x) ? x.toLocaleString() : (+x).toPrecision(3);
     const stats = [];
@@ -1786,74 +1778,14 @@ document.querySelectorAll("#fmt button").forEach((b) => {
 ["dragleave","drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev==="dragleave" && e.relatedTarget) return; $("stage").classList.remove("drag"); }));
 document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; if (f) loadFile(f); });
 
-// ─────────────────────────── wasm module cache (IndexedDB) ──────────────────
-// Repeat visits skip both the download and the compile: we persist the compiled
-// WebAssembly.Module in IndexedDB, keyed by the file's ETag/Last-Modified. A
-// cheap HEAD request tells us whether the cached module is still current, so a
-// CI redeploy of a new wasm invalidates the cache automatically.
-const IDB = { name: "maquette-cache", store: "modules", key: "maquette.wasm" };
-function idbOpen() {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open(IDB.name, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore(IDB.store);
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  });
-}
-async function idbGet(key) {
-  try {
-    const db = await idbOpen();
-    return await new Promise((res, rej) => {
-      const q = db.transaction(IDB.store, "readonly").objectStore(IDB.store).get(key);
-      q.onsuccess = () => res(q.result);
-      q.onerror = () => rej(q.error);
-    });
-  } catch { return undefined; }
-}
-async function idbPut(key, val) {
-  try {
-    const db = await idbOpen();
-    await new Promise((res, rej) => {
-      const q = db.transaction(IDB.store, "readwrite").objectStore(IDB.store).put(val, key);
-      q.onsuccess = () => res();
-      q.onerror = () => rej(q.error);
-    });
-  } catch { /* private mode, or a browser that won't structured-clone Module: skip caching */ }
-}
-
-async function compileModule() {
-  // Streaming compile overlaps download with compilation. Fall back to a plain
-  // compile if the response isn't served as application/wasm (some hosts).
-  try { return await WebAssembly.compileStreaming(fetch(WASM_URL)); }
-  catch { return await WebAssembly.compile(await (await fetch(WASM_URL)).arrayBuffer()); }
-}
-
-async function loadModule() {
-  let tag = null;
-  try {
-    const h = await fetch(WASM_URL, { method: "HEAD" });
-    tag = h.headers.get("etag") || h.headers.get("last-modified");
-  } catch { /* no freshness signal → compile fresh, don't cache */ }
-
-  if (tag) {
-    const hit = await idbGet(IDB.key);
-    if (hit && hit.tag === tag && hit.module instanceof WebAssembly.Module) return hit.module;
-  }
-  const module = await compileModule();
-  if (tag) idbPut(IDB.key, { tag, module });
-  return module;
-}
-
 // ─────────────────────────────────── boot ─────────────────────────────────
 (async function boot() {
   const { name: urlModel, hadConfig, raw } = await applyStateFromUrl();  // shared model + config, if any
   buildForm(); refreshVisibility();
   try {
-    const module = await loadModule();
-    // With a Module (not bytes), instantiate() resolves to the Instance directly.
-    // Bind the pre-compiled module into the plugin wrapper (skips its lazy fetch
-    // path — the maquette plugin lives in IndexedDB, not on a fresh HTTP fetch).
-    maquettePlugin.bind(await WebAssembly.instantiate(module, maquettePlugin.imports));
+    // Worker handles fetch → compile → IDB cache → instantiate for the
+    // maquette plugin. Return here means it's ready to `.call()`.
+    await maquettePlugin.ensure();
     // Load the model named in the URL (any file present in the demo dir — not
     // just picker built-ins, so documentation deep-links resolve), else bunny.
     const wanted = urlModel || "bunny.obj";
