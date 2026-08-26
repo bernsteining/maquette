@@ -73,12 +73,41 @@ demo: wasm demo-assets scad-wasm gltf-wasm
 SCAD_WASM_TARGET = target/wasm32-unknown-unknown/release/maquette_scad.wasm
 SCAD_WASM_OUT = crates/maquette-scad/maquette-scad.wasm
 
+# Manifold + Clipper2 are built via cmake against the wasm-cxx-shim
+# toolchain (see crates/vendored/manifold-csg-sys/). Two flags govern
+# the perf/reproducibility contract for scad-wasm:
+#
+#   MANIFOLD_WASM_CXX_FLAGS  extra C/C++ flags for the manifold build.
+#                            `-flto` enables cross-TU LTO across manifold
+#                            and Clipper2, worth 2–5% wall-clock on the
+#                            wasmi interpreter (measured on nut/gear/menger).
+#
+#   RUSTFLAGS_SCAD_LINK      swaps rust-lld for emsdk's wasm-ld so LTO can
+#                            actually run: rust-lld's LLVM 21 can't read
+#                            manifold's LLVM 23 bitcode (emsdk clang);
+#                            emsdk's wasm-ld (LLVM 23) reads both.
+#                            Requires $EMSDK to be set at build time.
+#
+# Ship both — no override defaults, but if EMSDK is not set we fall back
+# to the non-LTO path (rust-lld). CI runners without emsdk still work.
+EMSDK_WASMLD := $(if $(EMSDK),$(EMSDK)/upstream/bin/wasm-ld,)
+ifeq ($(strip $(EMSDK_WASMLD)),)
+SCAD_CXX_FLAGS =
+SCAD_RUSTFLAGS_EXTRA =
+else
+SCAD_CXX_FLAGS = -flto
+SCAD_RUSTFLAGS_EXTRA = -Clinker=$(EMSDK_WASMLD) -Clink-arg=--lto-O3
+endif
+
 # Build + optimize the scad plugin wasm. Mirrors the core `wasm` recipe (same
-# target features + wasm-opt flags) for consistency.
+# target features + wasm-opt flags) for consistency; adds the LTO recipe above.
 scad-wasm:
-	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release -p maquette-scad
+	MANIFOLD_WASM_CXX_FLAGS="$(SCAD_CXX_FLAGS)" \
+	RUSTFLAGS="$(RUSTFLAGS_WASM) $(SCAD_RUSTFLAGS_EXTRA)" \
+	  cargo build --target wasm32-unknown-unknown --release -p maquette-scad
 	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(SCAD_WASM_TARGET) -o $(SCAD_WASM_OUT)
 	@ls -lh $(SCAD_WASM_OUT)
+	@[ -n "$(SCAD_CXX_FLAGS)" ] && echo "  (built with $(SCAD_CXX_FLAGS) via emsdk wasm-ld)" || echo "  (built without LTO — set EMSDK to enable)"
 
 # --- maquette-gltf: glTF 2.0 plugin (workspace member, shares maquette-core) ---
 GLTF_WASM_TARGET = target/wasm32-unknown-unknown/release/maquette_gltf.wasm
