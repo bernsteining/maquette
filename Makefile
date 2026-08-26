@@ -1,6 +1,6 @@
 WASM_TARGET = target/wasm32-unknown-unknown/release/maquette.wasm
 WASM_OUT = crates/maquette/maquette.wasm
-WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette/0.1.0/maquette.wasm
+WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette/0.1.3/maquette.wasm
 
 # Path remaps so no build-machine paths (home, cargo registry, rustup toolchain)
 # leak into the wasm. Overridable — CI passes its container-specific prefixes.
@@ -18,10 +18,14 @@ wasm:
 	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(WASM_TARGET) -o $(WASM_OUT)
 	@ls -lh $(WASM_OUT)
 
-# Local: build + install into the typst local package dir.
+# Local: build + install into the typst local package dir. Copies the
+# whole package (wasm + typst.toml + .typ) so `@local/maquette:0.1.0`
+# resolves — otherwise a bare wasm sits there without the manifest and
+# typst can't find the entry .typ.
 build: wasm
 	mkdir -p $(dir $(WASM_PKG))
 	cp $(WASM_OUT) $(WASM_PKG)
+	cp crates/maquette/maquette/maquette.typ crates/maquette/maquette/typst.toml $(dir $(WASM_PKG))
 
 harness:
 	cargo build --release --manifest-path harness/Cargo.toml

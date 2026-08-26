@@ -1,4 +1,4 @@
-#import "../maquette/maquette.typ": render-stl, render-obj, render-ply, get-stl-info, get-obj-info, get-ply-info
+#import "@local/maquette:0.1.3": render-stl, render-obj, render-ply, get-stl-info, get-obj-info, get-ply-info
 
 #import "@preview/zebraw:0.6.1": *
 
@@ -187,7 +187,7 @@
     antialias: 4,
   ), width: 75%)
   #v(0.4em)
-  #text(size: 10pt, fill: luma(150))[Version #toml("/maquette/typst.toml").package.version #h(0.4em)·#h(0.4em) #datetime.today().display("[month repr:long] [day], [year]")]
+  #text(size: 10pt, fill: luma(150))[Version #toml("/crates/maquette/maquette/typst.toml").package.version #h(0.4em)·#h(0.4em) #datetime.today().display("[month repr:long] [day], [year]")]
 ]
 #v(1fr)
 
@@ -215,6 +215,15 @@
 Maquette is a Typst plugin for rendering 3D models directly inside your documents. It loads STL, OBJ, and PLY files and produces publication-ready images — no external renderer, no screenshots, no manual exporting. Everything runs with WASM.
 
 Under the hood, Maquette is a small rasterizer with a real lighting pipeline: multi-light Blinn-Phong shading, Fresnel reflections, subsurface scattering, ambient occlusion (SSAO), bloom, tone mapping, and more. Models can be rendered to PNG (rasterized, constant-size output) or SVG (scalable vector polygons). The full configuration — camera, lights, materials, post-processing — lives in your `.typ` source, so every view is reproducible and version-controllable.
+
+= Where to find sample models
+
+The examples below use small classics (bunny, teapot, crankshaft) drawn from a few free repositories. Any STL / OBJ / PLY file works — swap in your own.
+
+- #link("https://graphics.stanford.edu/data/3Dscanrep/")[Stanford 3D Scanning Repository] — the canonical bunny, dragon, happy Buddha; PLY.
+- #link("https://github.com/alecjacobson/common-3d-test-models")[alecjacobson/common-3d-test-models] — bunny, spot, teapot, nefertiti in OBJ + PLY, curated single-file downloads.
+- #link("https://sketchfab.com/3d-models?features=downloadable")[Sketchfab] (downloadable filter) — largest general library; most exports include OBJ.
+- #link("https://www.thingiverse.com/")[Thingiverse] — STL-heavy 3D-printing archive, older and larger back-catalog.
 
 = Quickstart
 

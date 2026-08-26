@@ -134,6 +134,18 @@ This document only covers what maquette-gltf *adds*. The shared rendering knobs 
 
 #pagebreak(weak: true)
 
+= Where to find sample glTF assets
+
+The examples below use canonical glTF sample models (Damaged Helmet, Fox, CesiumMan, ToyCar). Any `.glb` or `.gltf` works — the plugin handles compression extensions (Draco, meshopt, KTX2, WebP), quantization, and animations transparently.
+
+- #link("https://github.com/KhronosGroup/glTF-Sample-Assets")[KhronosGroup/glTF-Sample-Assets] — the canonical sample set every glTF viewer uses. Every extension has a dedicated test asset here.
+- #link("https://polyhaven.com/models")[Poly Haven Models] — CC0, glTF-native. High-quality PBR assets with authored materials.
+- #link("https://sketchfab.com/3d-models?features=downloadable")[Sketchfab] (downloadable filter) — largest general library; downloads default to glTF.
+
+For the HDR environment maps that feed the IBL section:
+
+- #link("https://polyhaven.com/hdris")[Poly Haven HDRIs] — CC0 8K/16K equirectangular HDRs. Bundle with your `.typ` and pass the bytes to `ibl: (hdr: ...)`.
+
 = Quickstart
 
 Two input shapes, both handled transparently.

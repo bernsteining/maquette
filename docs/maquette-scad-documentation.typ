@@ -149,6 +149,14 @@ This document only covers the *geometry* layer — primitives, booleans, transfo
 
 #pagebreak(weak: true)
 
+= Where to find sample `.scad` files
+
+The DSL examples below run inline — no external files needed. To exercise the `.scad` ingestion path (`compile-scad(read(...))`), grab source from:
+
+- #link("https://github.com/openscad/openscad/tree/master/examples")[openscad/openscad `examples/`] — the official example set that ships with the OpenSCAD editor.
+- #link("https://github.com/BelfrySCAD/BOSL2")[BOSL2] — comprehensive OpenSCAD utility library with hundreds of documented example fragments.
+- #link("https://www.thingiverse.com/tag:openscad")[Thingiverse (openscad tag)] — large community archive; many things ship the `.scad` source alongside the `.stl`.
+
 = Quickstart
 
 ```example
