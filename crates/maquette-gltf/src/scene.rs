@@ -22,6 +22,10 @@ pub struct Vertex {
     pub normal: Vec3,
     /// TEXCOORD_0. Zero-filled when the primitive has no UV set.
     pub uv: [f32; 2],
+    // TEXCOORD_2 — glTF's third UV channel. Rare but spec-legal (typical
+    // uses: baked light detail overlaid on a base UV, or a decal channel).
+    // Zero when the primitive lacks it; `clamp_texcoord` maps N ≥ 2 → slot 2.
+    pub uv2: [f32; 2],
     /// TEXCOORD_1. Zero-filled when the primitive has no secondary UV set.
     /// Materials pick per-slot which coord set to sample via `texcoord_*` fields.
     pub uv1: [f32; 2],
@@ -1091,16 +1095,12 @@ fn parse_anisotropy(m: &gltf::Material) -> AnisotropyCfg {
 
 #[inline]
 fn clamp_texcoord(n: u32) -> u8 {
-    // glTF allows arbitrary TEXCOORD_N — the spec puts no upper bound on N.
-    // We only wire slots 0 and 1 through the `Vertex` struct; anything with
-    // `texCoord: 2` or higher silently falls back to slot 1 (which is the
-    // closer approximation than falling back to slot 0 — a material that
-    // authored TEXCOORD_2 will have TEXCOORD_1 too more often than not).
-    //
-    // Widening the vertex to carry more slots is a real change (~200 LOC
-    // through `Vertex` + shader + rasterizer barycentric interp). Deferred
-    // — very few real-world assets use TEXCOORD_N for N ≥ 2.
-    if n >= 1 { 1 } else { 0 }
+    // glTF puts no upper bound on TEXCOORD_N. We wire slots 0/1/2 through
+    // the Vertex; anything N ≥ 3 falls back to slot 2 (assets that author
+    // TEXCOORD_3+ typically have the lower slots too). Real-world usage
+    // of N ≥ 3 is essentially never seen — extending further is easy but
+    // burns 8 bytes of vertex + a barycentric interp per slot.
+    n.min(2) as u8
 }
 
 fn load_texture_transform(info: &gltf::texture::Info) -> TextureTransform {
@@ -1671,6 +1671,9 @@ fn emit_mesh(
         let uvs1: Vec<[f32; 2]> = primitive.get(&gltf::Semantic::TexCoords(1))
             .and_then(|acc| read_vec2_f32(&acc, loaded).ok())
             .unwrap_or_default();
+        let uvs2: Vec<[f32; 2]> = primitive.get(&gltf::Semantic::TexCoords(2))
+            .and_then(|acc| read_vec2_f32(&acc, loaded).ok())
+            .unwrap_or_default();
         // COLOR_0 may be vec3 or vec4 per glTF spec — the utils reader
         // hands us `[f32; 4]` in either case (alpha=1 padded for vec3).
         let colors: Vec<[f32; 4]> = reader
@@ -1678,7 +1681,7 @@ fn emit_mesh(
             .map(|c| c.into_rgba_f32().collect())
             .unwrap_or_default();
 
-        emit_indexed(scene, &positions, normals.as_deref(), &uvs, &uvs1, &colors, tangents.as_deref(), primitive.mode(), reader, material_id);
+        emit_indexed(scene, &positions, normals.as_deref(), &uvs, &uvs1, &uvs2, &colors, tangents.as_deref(), primitive.mode(), reader, material_id);
     }
 }
 
@@ -1752,6 +1755,7 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
     normals: Option<&[Vec3]>,
     uvs: &[[f32; 2]],
     uvs1: &[[f32; 2]],
+    uvs2: &[[f32; 2]],
     colors: &[[f32; 4]],
     tangents: Option<&[[f32; 4]]>,
     mode: gltf::mesh::Mode,
@@ -1765,6 +1769,7 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
 
     let get_uv    = |i: usize| -> [f32; 2] { uvs.get(i).copied().unwrap_or([0.0, 0.0]) };
     let get_uv1   = |i: usize| -> [f32; 2] { uvs1.get(i).copied().unwrap_or([0.0, 0.0]) };
+    let get_uv2   = |i: usize| -> [f32; 2] { uvs2.get(i).copied().unwrap_or([0.0, 0.0]) };
     let get_color = |i: usize| -> [f32; 4] { colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, 1.0]) };
     let get_normal = |i: usize| -> Vec3 {
         normals.and_then(|n| n.get(i).copied()).unwrap_or(Vec3::new(0.0, 1.0, 0.0))
@@ -1778,6 +1783,7 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
             normal:   get_normal(i),
             uv:       get_uv(i),
             uv1:      get_uv1(i),
+            uv2:      get_uv2(i),
             color:    get_color(i),
             tangent:  get_tangent(i),
         }
@@ -1893,6 +1899,7 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
         let (a, b, c) = (positions[*ia as usize], positions[*ib as usize], positions[*ic as usize]);
         let (uva, uvb, uvc) = (get_uv(*ia as usize), get_uv(*ib as usize), get_uv(*ic as usize));
         let (uv1a, uv1b, uv1c) = (get_uv1(*ia as usize), get_uv1(*ib as usize), get_uv1(*ic as usize));
+        let (uv2a, uv2b, uv2c) = (get_uv2(*ia as usize), get_uv2(*ib as usize), get_uv2(*ic as usize));
         let (ca, cb, cc_col) = (get_color(*ia as usize), get_color(*ib as usize), get_color(*ic as usize));
 
         let (na, nb, nc) = (face_vert_normal(face, 0), face_vert_normal(face, 1), face_vert_normal(face, 2));
@@ -1911,9 +1918,9 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
         scene.extend_bbox(a); scene.extend_bbox(b); scene.extend_bbox(c);
         scene.triangles.push(Triangle {
             vertices: [
-                Vertex { position: a, normal: na, uv: uva, uv1: uv1a, color: ca,     tangent: ta },
-                Vertex { position: b, normal: nb, uv: uvb, uv1: uv1b, color: cb,     tangent: tb },
-                Vertex { position: c, normal: nc, uv: uvc, uv1: uv1c, color: cc_col, tangent: tc },
+                Vertex { position: a, normal: na, uv: uva, uv1: uv1a, uv2: uv2a, color: ca,     tangent: ta },
+                Vertex { position: b, normal: nb, uv: uvb, uv1: uv1b, uv2: uv2b, color: cb,     tangent: tb },
+                Vertex { position: c, normal: nc, uv: uvc, uv1: uv1c, uv2: uv2c, color: cc_col, tangent: tc },
             ],
             material_id,
         });

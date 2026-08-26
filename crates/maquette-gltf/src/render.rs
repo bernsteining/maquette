@@ -211,9 +211,13 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
     };
 
     // Cull + project each triangle once. Opaque + mask go straight to the
-    // rasterizer with Overwrite blend; blend triangles get held back so we
-    // can sort them by view-space centroid z and render back-to-front (the
-    // standard "good enough" translucency approach).
+    // rasterizer with Overwrite blend; blend triangles queue up so they're
+    // rasterized AFTER every opaque/mask primitive has settled the z-buffer.
+    // No back-to-front sort needed — the queue drains through WBOIT
+    // (Weighted Blended OIT, McGuire & Bavoil 2013), which is inherently
+    // order-independent: each translucent fragment contributes into an
+    // accumulation buffer weighted by depth, then a single composite pass
+    // over the opaque frame produces the final image.
     let mut blend_queue: Vec<PreparedTriangle> = Vec::new();
 
     // Iterate scene triangles then ground triangles. Ground material lives
@@ -401,6 +405,9 @@ fn shade_triangle(
     let uvs1 = [
         tri.vertices[0].uv1, tri.vertices[1].uv1, tri.vertices[2].uv1,
     ];
+    let uvs2 = [
+        tri.vertices[0].uv2, tri.vertices[1].uv2, tri.vertices[2].uv2,
+    ];
     let colors = [
         tri.vertices[0].color, tri.vertices[1].color, tri.vertices[2].color,
     ];
@@ -442,6 +449,7 @@ fn shade_triangle(
         &normals,
         &uvs,
         &uvs1,
+        &uvs2,
         &colors,
         &tangents,
         blend,
@@ -536,7 +544,7 @@ fn build_ground(scene: &Scene, config: &RenderConfig) -> (Vec<Triangle>, Option<
     let n = up;
     let t = [axis_a.x as f32, axis_a.y as f32, axis_a.z as f32, 1.0];
     let mk_vertex = |p: Vec3, u: f32, v: f32| Vertex {
-        position: p, normal: n, uv: [u, v], uv1: [u, v], color: [1.0, 1.0, 1.0, 1.0], tangent: t,
+        position: p, normal: n, uv: [u, v], uv1: [u, v], uv2: [u, v], color: [1.0, 1.0, 1.0, 1.0], tangent: t,
     };
     let mut tris = Vec::with_capacity(N * N * 2);
     let origin = center_on_ground.sub(axis_a.scale(half)).sub(axis_b.scale(half));

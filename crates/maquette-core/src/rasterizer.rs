@@ -63,6 +63,9 @@ pub struct ShadeIn4 {
     /// select `texcoord = 1` will sample at the origin, which is harmless
     /// (matches glTF's implicit-zero fallback).
     pub uv1_u: v128, pub uv1_v: v128,
+    /// TEXCOORD_2. Same fallback semantics as `uv1_*`. Materials referencing
+    /// TEXCOORD_3+ still collapse to slot 2 (see `clamp_texcoord`).
+    pub uv2_u: v128, pub uv2_v: v128,
     /// COLOR_0 (linear RGBA). Splatted 1.0 when the primitive lacks it.
     /// glTF spec: multiplied with baseColor before shading.
     pub col_r: v128, pub col_g: v128, pub col_b: v128, pub col_a: v128,
@@ -89,7 +92,7 @@ pub trait PixelShader {
     fn shade4(&self, in_: ShadeIn4) -> ShadeOut4;
     /// Shade one pixel (called from the scalar scanline remainder). Returns
     /// `None` to discard the fragment (mask alpha).
-    fn shade_scalar(&self, pos: Vec3, normal: Vec3, uv: [f32; 2], uv1: [f32; 2], color: [f32; 4], tangent: [f32; 4]) -> Option<[f32; 4]>;
+    fn shade_scalar(&self, pos: Vec3, normal: Vec3, uv: [f32; 2], uv1: [f32; 2], uv2: [f32; 2], color: [f32; 4], tangent: [f32; 4]) -> Option<[f32; 4]>;
 }
 
 pub struct PixelBuffer {
@@ -385,6 +388,7 @@ impl PixelBuffer {
         normals: &[Vec3; 3],
         uvs: &[[f32; 2]; 3],
         uvs1: &[[f32; 2]; 3],
+        uvs2: &[[f32; 2]; 3],
         colors: &[[f32; 4]; 3],
         tangents: &[[f32; 4]; 3],
         blend: BlendMode,
@@ -431,6 +435,11 @@ impl PixelBuffer {
             (uvs1[0][0] * d0, uvs1[0][1] * d0),
             (uvs1[1][0] * d1, uvs1[1][1] * d1),
             (uvs1[2][0] * d2, uvs1[2][1] * d2),
+        ];
+        let pd_uv2 = [
+            (uvs2[0][0] * d0, uvs2[0][1] * d0),
+            (uvs2[1][0] * d1, uvs2[1][1] * d1),
+            (uvs2[2][0] * d2, uvs2[2][1] * d2),
         ];
         let pd_col = [
             (colors[0][0] * d0, colors[0][1] * d0, colors[0][2] * d0, colors[0][3] * d0),
@@ -484,6 +493,8 @@ impl PixelBuffer {
             let pdv_uv_v  = [f32x4_splat(pd_uv[0].1),  f32x4_splat(pd_uv[1].1),  f32x4_splat(pd_uv[2].1)];
             let pdv_uv1_u = [f32x4_splat(pd_uv1[0].0), f32x4_splat(pd_uv1[1].0), f32x4_splat(pd_uv1[2].0)];
             let pdv_uv1_v = [f32x4_splat(pd_uv1[0].1), f32x4_splat(pd_uv1[1].1), f32x4_splat(pd_uv1[2].1)];
+            let pdv_uv2_u = [f32x4_splat(pd_uv2[0].0), f32x4_splat(pd_uv2[1].0), f32x4_splat(pd_uv2[2].0)];
+            let pdv_uv2_v = [f32x4_splat(pd_uv2[0].1), f32x4_splat(pd_uv2[1].1), f32x4_splat(pd_uv2[2].1)];
             let pdv_col_r = [f32x4_splat(pd_col[0].0), f32x4_splat(pd_col[1].0), f32x4_splat(pd_col[2].0)];
             let pdv_col_g = [f32x4_splat(pd_col[0].1), f32x4_splat(pd_col[1].1), f32x4_splat(pd_col[2].1)];
             let pdv_col_b = [f32x4_splat(pd_col[0].2), f32x4_splat(pd_col[1].2), f32x4_splat(pd_col[2].2)];
@@ -560,6 +571,8 @@ impl PixelBuffer {
                                 let uv_v  = interp(&pdv_uv_v);
                                 let uv1_u = interp(&pdv_uv1_u);
                                 let uv1_v = interp(&pdv_uv1_v);
+                                let uv2_u = interp(&pdv_uv2_u);
+                                let uv2_v = interp(&pdv_uv2_v);
                                 let col_r = interp(&pdv_col_r);
                                 let col_g = interp(&pdv_col_g);
                                 let col_b = interp(&pdv_col_b);
@@ -583,6 +596,7 @@ impl PixelBuffer {
                                     n_x, n_y, n_z,
                                     uv_u, uv_v,
                                     uv1_u, uv1_v,
+                                    uv2_u, uv2_v,
                                     col_r, col_g, col_b, col_a,
                                     tan_x, tan_y, tan_z, tan_w: tan_w_v,
                                 });
@@ -627,6 +641,10 @@ impl PixelBuffer {
                                     (w0s * pd_uv1[0].0 + w1s * pd_uv1[1].0 + w2s * pd_uv1[2].0) * inv_depth,
                                     (w0s * pd_uv1[0].1 + w1s * pd_uv1[1].1 + w2s * pd_uv1[2].1) * inv_depth,
                                 ];
+                                let uv2 = [
+                                    (w0s * pd_uv2[0].0 + w1s * pd_uv2[1].0 + w2s * pd_uv2[2].0) * inv_depth,
+                                    (w0s * pd_uv2[0].1 + w1s * pd_uv2[1].1 + w2s * pd_uv2[2].1) * inv_depth,
+                                ];
                                 let color = [
                                     (w0s * pd_col[0].0 + w1s * pd_col[1].0 + w2s * pd_col[2].0) * inv_depth,
                                     (w0s * pd_col[0].1 + w1s * pd_col[1].1 + w2s * pd_col[2].1) * inv_depth,
@@ -639,7 +657,7 @@ impl PixelBuffer {
                                     (w0s * pd_tan[0].2 + w1s * pd_tan[1].2 + w2s * pd_tan[2].2) * inv_depth,
                                     tan_w_splat,
                                 ];
-                                if let Some(rgba) = shader.shade_scalar(pos, normal, uv, uv1, color, tan) {
+                                if let Some(rgba) = shader.shade_scalar(pos, normal, uv, uv1, uv2, color, tan) {
                                     write_pixel(pixels, zbuf, oit_accum, oit_reveal, idx, zbuf_key as f32, rgba, blend);
                                 }
                             }

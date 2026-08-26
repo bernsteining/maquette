@@ -665,18 +665,30 @@ impl<'a> MaterialShader<'a> {
     /// converted to linear where appropriate. Each texture slot picks TEXCOORD_0
     /// or TEXCOORD_1 based on its `texcoord_*` field in the material.
     #[inline]
-    fn sample_textures4(&self, uv_u: v128, uv_v: v128, uv1_u: v128, uv1_v: v128) -> Samples4 {
+    fn sample_textures4(&self, uv_u: v128, uv_v: v128, uv1_u: v128, uv1_v: v128, uv2_u: v128, uv2_v: v128) -> Samples4 {
         let mut base = [[1.0f32; 4]; 4];
         let mut mr   = [[0.0f32; 4]; 4];
         let mut emit = [[0.0f32; 4]; 4];
         let mut occ  = [1.0f32; 4];
         let mut nrm  = [[0.0f32; 3]; 4];
         let mut trans = [1.0f32; 4];
+        // Diffuse-transmission per-pixel modulators. `dt_fac[i]` samples the
+        // `diffuseTransmissionTexture` alpha channel (spec §KHR_materials_
+        // diffuse_transmission: "the alpha component is multiplied by the
+        // factor"). `dt_col[i]` samples the `diffuseTransmissionColorTexture`
+        // RGB (linear, since it's a color modulator not a display colour).
+        // Both default to 1.0 so materials without textures get factor+color
+        // straight through.
+        let mut dt_fac = [1.0f32; 4];
+        let mut dt_col = [[1.0f32; 3]; 4];
 
         macro_rules! lane { ($i:tt) => { {
             let uv0  = [f32x4_extract_lane::<$i>(uv_u),  f32x4_extract_lane::<$i>(uv_v)];
             let uv1  = [f32x4_extract_lane::<$i>(uv1_u), f32x4_extract_lane::<$i>(uv1_v)];
-            let pick = |n: u8| -> [f32; 2] { if n == 1 { uv1 } else { uv0 } };
+            let uv2  = [f32x4_extract_lane::<$i>(uv2_u), f32x4_extract_lane::<$i>(uv2_v)];
+            let pick = |n: u8| -> [f32; 2] {
+                match n { 2 => uv2, 1 => uv1, _ => uv0 }
+            };
             if let Some(t) = self.base_tex {
                 let s = t.sample_lod(self.material.xform_base.apply(pick(self.material.texcoord_base)), self.lod_base);
                 base[$i] = [
@@ -708,6 +720,20 @@ impl<'a> MaterialShader<'a> {
             if let Some(t) = self.transmission_tex {
                 trans[$i] = t.sample_lod(self.material.xform_transmission.apply(pick(self.material.texcoord_transmission)), self.lod_transmission)[0];
             }
+            if let Some(t) = self.diffuse_transmission_tex {
+                // Spec: only the alpha channel of the DT texture modulates the factor.
+                let s = t.sample_lod(self.material.xform_diffuse_transmission.apply(pick(self.material.texcoord_diffuse_transmission)), self.lod_diffuse_transmission);
+                dt_fac[$i] = s[3];
+            }
+            if let Some(t) = self.diffuse_transmission_color_tex {
+                // Spec: color texture is sRGB, converted to linear for shading.
+                let s = t.sample_lod(self.material.xform_diffuse_transmission_color.apply(pick(self.material.texcoord_diffuse_transmission_color)), self.lod_diffuse_transmission_color);
+                dt_col[$i] = [
+                    srgb_to_linear_f01(s[0]),
+                    srgb_to_linear_f01(s[1]),
+                    srgb_to_linear_f01(s[2]),
+                ];
+            }
         } } }
         lane!(0); lane!(1); lane!(2); lane!(3);
 
@@ -726,6 +752,10 @@ impl<'a> MaterialShader<'a> {
             normal_ly: f32x4(nrm[0][1], nrm[1][1], nrm[2][1], nrm[3][1]),
             normal_lz: f32x4(nrm[0][2], nrm[1][2], nrm[2][2], nrm[3][2]),
             transmission: f32x4(trans[0], trans[1], trans[2], trans[3]),
+            dt_factor_tex:  f32x4(dt_fac[0], dt_fac[1], dt_fac[2], dt_fac[3]),
+            dt_color_r_tex: f32x4(dt_col[0][0], dt_col[1][0], dt_col[2][0], dt_col[3][0]),
+            dt_color_g_tex: f32x4(dt_col[0][1], dt_col[1][1], dt_col[2][1], dt_col[3][1]),
+            dt_color_b_tex: f32x4(dt_col[0][2], dt_col[1][2], dt_col[2][2], dt_col[3][2]),
         }
     }
 }
@@ -744,6 +774,12 @@ struct Samples4 {
     /// KHR_materials_transmission per-pixel scale (R channel × factor). `1.0`
     /// when no transmission texture — the factor multiply happens outside.
     transmission: v128,
+    /// KHR_materials_diffuse_transmission per-pixel modulators. Alpha of the
+    /// dt texture scales the factor; RGB of the color texture (linearised)
+    /// scales the color. All default to 1.0 so materials without textures
+    /// get factor+color straight through.
+    dt_factor_tex: v128,
+    dt_color_r_tex: v128, dt_color_g_tex: v128, dt_color_b_tex: v128,
 }
 
 impl<'a> PixelShader for MaterialShader<'a> {
@@ -761,7 +797,7 @@ impl<'a> PixelShader for MaterialShader<'a> {
         // Sample all textures once per 4-pixel batch (scalar gather, packed
         // back to SIMD lanes). Textures without a binding yield the identity
         // for the multiply that follows.
-        let s = self.sample_textures4(in_.uv_u, in_.uv_v, in_.uv1_u, in_.uv1_v);
+        let s = self.sample_textures4(in_.uv_u, in_.uv_v, in_.uv1_u, in_.uv1_v, in_.uv2_u, in_.uv2_v);
 
         // Post-sample material values. glTF spec: `base = baseColorFactor
         // · baseColorTexture · COLOR_0`. COLOR_0 splats to 1.0 when absent
@@ -1049,17 +1085,24 @@ impl<'a> PixelShader for MaterialShader<'a> {
             // KHR_materials_diffuse_transmission — matte back-lit lambertian.
             // Uses the flipped normal (max(0, -N·L)) so backlit surfaces glow
             // even when the visible face is in shadow. Tinted by
-            // `diffuse_transmission_color`; the front-side kd already includes
-            // `(1 - metallic)` so the transmitted term does too — an all-metal
-            // surface has no transmission per spec.
+            // `diffuse_transmission_color` × sampled color texture; the
+            // front-side kd already includes `(1 - metallic)` so the
+            // transmitted term does too — an all-metal surface has no
+            // transmission per spec. Textures modulate per-pixel: alpha
+            // channel scales factor, RGB scales color (both default to 1
+            // when the texture isn't bound).
             if self.has_diffuse_transmission {
                 let ndl_back = f32x4_max(zero, f32x4_neg(dot_v3(nx_final, ny_final, nz_final, lx, ly, lz)));
+                let dt_f = f32x4_mul(self.diffuse_transmission_factor, s.dt_factor_tex);
+                let dt_cr = f32x4_mul(self.dt_color_r, s.dt_color_r_tex);
+                let dt_cg = f32x4_mul(self.dt_color_g, s.dt_color_g_tex);
+                let dt_cb = f32x4_mul(self.dt_color_b, s.dt_color_b_tex);
                 let scale = f32x4_mul(
-                    f32x4_mul(one_minus_metallic, self.diffuse_transmission_factor),
+                    f32x4_mul(one_minus_metallic, dt_f),
                     f32x4_mul(inv_pi, f32x4_mul(ndl_back, shadow_v)));
-                base_r = f32x4_add(base_r, f32x4_mul(f32x4_mul(self.dt_color_r, atten_r), scale));
-                base_g = f32x4_add(base_g, f32x4_mul(f32x4_mul(self.dt_color_g, atten_g), scale));
-                base_b = f32x4_add(base_b, f32x4_mul(f32x4_mul(self.dt_color_b, atten_b), scale));
+                base_r = f32x4_add(base_r, f32x4_mul(f32x4_mul(dt_cr, atten_r), scale));
+                base_g = f32x4_add(base_g, f32x4_mul(f32x4_mul(dt_cg, atten_g), scale));
+                base_b = f32x4_add(base_b, f32x4_mul(f32x4_mul(dt_cb, atten_b), scale));
             }
 
             // KHR_materials_clearcoat — per-light layered attenuation + spec.
@@ -1140,6 +1183,12 @@ impl<'a> PixelShader for MaterialShader<'a> {
             let max_lod = env.max_lod;
             let mut diff = [[0.0f32; 3]; 4];
             let mut spec = [[0.0f32; 3]; 4];
+            // Back-facing diffuse sample for KHR_materials_diffuse_transmission's
+            // IBL contribution — the env at -N models light passing through the
+            // surface from the far side. Only populated when the material
+            // actually uses DT (otherwise the sample is wasted).
+            let mut diff_back = [[0.0f32; 3]; 4];
+            let dt_on = self.has_diffuse_transmission;
             macro_rules! lane { ($i:tt) => { {
                 let nx = f32x4_extract_lane::<$i>(nx_final);
                 let ny = f32x4_extract_lane::<$i>(ny_final);
@@ -1150,6 +1199,7 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 let rough = f32x4_extract_lane::<$i>(roughness);
                 diff[$i] = env.sample_diffuse(nx, ny, nz);
                 spec[$i] = env.sample_dir(rxl, ryl, rzl, rough * max_lod);
+                if dt_on { diff_back[$i] = env.sample_diffuse(-nx, -ny, -nz); }
             } } }
             lane!(0); lane!(1); lane!(2); lane!(3);
             let irr_r = f32x4(diff[0][0], diff[1][0], diff[2][0], diff[3][0]);
@@ -1159,9 +1209,26 @@ impl<'a> PixelShader for MaterialShader<'a> {
             let env_spec_g = f32x4(spec[0][1], spec[1][1], spec[2][1], spec[3][1]);
             let env_spec_b = f32x4(spec[0][2], spec[1][2], spec[2][2], spec[3][2]);
 
-            let ad_r = f32x4_mul(f32x4_mul(irr_r, diffuse_r), occlusion);
-            let ad_g = f32x4_mul(f32x4_mul(irr_g, diffuse_g), occlusion);
-            let ad_b = f32x4_mul(f32x4_mul(irr_b, diffuse_b), occlusion);
+            let mut ad_r = f32x4_mul(f32x4_mul(irr_r, diffuse_r), occlusion);
+            let mut ad_g = f32x4_mul(f32x4_mul(irr_g, diffuse_g), occlusion);
+            let mut ad_b = f32x4_mul(f32x4_mul(irr_b, diffuse_b), occlusion);
+
+            // KHR_materials_diffuse_transmission — env contribution. Same
+            // `(1 - metallic) · factor · color` scaling as the direct-light
+            // lobe, but here the "light" is the env sampled at -N.
+            if dt_on {
+                let irr_back_r = f32x4(diff_back[0][0], diff_back[1][0], diff_back[2][0], diff_back[3][0]);
+                let irr_back_g = f32x4(diff_back[0][1], diff_back[1][1], diff_back[2][1], diff_back[3][1]);
+                let irr_back_b = f32x4(diff_back[0][2], diff_back[1][2], diff_back[2][2], diff_back[3][2]);
+                let dt_f  = f32x4_mul(self.diffuse_transmission_factor, s.dt_factor_tex);
+                let dt_cr = f32x4_mul(self.dt_color_r, s.dt_color_r_tex);
+                let dt_cg = f32x4_mul(self.dt_color_g, s.dt_color_g_tex);
+                let dt_cb = f32x4_mul(self.dt_color_b, s.dt_color_b_tex);
+                let scale = f32x4_mul(f32x4_mul(one_minus_metallic, dt_f), occlusion);
+                ad_r = f32x4_add(ad_r, f32x4_mul(f32x4_mul(irr_back_r, dt_cr), scale));
+                ad_g = f32x4_add(ad_g, f32x4_mul(f32x4_mul(irr_back_g, dt_cg), scale));
+                ad_b = f32x4_add(ad_b, f32x4_mul(f32x4_mul(irr_back_b, dt_cb), scale));
+            }
 
             // Karis split-sum polynomial (full form with exp2 grazing term).
             // Returns (scale, bias) that combine F0 and roughness.
@@ -1323,7 +1390,7 @@ impl<'a> PixelShader for MaterialShader<'a> {
     /// Fix: splat the scalar inputs into all 4 lanes and call `shade4`,
     /// then extract lane 0. Guarantees pixel-perfect consistency between
     /// SIMD and scalar paths.
-    fn shade_scalar(&self, pos: Vec3, normal: Vec3, uv: [f32; 2], uv1: [f32; 2], color: [f32; 4], tangent: [f32; 4]) -> Option<[f32; 4]> {
+    fn shade_scalar(&self, pos: Vec3, normal: Vec3, uv: [f32; 2], uv1: [f32; 2], uv2: [f32; 2], color: [f32; 4], tangent: [f32; 4]) -> Option<[f32; 4]> {
         let in4 = ShadeIn4 {
             pos_x: f32x4_splat(pos.x as f32),
             pos_y: f32x4_splat(pos.y as f32),
@@ -1335,6 +1402,8 @@ impl<'a> PixelShader for MaterialShader<'a> {
             uv_v:  f32x4_splat(uv[1]),
             uv1_u: f32x4_splat(uv1[0]),
             uv1_v: f32x4_splat(uv1[1]),
+            uv2_u: f32x4_splat(uv2[0]),
+            uv2_v: f32x4_splat(uv2[1]),
             col_r: f32x4_splat(color[0]),
             col_g: f32x4_splat(color[1]),
             col_b: f32x4_splat(color[2]),
@@ -1437,7 +1506,8 @@ fn compute_clearcoat_normal(sh: &MaterialShader, in_: &ShadeIn4) -> (v128, v128,
     macro_rules! lane { ($i:tt) => { {
         let uv0 = [f32x4_extract_lane::<$i>(in_.uv_u),  f32x4_extract_lane::<$i>(in_.uv_v)];
         let uv1 = [f32x4_extract_lane::<$i>(in_.uv1_u), f32x4_extract_lane::<$i>(in_.uv1_v)];
-        let uv_raw = if sh.material.texcoord_clearcoat_normal == 1 { uv1 } else { uv0 };
+        let uv2 = [f32x4_extract_lane::<$i>(in_.uv2_u), f32x4_extract_lane::<$i>(in_.uv2_v)];
+        let uv_raw = match sh.material.texcoord_clearcoat_normal { 2 => uv2, 1 => uv1, _ => uv0 };
         let s = t.sample_lod(sh.material.xform_clearcoat_normal.apply(uv_raw), sh.lod_clearcoat_normal);
         cc[$i] = [s[0] * 2.0 - 1.0, s[1] * 2.0 - 1.0, s[2] * 2.0 - 1.0];
     } } }
