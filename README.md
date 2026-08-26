@@ -9,12 +9,12 @@
 
 ## The workspace
 
-| Package | Kind | What it renders | Docs |
-|---|---|---|---|
-| **[maquette](maquette/README.md)** | Typst plugin | STL / OBJ / PLY, with a full CAD-style shading + material feature set | [`maquette/README.md`](maquette/README.md) |
-| **[maquette-gltf](crates/maquette-gltf/README.md)** | Typst plugin | glTF 2.0 (`.glb` / `.gltf`) with PBR, IBL, KHR_materials_* extensions, Draco, quantization | [`crates/maquette-gltf/README.md`](crates/maquette-gltf/README.md) |
-| **[maquette-scad](crates/maquette-scad/README.md)** | Typst plugin | OpenSCAD source text → in-browser mesh compilation → any maquette renderer | [`crates/maquette-scad/README.md`](crates/maquette-scad/README.md) |
-| **[maquette-core](crates/maquette-core/README.md)** | Rust rlib | Shared render primitives (rasterizer, SSAA/SSAO/FXAA, shadow maps, IBL, HDR + texture decode) | [`crates/maquette-core/README.md`](crates/maquette-core/README.md) |
+| Package | Kind | What it renders |
+|---|---|---|
+| **[maquette](maquette/README.md)** | Typst plugin | STL / OBJ / PLY, with a full CAD-style shading + material feature set |
+| **[maquette-gltf](crates/maquette-gltf/README.md)** | Typst plugin | glTF 2.0 (`.glb` / `.gltf`) with PBR, IBL, KHR_materials_* extensions, Draco, quantization |
+| **[maquette-scad](crates/maquette-scad/README.md)** | Typst plugin | OpenSCAD source text → in-browser mesh compilation → any maquette renderer |
+| **[maquette-core](crates/maquette-core/README.md)** | Rust rlib | Shared render primitives (rasterizer, SSAA/SSAO/FXAA, shadow maps, IBL, HDR + texture decode) |
 
 The three Typst plugins each compile to a single WebAssembly module and pull their render primitives from `maquette-core`. They ship independently on Typst Universe — you pick the one(s) matching your input format.
 
