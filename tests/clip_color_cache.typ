@@ -5,10 +5,10 @@
 // every later render of the same mesh reuses its color, silently ignoring
 // `color`. This guards against reintroducing that stale-cache bug.
 //
-// Run:  typst compile --root . tests/clip_color_cache.typ /dev/null
+// Run:  typst compile --root . tests/clip_color_cache.typ -f pdf /tmp/clip_color_cache.pdf
 // A failing `#assert` makes `typst compile` exit non-zero (CI-friendly).
 
-#let mp = plugin("/maquette/maquette.wasm")
+#let mp = plugin("/crates/maquette/maquette.wasm")
 #let cube = read("/examples/data/cube.stl", encoding: none)
 
 #let svg(cfg) = str(mp.render_stl(cube, bytes(json.encode(cfg))))

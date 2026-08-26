@@ -4,10 +4,10 @@
 // wired in render_png). This guards against the hatch silently reverting to a
 // plain solid cap in PNG.
 //
-// Run:  typst compile --root . tests/hatch_png.typ /dev/null
+// Run:  typst compile --root . tests/hatch_png.typ -f pdf /tmp/hatch_png.pdf
 // A failing `#assert` makes `typst compile` exit non-zero (CI-friendly).
 
-#let mp = plugin("/maquette/maquette.wasm")
+#let mp = plugin("/crates/maquette/maquette.wasm")
 #let cube = read("/examples/data/cube.stl", encoding: none)
 
 #let png(cfg) = array(mp.render_stl(cube, bytes(json.encode(cfg))))

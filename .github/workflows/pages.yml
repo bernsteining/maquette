@@ -74,7 +74,7 @@ jobs:
         # so nothing (registry, toolchain, workspace) leaks into the artifact.
         run: |
           make wasm REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
-          cp maquette/maquette.wasm docs/maquette.wasm
+          cp crates/maquette/maquette.wasm docs/maquette.wasm
           ls -la docs/maquette.wasm
           # Demo models aren't committed under docs/ (canonical copies live in
           # examples/data/); stage them into the artifact the same way as the wasm.

@@ -31,7 +31,7 @@ jobs:
         plugin:
           - name: maquette
             make_target: wasm
-            wasm_path: maquette/maquette.wasm
+            wasm_path: crates/maquette/maquette.wasm
           - name: maquette-gltf
             make_target: gltf-wasm
             wasm_path: crates/maquette-gltf/maquette-gltf.wasm

@@ -1,0 +1,12 @@
+[package]
+name = "maquette"
+version = "0.1.3"
+edition = "2021"
+description = "Typst plugin that rasterizes STL / OBJ / PLY models into raster or SVG images at document build time. Root of the maquette family (maquette-gltf, maquette-scad live alongside)."
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }

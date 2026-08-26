@@ -8,10 +8,10 @@
 // changed nothing). The fix applies `zoom` as a direct post-fit multiplier on
 // the projection magnification (`ProjectionSetup::magnified`).
 //
-// Run:  typst compile --root . tests/zoom_projection.typ /dev/null
+// Run:  typst compile --root . tests/zoom_projection.typ -f pdf /tmp/zoom_projection.pdf
 // A failing `#assert` makes `typst compile` exit non-zero (CI-friendly).
 
-#let mp = plugin("/maquette/maquette.wasm")
+#let mp = plugin("/crates/maquette/maquette.wasm")
 #let teapot = read("/examples/data/teapot.obj")
 
 #let svg(cfg) = str(mp.render_obj(bytes(teapot), bytes(json.encode(cfg))))

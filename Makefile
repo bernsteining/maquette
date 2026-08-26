@@ -1,5 +1,5 @@
 WASM_TARGET = target/wasm32-unknown-unknown/release/maquette.wasm
-WASM_OUT = maquette/maquette.wasm
+WASM_OUT = crates/maquette/maquette.wasm
 WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette/0.1.0/maquette.wasm
 
 # Path remaps so no build-machine paths (home, cargo registry, rustup toolchain)
@@ -14,7 +14,7 @@ RUSTFLAGS_WASM = -Ctarget-feature=+simd128,+bulk-memory,+sign-ext,+nontrapping-f
 # Build + optimize the wasm into $(WASM_OUT). Single source of truth for the
 # build — used by local `build` and by CI (docs/ demo + Pages).
 wasm:
-	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release
+	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release -p maquette
 	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(WASM_TARGET) -o $(WASM_OUT)
 	@ls -lh $(WASM_OUT)
 
