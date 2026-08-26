@@ -96,6 +96,7 @@ SCAD_WASM_OUT = crates/maquette-scad/maquette-scad.wasm
 # libc++ (Debian bookworm's is too old for shim v0.5.0's __config_site
 # override — errors like `use of undeclared identifier 'wcschr'`). Emsdk's
 # headers are guaranteed compatible with the clang++ we're pairing with.
+EMSDK_LLVM    := $(if $(EMSDK),$(EMSDK)/upstream/bin,)
 EMSDK_WASMLD  := $(if $(EMSDK),$(EMSDK)/upstream/bin/wasm-ld,)
 EMSDK_LIBCXX  := $(if $(EMSDK),$(EMSDK)/upstream/emscripten/system/lib/libcxx/include,)
 ifeq ($(strip $(EMSDK_WASMLD)),)
@@ -105,7 +106,12 @@ SCAD_ENV =
 else
 SCAD_CXX_FLAGS = -flto
 SCAD_RUSTFLAGS_EXTRA = -Clinker=$(EMSDK_WASMLD) -Clink-arg=--lto-O3
-SCAD_ENV = WASM_CXX_SHIM_LIBCXX_HEADERS=$(EMSDK_LIBCXX)
+# Pin BOTH clang++ and libc++ to emsdk so the libcxx-extras compile (in
+# build.rs) and the manifold+Clipper2 compile (via the shim's cmake) use
+# the exact same toolchain. Without WASM_CXX_SHIM_LLVM_BIN_DIR the shim
+# probes /usr/lib/llvm-N/bin first — on Debian bookworm that resolves to
+# clang-14, whose builtin headers collide with emsdk's newer libc++ src.
+SCAD_ENV = WASM_CXX_SHIM_LLVM_BIN_DIR=$(EMSDK_LLVM) WASM_CXX_SHIM_LIBCXX_HEADERS=$(EMSDK_LIBCXX)
 endif
 
 # Build + optimize the scad plugin wasm. Mirrors the core `wasm` recipe (same
