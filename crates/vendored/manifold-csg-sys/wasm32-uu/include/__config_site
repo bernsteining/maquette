@@ -1,0 +1,73 @@
+// test/smoke/include/__config_site — libc++ site config override.
+//
+// Adapted from pca006132's manifold-on-wasm config:
+//   https://github.com/elalish/manifold/discussions/1046#discussioncomment-11302257
+// Updated for LLVM 20+'s numeric-value config macros (LLVM 19 used
+// defined/undefined; LLVM 20 switched to numeric 0/1).
+//
+// Reference (LLVM 20–22+; knobs added across versions are noted inline):
+//   https://github.com/llvm/llvm-project/blob/main/libcxx/include/__config_site.in
+//
+// Disables libc++'s assumptions about threads, filesystem, locale,
+// wide chars, monotonic clock, etc. Without this, libc++ headers drag
+// in symbols our shim doesn't and shouldn't ship.
+//
+// Placed on the include path BEFORE libc++'s own config so libc++
+// picks ours up instead of the install-tree-baked one.
+//
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef _LIBCPP___CONFIG_SITE
+#define _LIBCPP___CONFIG_SITE
+
+#define _LIBCPP_ABI_VERSION 1
+#define _LIBCPP_ABI_NAMESPACE __1
+#define _LIBCPP_ABI_FORCE_ITANIUM 0
+#define _LIBCPP_ABI_FORCE_MICROSOFT 0
+
+#define _LIBCPP_HAS_THREADS 0              // no pthreads on wasm32-unknown-unknown
+#define _LIBCPP_HAS_MONOTONIC_CLOCK 0      // no clock_gettime
+#define _LIBCPP_HAS_TERMINAL 0
+#define _LIBCPP_HAS_MUSL_LIBC 1            // wasm-cxx-shim provides musl-style headers
+#define _LIBCPP_HAS_THREAD_API_PTHREAD 0
+#define _LIBCPP_HAS_THREAD_API_EXTERNAL 0
+#define _LIBCPP_HAS_THREAD_API_WIN32 0
+#define _LIBCPP_HAS_THREAD_API_C11 0
+#define _LIBCPP_HAS_VENDOR_AVAILABILITY_ANNOTATIONS 0
+#define _LIBCPP_HAS_FILESYSTEM 0           // no filesystem syscalls
+#define _LIBCPP_HAS_RANDOM_DEVICE 0        // no /dev/urandom
+#define _LIBCPP_HAS_LOCALIZATION 0         // disables iostreams + locale machinery
+#define _LIBCPP_HAS_UNICODE 0
+#define _LIBCPP_HAS_WIDE_CHARACTERS 0      // no wchar_t API surface
+#define _LIBCPP_HAS_TIME_ZONE_DATABASE 0
+#define _LIBCPP_INSTRUMENTED_WITH_ASAN 0
+
+// PSTL backend — serial (no threading) for the few PSTL paths we hit.
+#define _LIBCPP_PSTL_BACKEND_SERIAL
+
+// Hardening — extensive (level 2). Hardening assertions route through
+// our __assertion_handler override, which traps.
+#define _LIBCPP_HARDENING_MODE_DEFAULT 2
+
+// LLVM 21+ split hardening into "mode" (above) + "semantic" (below).
+// Older libc++ ignores this knob; newer libc++ aborts at __config time
+// without it. ENFORCE matches our trapping __assertion_handler and the
+// extensive hardening level above.
+#define _LIBCPP_ASSERTION_SEMANTIC_DEFAULT _LIBCPP_ASSERTION_SEMANTIC_ENFORCE
+
+#ifdef __clang__
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wmacro-redefined"
+#endif
+
+#ifdef __clang__
+#  pragma clang diagnostic pop
+#endif
+
+#endif // _LIBCPP___CONFIG_SITE

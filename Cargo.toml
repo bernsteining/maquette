@@ -14,6 +14,15 @@
 # own set of features and the merge needs its own visual-regression pass).
 resolver = "2"
 members = ["crates/maquette-core", "crates/maquette-gltf", "crates/maquette-scad"]
+exclude = ["crates/vendored"]
+
+# Local fork of manifold-csg-sys with MANIFOLD_WASM_CXX_FLAGS env-var
+# passthrough patched into build/wasm.rs. Delta vs 3.5.104 = one env
+# read + splicing that into the two cmake configures (shim + manifold)
+# and the libcxx-extras clang++ invocation. Enables benchmarking
+# -O3/-msimd128/-flto without waiting on an upstream release.
+[patch.crates-io]
+manifold-csg-sys = { path = "crates/vendored/manifold-csg-sys" }
 
 [package]
 name = "maquette"

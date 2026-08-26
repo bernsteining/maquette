@@ -1,0 +1,31 @@
+[package]
+name = "manifold-csg-sys"
+description = "Raw FFI bindings to the manifold3d C API for constructive solid geometry"
+version = "3.5.104"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+keywords = ["csg", "geometry", "mesh", "manifold", "ffi"]
+categories = ["algorithms", "external-ffi-bindings"]
+links = "manifold"
+build = "build.rs"
+
+[features]
+default = ["parallel"]
+parallel = []
+# Acknowledges that wasm32-unknown-unknown support is provisional. Required
+# to build for that target. See the "Browser without Emscripten" section of
+# the README for the rationale (carry-patches against upstream, no exception
+# runtime, OBJ I/O disabled).
+unstable-wasm-uu = []
+
+[build-dependencies]
+cmake = "0.1"
+
+[package.metadata.docs.rs]
+features = ["parallel"]
+
+[lints]
+workspace = true

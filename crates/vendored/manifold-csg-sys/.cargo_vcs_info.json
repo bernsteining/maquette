@@ -1,0 +1,6 @@
+{
+  "git": {
+    "sha1": "8f0dd49c7e4830e7e981abfafb2f220e5c350496"
+  },
+  "path_in_vcs": "crates/manifold-csg-sys"
+}

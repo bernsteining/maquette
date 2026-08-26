@@ -1,0 +1,83 @@
+// test/manifold-link/include/mutex — stub <mutex> for no-thread builds.
+//
+// libc++ gates std::mutex / std::recursive_mutex etc. behind
+// `#if _LIBCPP_HAS_THREADS`. We compile manifold with
+// `_LIBCPP_HAS_THREADS=0` (via __config_site override), so libc++'s
+// <mutex> doesn't declare those types. Manifold's source still
+// references them — the upstream-friendly fix is to ifdef the mutex
+// usage out, but the smaller intervention is to provide stub
+// implementations here so manifold compiles unchanged. With threads
+// off, all mutex operations are trivially correct as no-ops.
+//
+// On the include path BEFORE libc++'s <mutex>; libc++'s gets shadowed.
+//
+// Smoke-test-companion only; consumers use real libc++ <mutex> in
+// threaded builds.
+#ifndef _WASM_CXX_SHIM_MANIFOLD_LINK_MUTEX
+#define _WASM_CXX_SHIM_MANIFOLD_LINK_MUTEX
+
+#include <__config>
+
+namespace std { inline namespace __1 {
+
+class mutex {
+public:
+    constexpr mutex() noexcept = default;
+    ~mutex() = default;
+    mutex(const mutex&) = delete;
+    mutex& operator=(const mutex&) = delete;
+    void lock()       {}
+    bool try_lock()   { return true; }
+    void unlock()     {}
+};
+
+class recursive_mutex {
+public:
+    recursive_mutex() = default;
+    ~recursive_mutex() = default;
+    recursive_mutex(const recursive_mutex&) = delete;
+    recursive_mutex& operator=(const recursive_mutex&) = delete;
+    void lock()       {}
+    bool try_lock()   { return true; }
+    void unlock()     {}
+};
+
+template <class _Mutex>
+class lock_guard {
+public:
+    explicit lock_guard(_Mutex&) {}
+    lock_guard(const lock_guard&) = delete;
+    lock_guard& operator=(const lock_guard&) = delete;
+};
+
+template <class... _MArgs>
+class scoped_lock {
+public:
+    explicit scoped_lock(_MArgs&...) {}
+    scoped_lock(const scoped_lock&) = delete;
+    scoped_lock& operator=(const scoped_lock&) = delete;
+};
+
+template <class _Mutex>
+class unique_lock {
+public:
+    unique_lock() = default;
+    explicit unique_lock(_Mutex&) {}
+    unique_lock(const unique_lock&) = delete;
+    unique_lock(unique_lock&&) = default;
+    unique_lock& operator=(unique_lock&&) = default;
+    void lock()       {}
+    bool try_lock()   { return true; }
+    void unlock()     {}
+};
+
+struct defer_lock_t  { explicit defer_lock_t()  = default; };
+struct try_to_lock_t { explicit try_to_lock_t() = default; };
+struct adopt_lock_t  { explicit adopt_lock_t()  = default; };
+inline constexpr defer_lock_t  defer_lock{};
+inline constexpr try_to_lock_t try_to_lock{};
+inline constexpr adopt_lock_t  adopt_lock{};
+
+}}  // namespace std::__1
+
+#endif

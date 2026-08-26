@@ -1,0 +1,10 @@
+# Cache-busting marker for CI's actions/cache stanzas.
+#
+# Workflow `key:` and `restore-keys:` both hash this file, so bumping
+# anything below invalidates every matching cache the next time CI runs.
+# Use this when restored caches contain stale state that the normal
+# Cargo.lock / build.rs hash doesn't catch — e.g. a cmake build dir
+# that hardcoded a per-runner-job temp path that no longer exists.
+#
+# Bump procedure: increment the integer below, commit, push.
+2
