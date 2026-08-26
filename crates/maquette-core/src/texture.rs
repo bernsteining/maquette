@@ -32,6 +32,11 @@ pub struct Texture {
     pub wrap_t: Wrap,
     pub mag_filter: Filter,
     pub min_filter: Filter,
+    /// `0.5 · log₂(base_w · base_h)` — half the constant term of the shader's
+    /// per-triangle LOD formula `0.5 · log₂(lod_scale · w · h)`, precomputed
+    /// once at texture load so the shader only pays `0.5 · log₂(lod_scale)`
+    /// (an add + a log, but the `w · h` factor drops out).
+    pub lod_bias: f32,
 }
 
 impl Texture {
@@ -151,19 +156,53 @@ fn sample_bilinear(mip: &MipLevel, u: f32, v: f32, wrap_s: Wrap, wrap_t: Wrap) -
     let (x0, x1) = neighbour_indices(x0, mip.width  as i32, wrap_s);
     let (y0, y1) = neighbour_indices(y0, mip.height as i32, wrap_t);
 
-    let p00 = pixel_norm(mip, x0 as u32, y0 as u32);
-    let p10 = pixel_norm(mip, x1 as u32, y0 as u32);
-    let p01 = pixel_norm(mip, x0 as u32, y1 as u32);
-    let p11 = pixel_norm(mip, x1 as u32, y1 as u32);
-
-    let ix = 1.0 - fx;
-    let iy = 1.0 - fy;
+    // Load 4 texels as `v128` (RGBA8→f32×4 in one op chain per texel), then
+    // do the bilinear weighted sum fully in SIMD. Was scalar per-channel:
+    // 4 texels × 4 chans × 3 lerp ops (`p·ix + p·fx`, then y-lerp) = 48+
+    // scalar ops. SIMD collapses that to ~15 f32x4 ops. Hot for any textured
+    // material — this is called ~5-10 times per pixel with a typical PBR
+    // asset (base, MR, normal, emissive, occlusion, [transmission]) bound.
+    use std::arch::wasm32::*;
+    let p00 = load_texel_simd(mip, x0 as u32, y0 as u32);
+    let p10 = load_texel_simd(mip, x1 as u32, y0 as u32);
+    let p01 = load_texel_simd(mip, x0 as u32, y1 as u32);
+    let p11 = load_texel_simd(mip, x1 as u32, y1 as u32);
+    let fx4 = f32x4_splat(fx);
+    let ix4 = f32x4_splat(1.0 - fx);
+    let fy4 = f32x4_splat(fy);
+    let iy4 = f32x4_splat(1.0 - fy);
+    let top = f32x4_add(f32x4_mul(p00, ix4), f32x4_mul(p10, fx4));
+    let bot = f32x4_add(f32x4_mul(p01, ix4), f32x4_mul(p11, fx4));
+    let out = f32x4_add(f32x4_mul(top, iy4), f32x4_mul(bot, fy4));
     [
-        (p00[0]*ix + p10[0]*fx)*iy + (p01[0]*ix + p11[0]*fx)*fy,
-        (p00[1]*ix + p10[1]*fx)*iy + (p01[1]*ix + p11[1]*fx)*fy,
-        (p00[2]*ix + p10[2]*fx)*iy + (p01[2]*ix + p11[2]*fx)*fy,
-        (p00[3]*ix + p10[3]*fx)*iy + (p01[3]*ix + p11[3]*fx)*fy,
+        f32x4_extract_lane::<0>(out),
+        f32x4_extract_lane::<1>(out),
+        f32x4_extract_lane::<2>(out),
+        f32x4_extract_lane::<3>(out),
     ]
+}
+
+/// Load one RGBA8 texel from `mip` at `(x, y)` and expand to `f32x4` in
+/// `[0, 1]`. Replaces scalar `pixel_norm` — the u32 unaligned load + SIMD
+/// unsigned-extend chain hits ~5 wasm ops vs the 8 (4 loads + 4 muls) of
+/// the scalar version. Bounds are trusted: callers pass wrap/clamped x/y.
+#[inline(always)]
+fn load_texel_simd(mip: &MipLevel, x: u32, y: u32) -> std::arch::wasm32::v128 {
+    use std::arch::wasm32::*;
+    let off = ((y * mip.width + x) * 4) as usize;
+    unsafe {
+        // Load the 4-byte RGBA texel as a u32 into the low lane of v128 (the
+        // remaining 12 bytes are don't-care — they get shifted out below).
+        let bytes = std::ptr::read_unaligned(mip.rgba.as_ptr().add(off) as *const u32);
+        let v = i32x4(bytes as i32, 0, 0, 0);
+        // Widen bytes → u16 → u32 via two unsigned extends: byte 0..3 of `v`
+        // become the four u32 lanes.
+        let u16s = u16x8_extend_low_u8x16(v);
+        let u32s = u32x4_extend_low_u16x8(u16s);
+        // Convert to f32x4 (unsigned) and normalise to [0, 1].
+        let f = f32x4_convert_u32x4(u32s);
+        f32x4_mul(f, f32x4_splat(1.0 / 255.0))
+    }
 }
 
 #[inline(always)]

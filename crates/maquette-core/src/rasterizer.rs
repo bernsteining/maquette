@@ -19,6 +19,18 @@
 use crate::math::Vec3;
 
 use std::arch::wasm32::*;
+use std::cell::RefCell;
+
+// Reusable scratch buffers for SSAO. Sized on demand each render, but the
+// backing allocation is retained across calls — so an animation scrub with
+// N frames does one alloc + fill instead of N. Also applies to the harness
+// bench loop (--bench=5 sees ~4 fewer 1MB allocations). thread_local rather
+// than static-mut so this stays sound if we ever host multi-threaded wasm.
+thread_local! {
+    static AO_BUFFER:    RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+    static FLAT_OFFSETS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
+    static Z_BIASES:     RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+}
 
 /// Per-pixel write behaviour once the shader has produced a linear RGBA sample.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -671,8 +683,16 @@ impl PixelBuffer {
         let num_samples = offsets[0].len();
         let batches = num_samples / 4;
         let n_rot = crate::ssao::NOISE_ROTATIONS;
-        let mut flat_offsets = vec![0i32; n_rot * num_samples];
-        let mut z_biases = vec![0.0f32; n_rot * num_samples];
+        // Take ownership of the reusable buffers out of the thread-locals for
+        // the duration of this render, then put them back at the end. Keeps
+        // the backing allocation alive across renders (saves ~1 MB alloc + fill
+        // per 512×512 render for `ao_buffer`, plus a couple of small ones for
+        // the offset tables). Safe: apply_ssao has no early returns / `?`, so
+        // the swap-back at the bottom always runs.
+        let mut flat_offsets = FLAT_OFFSETS.with(|c| std::mem::take(&mut *c.borrow_mut()));
+        let mut z_biases     = Z_BIASES    .with(|c| std::mem::take(&mut *c.borrow_mut()));
+        flat_offsets.clear(); flat_offsets.resize(n_rot * num_samples, 0);
+        z_biases.clear();     z_biases.resize(n_rot * num_samples, 0.0);
         let mut max_dx = 0i32;
         let mut max_dy = 0i32;
         for (p, pattern) in offsets.iter().enumerate() {
@@ -691,7 +711,9 @@ impl PixelBuffer {
         let neg_inf_v = f32x4_splat(f32::NEG_INFINITY);
         let zbuf_ptr = self.zbuf.as_ptr();
 
-        let mut ao_buffer = vec![1.0_f32; w * h];
+        let mut ao_buffer = AO_BUFFER.with(|c| std::mem::take(&mut *c.borrow_mut()));
+        ao_buffer.clear();
+        ao_buffer.resize(w * h, 1.0);
 
         macro_rules! ssao_scalar_pixel {
             ($x:expr, $y:expr, $idx:expr) => {
@@ -779,18 +801,24 @@ impl PixelBuffer {
             }
         }
 
-        let ao_buffer = crate::ssao::bilateral_blur_separable(&ao_buffer, &self.zbuf, w, h, 4);
+        let blurred = crate::ssao::bilateral_blur_separable(&ao_buffer, &self.zbuf, w, h, 4);
 
         // Apply AO by darkening pixels.
         unsafe {
             for i in 0..w * h {
-                let ao = *ao_buffer.get_unchecked(i);
+                let ao = *blurred.get_unchecked(i);
                 let p = self.pixels.as_mut_ptr().add(i * 3);
                 *p        = (*p        as f32 * ao + 0.5) as u8;
                 *p.add(1) = (*p.add(1) as f32 * ao + 0.5) as u8;
                 *p.add(2) = (*p.add(2) as f32 * ao + 0.5) as u8;
             }
         }
+
+        // Return the scratch Vecs to the thread-locals so the next call reuses
+        // the backing allocations. `blurred` is a fresh Vec — dropped here.
+        AO_BUFFER   .with(|c| *c.borrow_mut() = ao_buffer);
+        FLAT_OFFSETS.with(|c| *c.borrow_mut() = flat_offsets);
+        Z_BIASES    .with(|c| *c.borrow_mut() = z_biases);
     }
 
     /// Downsample by an integer factor via box filter — SIMD-accelerated for
@@ -963,15 +991,44 @@ impl PixelBuffer {
             oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false }
     }
 
-    /// Expand opaque RGB → straight RGBA8 (alpha = 255).
+    /// Expand opaque RGB → straight RGBA8 (alpha = 255). Vectorised: each
+    /// iteration reads 16 bytes (4 RGB pixels + 4 padding bytes shuffled
+    /// out), interleaves 0xFF alphas via `i8x16_shuffle`, and writes 16
+    /// bytes of RGBA. The tail is handled scalar to avoid a 16-byte read
+    /// past `pixels.len()`.
     pub fn to_rgba8(&self) -> (u32, u32, Vec<u8>) {
         let n = self.width * self.height;
         let mut rgba = vec![0u8; n * 4];
-        for i in 0..n {
-            rgba[i * 4]     = self.pixels[i * 3];
-            rgba[i * 4 + 1] = self.pixels[i * 3 + 1];
-            rgba[i * 4 + 2] = self.pixels[i * 3 + 2];
-            rgba[i * 4 + 3] = 255;
+        let src = self.pixels.as_ptr();
+        let dst = rgba.as_mut_ptr();
+        // A batch of 4 pixels reads `[p*3 .. p*3 + 16)` and writes 16 bytes.
+        // Safe while `p*3 + 16 <= 3n`, i.e. `p <= n - 6` (integer).
+        let simd_end_p = if n >= 6 { (n - 5) & !3 } else { 0 };
+        unsafe {
+            let ff = u8x16_splat(0xff);
+            let mut p = 0usize;
+            while p < simd_end_p {
+                let v = v128_load(src.add(p * 3) as *const v128);
+                // Lane picks: [R0,G0,B0, α, R1,G1,B1, α, R2,G2,B2, α, R3,G3,B3, α]
+                // 0-15 come from `v`; 16 comes from `ff` (splat, so any lane of
+                // `ff` is 0xFF — pick 16).
+                let out = i8x16_shuffle::<
+                    0, 1, 2, 16,
+                    3, 4, 5, 16,
+                    6, 7, 8, 16,
+                    9, 10, 11, 16,
+                >(v, ff);
+                v128_store(dst.add(p * 4) as *mut v128, out);
+                p += 4;
+            }
+            // Tail: remaining `n - p` pixels scalar.
+            while p < n {
+                *dst.add(p * 4)     = *src.add(p * 3);
+                *dst.add(p * 4 + 1) = *src.add(p * 3 + 1);
+                *dst.add(p * 4 + 2) = *src.add(p * 3 + 2);
+                *dst.add(p * 4 + 3) = 0xff;
+                p += 1;
+            }
         }
         (self.width as u32, self.height as u32, rgba)
     }

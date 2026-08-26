@@ -552,6 +552,9 @@ fn build_ground(scene: &Scene, config: &RenderConfig) -> (Vec<Triangle>, Option<
     mat.metallic = 0.0;
     mat.roughness = g.roughness;
     mat.double_sided = true; // Grazing views shouldn't cull ground.
+    // Reflect the mutations above in the cached precomputes — dielectric F0,
+    // volume attenuation etc. depend on fields we may have touched.
+    mat.recompute_precomp();
     (tris, Some(Box::new(mat)))
 }
 

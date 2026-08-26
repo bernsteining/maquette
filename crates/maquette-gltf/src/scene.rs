@@ -192,6 +192,69 @@ pub struct Material {
     // index across RGB: higher wavelength (red) refracts less, shorter
     // wavelength (blue) refracts more. Zero factor = no dispersion.
     pub dispersion: f32,
+
+    /// Values derived from the fields above that don't change per-triangle.
+    /// Populated once at scene flatten and read by `MaterialShader::new` so
+    /// per-triangle setup skips transcendentals (`.cos()`, `.sin()`, `.powf()`)
+    /// and small arithmetic chains.
+    pub precomp: MaterialPrecomp,
+}
+
+/// Per-material constants that would otherwise be recomputed on every
+/// triangle inside `MaterialShader::new`. Cached alongside the material so
+/// hot-loop setup is a handful of splats + loads instead of the full compute.
+///
+/// Only fields that need real work belong here — trivial `f32x4_splat(f)` of a
+/// raw material field isn't worth caching (splat is one wasm op).
+#[derive(Clone, Copy, Default)]
+pub struct MaterialPrecomp {
+    /// `[((n-1)/(n+1))² · specular_color[i] · specular_factor].min(1.0)`, 3 chans.
+    pub dielectric_f0: [f32; 3],
+    /// `1 / max(1e-4, sheen_roughness²)`.
+    pub sheen_inv_alpha: f32,
+    /// Beer-Lambert attenuation per channel: `color[i].powf(thickness / dist)`.
+    pub volume_attenuation: [f32; 3],
+    /// Reciprocals used by refraction/transmission and dispersion — bake the
+    /// `1 / n` divide once per material.
+    pub ior_ratio: f32,
+    pub ior_ratio_r: f32,
+    pub ior_ratio_b: f32,
+    /// Anisotropy tangent rotation — `.cos()` / `.sin()` are expensive per-tri.
+    pub anisotropy_cos_rot: f32,
+    pub anisotropy_sin_rot: f32,
+}
+
+impl MaterialPrecomp {
+    /// Compute the derived constants from a fully-populated `Material`. Called
+    /// once at scene flatten, never on the hot path.
+    pub fn from_material(m: &Material) -> Self {
+        let n = m.ior;
+        let x = (n - 1.0) / (n + 1.0);
+        let x2 = x * x;
+        let vol = |ch: usize| {
+            if m.thickness_factor <= 0.0 || !m.attenuation_distance.is_finite() {
+                1.0
+            } else {
+                let c = m.attenuation_color[ch].clamp(1e-6, 1.0);
+                let t = m.thickness_factor / m.attenuation_distance.max(1e-6);
+                c.powf(t)
+            }
+        };
+        Self {
+            dielectric_f0: [
+                (x2 * m.specular_color[0] * m.specular_factor).min(1.0),
+                (x2 * m.specular_color[1] * m.specular_factor).min(1.0),
+                (x2 * m.specular_color[2] * m.specular_factor).min(1.0),
+            ],
+            sheen_inv_alpha: 1.0 / (m.sheen_roughness * m.sheen_roughness).max(1e-4),
+            volume_attenuation: [vol(0), vol(1), vol(2)],
+            ior_ratio:   1.0 / m.ior.max(1.0001),
+            ior_ratio_r: 1.0 / (m.ior - 0.02 * m.dispersion).max(1.0001),
+            ior_ratio_b: 1.0 / (m.ior + 0.02 * m.dispersion).max(1.0001),
+            anisotropy_cos_rot: m.anisotropy_rotation.cos(),
+            anisotropy_sin_rot: m.anisotropy_rotation.sin(),
+        }
+    }
 }
 
 /// KHR_texture_transform: `uv_new = R · (uv · scale) + offset` where `R`
@@ -239,9 +302,17 @@ impl TextureTransform {
 }
 
 impl Material {
+    /// Refresh `self.precomp` from the current field values. Call after any
+    /// caller-side field mutation (e.g. render.rs builds the ground material
+    /// via `default_gltf()` + a handful of overrides — the resulting precomp
+    /// needs to reflect the overrides, not the defaults).
+    pub fn recompute_precomp(&mut self) {
+        self.precomp = MaterialPrecomp::from_material(self);
+    }
+
     /// glTF's default when a primitive has no material.
     pub fn default_gltf() -> Self {
-        Self {
+        let mut m = Self {
             base_color: [1.0, 1.0, 1.0, 1.0],
             metallic: 1.0,
             roughness: 1.0,
@@ -298,7 +369,10 @@ impl Material {
             anisotropy_texture:  None,
             texcoord_anisotropy: 0,
             dispersion: 0.0,
-        }
+            precomp: MaterialPrecomp::default(),
+        };
+        m.recompute_precomp();
+        m
     }
 }
 
@@ -736,8 +810,13 @@ fn collect_materials(loaded: &LoadedGltf) -> Vec<Material> {
             texcoord_anisotropy: anisotropy.texcoord,
 
             dispersion,
+            precomp: MaterialPrecomp::default(),
         });
     }
+    // Fill in per-material precomputes now that every input field is set —
+    // MaterialShader::new reads these on every triangle, so the transcendentals
+    // and small arithmetic chains only pay once per material this way.
+    for m in &mut materials { m.precomp = MaterialPrecomp::from_material(m); }
     materials
 }
 
@@ -970,12 +1049,15 @@ fn load_texture(loaded: &LoadedGltf, t: &gltf::Texture, opts: TextureLoadOpts) -
         }
     }
     let sampler = t.sampler();
+    let mips = build_mips(base);
+    let (bw, bh) = (mips[0].width, mips[0].height);
     Ok(Texture {
-        mips: build_mips(base),
+        mips,
         wrap_s: map_wrap(sampler.wrap_s()),
         wrap_t: map_wrap(sampler.wrap_t()),
         mag_filter: sampler.mag_filter().map(map_mag).unwrap_or(Filter::Linear),
         min_filter: sampler.min_filter().map(map_min).unwrap_or(Filter::Linear),
+        lod_bias: 0.5 * ((bw * bh) as f32).log2(),
     })
 }
 
@@ -1003,6 +1085,7 @@ fn placeholder_texture() -> Texture {
         mips: vec![MipLevel { width: 1, height: 1, rgba: vec![255, 255, 255, 255] }],
         wrap_s: Wrap::Repeat, wrap_t: Wrap::Repeat,
         mag_filter: Filter::Nearest, min_filter: Filter::Nearest,
+        lod_bias: 0.0,   // 0.5 · log₂(1) = 0
     }
 }
 

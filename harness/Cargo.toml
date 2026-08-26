@@ -3,5 +3,11 @@ name = "harness"
 version = "0.1.0"
 edition = "2021"
 
+# The workspace root at ../Cargo.toml would swallow this crate as a member,
+# but the harness is a native binary with its own dependency set (wasmi) and
+# shouldn't inherit the workspace's release profile / target-features. Opt
+# out with an empty [workspace] block.
+[workspace]
+
 [dependencies]
 wasmi = { version = "1", features = ["simd"] }

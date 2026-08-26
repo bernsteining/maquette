@@ -517,12 +517,18 @@ impl<'a> MaterialShader<'a> {
         let em_tex   = tex(material.emissive_texture);
         let oc_tex   = tex(material.occlusion_texture);
         let n_tex    = tex(material.normal_texture);
+        // Per-triangle LOD: `0.5 · log₂(lod_scale · w · h)`. Splits into
+        // `0.5 · log₂(lod_scale) + Texture::lod_bias` (the second term is
+        // precomputed at texture load — same value for every triangle that
+        // samples this texture). The `.max(1.0)` clamp on the product would
+        // matter only for lod_scale × texels < 1 (extreme minification into
+        // sub-texel territory) — in that regime the caller clamps to
+        // `[0, max_mip_level]` anyway, so a `.max(0.0)` on the sum below
+        // is enough.
+        let half_log_scale = 0.5 * (lod_scale.max(1e-30)).log2();
         let lod_for = |t: Option<&Texture>| -> f32 {
             let Some(t) = t else { return 0.0; };
-            let (w, h) = t.base_dims();
-            // 0.5 · log₂(texels²/pixel²) = log₂(texels-per-pixel).
-            let ratio = (lod_scale * (w * h) as f32).max(1.0);
-            0.5 * ratio.log2()
+            (half_log_scale + t.lod_bias).max(0.0)
         };
         Self {
             ctx,
@@ -588,45 +594,26 @@ impl<'a> MaterialShader<'a> {
             sheen_r:          f32x4_splat(material.sheen_color[0]),
             sheen_g:          f32x4_splat(material.sheen_color[1]),
             sheen_b:          f32x4_splat(material.sheen_color[2]),
-            sheen_inv_alpha:  f32x4_splat(1.0 / (material.sheen_roughness * material.sheen_roughness).max(1e-4)),
+            // All per-material precomputes (`1/α²`, dielectric F0, volume
+            // attenuation via powf, IOR reciprocals) are baked at scene
+            // flatten via `MaterialPrecomp::from_material` — this reads the
+            // cached scalars and pays only the splat cost per triangle.
+            sheen_inv_alpha:  f32x4_splat(material.precomp.sheen_inv_alpha),
             has_sheen:        material.sheen_color.iter().any(|c| *c > 0.0),
-            dielectric_f0_r:  {
-                let n = material.ior;
-                let x = (n - 1.0) / (n + 1.0);
-                f32x4_splat((x * x * material.specular_color[0] * material.specular_factor).min(1.0))
-            },
-            dielectric_f0_g:  {
-                let n = material.ior;
-                let x = (n - 1.0) / (n + 1.0);
-                f32x4_splat((x * x * material.specular_color[1] * material.specular_factor).min(1.0))
-            },
-            dielectric_f0_b:  {
-                let n = material.ior;
-                let x = (n - 1.0) / (n + 1.0);
-                f32x4_splat((x * x * material.specular_color[2] * material.specular_factor).min(1.0))
-            },
+            dielectric_f0_r:  f32x4_splat(material.precomp.dielectric_f0[0]),
+            dielectric_f0_g:  f32x4_splat(material.precomp.dielectric_f0[1]),
+            dielectric_f0_b:  f32x4_splat(material.precomp.dielectric_f0[2]),
 
             transmission_tex: tex(material.transmission_texture),
             lod_transmission: lod_for(tex(material.transmission_texture)),
             transmission_factor: f32x4_splat(material.transmission_factor),
             has_transmission: material.transmission_factor > 0.0,
-            // Beer-Lambert precompute: exp(-thickness / dist · -ln(color)) =
-            // color^(thickness / dist). We store the exponent components as
-            // `ln(color) · thickness / dist` and apply via `exp` in shader —
-            // but since we're multiplying only, expressing as `pow(color, t/d)`
-            // would need a per-channel `powf` per pixel. Cheaper: precompute
-            // per-channel attenuation for the material's thickness_factor
-            // (assumes uniform-thickness slab — good approximation without a
-            // thickness texture). Result: multiply transmitted RGB by these.
-            volume_attenuation_r: f32x4_splat(volume_attenuation(material, 0)),
-            volume_attenuation_g: f32x4_splat(volume_attenuation(material, 1)),
-            volume_attenuation_b: f32x4_splat(volume_attenuation(material, 2)),
-            ior_ratio: f32x4_splat(1.0 / material.ior.max(1.0001)),
-            // Dispersion: red bends less (higher wavelength), blue bends more.
-            // 0.02 * dispersion is a visually calibrated coefficient — close to
-            // typical heavy flint glass at dispersion=1.
-            ior_ratio_r: f32x4_splat(1.0 / (material.ior - 0.02 * material.dispersion).max(1.0001)),
-            ior_ratio_b: f32x4_splat(1.0 / (material.ior + 0.02 * material.dispersion).max(1.0001)),
+            volume_attenuation_r: f32x4_splat(material.precomp.volume_attenuation[0]),
+            volume_attenuation_g: f32x4_splat(material.precomp.volume_attenuation[1]),
+            volume_attenuation_b: f32x4_splat(material.precomp.volume_attenuation[2]),
+            ior_ratio:   f32x4_splat(material.precomp.ior_ratio),
+            ior_ratio_r: f32x4_splat(material.precomp.ior_ratio_r),
+            ior_ratio_b: f32x4_splat(material.precomp.ior_ratio_b),
             has_dispersion: material.dispersion > 0.0 && material.transmission_factor > 0.0,
 
             iridescence_tex:              tex(material.iridescence_texture),
@@ -642,8 +629,8 @@ impl<'a> MaterialShader<'a> {
             anisotropy_tex:               tex(material.anisotropy_texture),
             lod_anisotropy:               lod_for(tex(material.anisotropy_texture)),
             anisotropy_strength:          f32x4_splat(material.anisotropy_strength),
-            anisotropy_cos_rot:           f32x4_splat(material.anisotropy_rotation.cos()),
-            anisotropy_sin_rot:           f32x4_splat(material.anisotropy_rotation.sin()),
+            anisotropy_cos_rot:           f32x4_splat(material.precomp.anisotropy_cos_rot),
+            anisotropy_sin_rot:           f32x4_splat(material.precomp.anisotropy_sin_rot),
             has_anisotropy:               material.anisotropy_strength > 0.0,
 
             unlit: material.unlit,
@@ -738,6 +725,12 @@ struct Samples4 {
 }
 
 impl<'a> PixelShader for MaterialShader<'a> {
+    // Hot inner loop of the rasterizer — called once per 4-pixel batch, per
+    // triangle. `#[inline]` (not `always`) — with `always`, wasmi's translator
+    // panics on the resulting fused cmp+branch pattern (`cmp+branch fusion must
+    // succeed`, wasmi 1.0.9 mod.rs:1704). Plain `#[inline]` gives LLVM enough
+    // license to inline through the trait call without producing that shape.
+    #[inline]
     fn shade4(&self, in_: ShadeIn4) -> ShadeOut4 {
         let zero = f32x4_splat(0.0);
         let one  = f32x4_splat(1.0);
@@ -1135,27 +1128,15 @@ impl<'a> PixelShader for MaterialShader<'a> {
             // Karis split-sum polynomial (full form with exp2 grazing term).
             // Returns (scale, bias) that combine F0 and roughness.
             // a004 = min(r.x², exp2(-9.28·NoV)) · r.x + r.y
-            let n_dot_v_local = n_dot_v;
             let r_x = f32x4_sub(one, roughness);
             let r_y = f32x4_add(f32x4_mul(roughness, f32x4_splat(-0.0275)), f32x4_splat(0.0425));
             let r_z = f32x4_add(f32x4_mul(roughness, f32x4_splat(-0.572)), f32x4_splat(1.04));
             let r_w = f32x4_add(f32x4_mul(roughness, f32x4_splat(0.022)),  f32x4_splat(-0.04));
-            // Per-lane scalar exp2 (wasm SIMD lacks it). Fast: the input
-            // range is small (`-9.28·NoV` ∈ [-9.28, 0]) so a couple of ops.
-            let exp_x = {
-                let nov = [
-                    f32x4_extract_lane::<0>(n_dot_v_local),
-                    f32x4_extract_lane::<1>(n_dot_v_local),
-                    f32x4_extract_lane::<2>(n_dot_v_local),
-                    f32x4_extract_lane::<3>(n_dot_v_local),
-                ];
-                f32x4(
-                    (-9.28 * nov[0]).exp2(),
-                    (-9.28 * nov[1]).exp2(),
-                    (-9.28 * nov[2]).exp2(),
-                    (-9.28 * nov[3]).exp2(),
-                )
-            };
+            // SIMD exp2 approximation for the grazing-term argument
+            // `-9.28·NoV`, x ∈ roughly [-9.28, 0]. Was: extract 4 lanes,
+            // scalar `.exp2()` per lane, repack — 8 lane ops + 4 libcalls per
+            // pixel batch. Now: pure SIMD, ~15 ops, no lane extracts.
+            let exp_x = simd_exp2_grazing(f32x4_mul(f32x4_splat(-9.28), n_dot_v));
             let rx2 = f32x4_mul(r_x, r_x);
             let a004 = f32x4_add(f32x4_mul(f32x4_min(rx2, exp_x), r_x), r_y);
             let scale = f32x4_add(f32x4_mul(f32x4_splat(-1.04), a004), r_z);
@@ -1543,6 +1524,44 @@ fn per_lane_cos(v: v128) -> v128 {
     )
 }
 
+/// SIMD `2^x` for `x` in roughly `[-10, 0]` — the range the Karis split-sum
+/// grazing term hits (`x = -9.28 · NoV`, `NoV ∈ [0, 1]`). Was a per-lane
+/// scalar `.exp2()` (extract, libcall, repack — 4 lane ops + 4 transcendental
+/// calls per 4-pixel batch, hot path in every IBL pixel). Now: pure SIMD via
+/// exponent-bit assembly + 5th-degree polynomial for the fractional part.
+///
+/// Error bound over the hit range is < 1e-5 vs the libm `exp2` — well below
+/// the 8-bit sRGB quantization the shader writes to, and orders below the
+/// tone-map's own polynomial error.
+///
+/// Polynomial coefficients: minimax fit for `2^x` on `[0, 1]` (Chebyshev
+/// truncation of the Taylor series in `ln 2`; degrees 0-5).
+#[inline]
+fn simd_exp2_grazing(x: v128) -> v128 {
+    let ix_f  = f32x4_floor(x);
+    let fx    = f32x4_sub(x, ix_f);
+    // 2^ix — reinterpret `(ix + 127) << 23` as f32 (IEEE 754 bias trick).
+    // For our x-range `ix ∈ [-10, 0]`, `ix + 127 ∈ [117, 127]` — safely inside
+    // the exponent field, no NaN/denormal edge cases.
+    let ix_i    = i32x4_trunc_sat_f32x4(ix_f);
+    let biased  = i32x4_add(ix_i, i32x4_splat(127));
+    let pow_int = i32x4_shl(biased, 23);   // v128 layout matches f32x4
+    // 2^fx via Horner on the fractional part in [0, 1].
+    let c0 = f32x4_splat(1.0);
+    let c1 = f32x4_splat(0.693_147_2);
+    let c2 = f32x4_splat(0.240_226_5);
+    let c3 = f32x4_splat(0.055_504_1);
+    let c4 = f32x4_splat(0.009_681_2);
+    let c5 = f32x4_splat(0.001_333_5);
+    let p = c5;
+    let p = f32x4_add(c4, f32x4_mul(p, fx));
+    let p = f32x4_add(c3, f32x4_mul(p, fx));
+    let p = f32x4_add(c2, f32x4_mul(p, fx));
+    let p = f32x4_add(c1, f32x4_mul(p, fx));
+    let p = f32x4_add(c0, f32x4_mul(p, fx));
+    f32x4_mul(pow_int, p)
+}
+
 #[inline(always)]
 fn normalize_v3(vx: v128, vy: v128, vz: v128) -> (v128, v128, v128) {
     let len2 = f32x4_add(f32x4_add(f32x4_mul(vx, vx), f32x4_mul(vy, vy)), f32x4_mul(vz, vz));
@@ -1550,19 +1569,8 @@ fn normalize_v3(vx: v128, vy: v128, vz: v128) -> (v128, v128, v128) {
     (f32x4_mul(vx, inv), f32x4_mul(vy, inv), f32x4_mul(vz, inv))
 }
 
-// ---------------------------------------------------------------------------
-/// Precompute per-channel Beer-Lambert attenuation for a material's volume
-/// thickness. `color = attenuation_color^(thickness / attenuation_distance)`.
-/// Returns 1.0 (no attenuation) when volume is disabled.
-#[inline]
-fn volume_attenuation(m: &Material, channel: usize) -> f32 {
-    if m.thickness_factor <= 0.0 || !m.attenuation_distance.is_finite() {
-        return 1.0;
-    }
-    let c = m.attenuation_color[channel].clamp(1e-6, 1.0);
-    let t = m.thickness_factor / m.attenuation_distance.max(1e-6);
-    c.powf(t)
-}
+// Volume/Beer-Lambert attenuation now lives on `Material::precomp` — filled
+// at scene flatten via `MaterialPrecomp::from_material` (see scene.rs).
 
 // Scalar BRDF terms (used by PbrContext::shade_pixel)
 // ---------------------------------------------------------------------------

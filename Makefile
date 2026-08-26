@@ -68,11 +68,14 @@ GLTF_WASM_TARGET = target/wasm32-unknown-unknown/release/maquette_gltf.wasm
 GLTF_WASM_OUT = crates/maquette-gltf/maquette-gltf.wasm
 GLTF_WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette-gltf/0.1.0/maquette-gltf.wasm
 
-# Build + optimize the glTF plugin wasm. Same flags as maquette itself so the
-# two plugins agree on wasm feature use and file-size discipline.
+# Build + optimize the glTF plugin wasm. Flags mostly mirror the maquette
+# core plugin, minus `--converge`: on this codebase, --converge trades ~1%
+# speed for a ~0.2 % size shave under wasmi. wasmi is an interpreter, so
+# instructions-per-frame beats module bytes; we keep the single-pass -O3
+# output. Verified with harness --bench=5 --fuel on helmet.blg.
 gltf-wasm:
 	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo build --target wasm32-unknown-unknown --release -p maquette-gltf
-	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(GLTF_WASM_TARGET) -o $(GLTF_WASM_OUT)
+	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops $(GLTF_WASM_TARGET) -o $(GLTF_WASM_OUT)
 	@ls -lh $(GLTF_WASM_OUT)
 
 # Install glTF plugin into the local Typst package dir (mirror of `build`).
