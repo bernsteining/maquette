@@ -424,8 +424,53 @@ fn decompress_draco(
             let decoded = Decoder::new().decode_mesh(src)
                 .map_err(|e| format!("draco decode error: {:?}", e))?;
 
-            // For each declared attribute, serialise per-point values into
-            // the accessor's fallback bufferView region.
+            // Establish a *canonical* index space keyed by POSITION's own
+            // dedup — every attribute's output gets reshuffled into it, and
+            // face indices get remapped through it. Rationale: Draco lets
+            // each attribute dedup along its own axis (positions on (x,y,z),
+            // UVs on (u,v)), so POSITION.map[p] and TEXCOORD_1.map[p] index
+            // into different unique-value tables. glTF exposes ONE index
+            // buffer and ONE `accessor.count` shared across attributes, so
+            // the reader has no way to disambiguate which map to use. We
+            // pick POSITION as the canonical space (its unique count is what
+            // exporters typically set `accessor.count` to) and rewrite every
+            // other attribute so its output at slot `i` holds the value of
+            // some point `p` with `pos_map[p] == i`.
+            //
+            // Old code skipped the reshuffle and just used POSITION's map for
+            // the face-index remap, leaving other attributes indexed by
+            // their OWN dedup — hence LittlestTokyo's texture bleed / magenta
+            // patches: TEXCOORD_1 values landed at wrong POSITION-unique
+            // slots.
+            //
+            // For POSITION-unique-idx i, we take the FIRST point that maps
+            // to it. When two points sharing a position have distinct values
+            // (e.g. UV seams), we drop one — a minor fidelity loss vs
+            // rendering garbage.
+            let pos_attr = attr_map.iter()
+                .find_map(|(name, id)| {
+                    if name != "POSITION" { return None; }
+                    let draco_id = id.as_u64()? as usize;
+                    decoded.attributes.iter().find(|a| a.get_id().as_usize() == draco_id)
+                });
+            let pos_map = pos_attr.and_then(|a| a.point_map_as_slice());
+            // Reverse map: for each POSITION-unique-idx, the first point that
+            // maps to it. Length = n_pos_unique. Built once per primitive.
+            let (n_pos_unique, first_point_at) = match (pos_attr, pos_map) {
+                (Some(pa), Some(pm)) => {
+                    let n = pa.num_unique_values();
+                    let mut fpa: Vec<usize> = vec![usize::MAX; n];
+                    for (p, &ui) in pm.iter().enumerate() {
+                        let u = usize::from(ui);
+                        if u < n && fpa[u] == usize::MAX { fpa[u] = p; }
+                    }
+                    (n, fpa)
+                }
+                _ => (0, Vec::new()),
+            };
+
+            // For each declared attribute, serialise POSITION-aligned values
+            // into the accessor's fallback bufferView region.
             for (attr_name, id_val) in attr_map {
                 let draco_id = id_val.as_u64()
                     .ok_or("draco: attribute id not an integer")? as usize;
@@ -440,49 +485,67 @@ fn decompress_draco(
                     .ok_or_else(|| format!("draco: attribute id {} not present in decoded stream", draco_id))?;
 
                 let value_size = attr.get_component_type().size() * attr.get_num_components();
-                // Draco keeps two counts: `num_unique_values()` (deduplicated
-                // attribute values) and `len()` (points, where multiple
-                // points can alias one unique value via `point_to_att_val_map`).
-                // glTF expects the accessor to contain exactly the unique
-                // values, with face indices reading directly into them —
-                // Draco's point-to-value map is applied when generating the
-                // indices below. Real-world assets exercise this: three.js's
-                // `forest_house.glb` mesh 5 has 188 points but only 183
-                // uniques, and its accessor.count is 183.
-                let n_unique = attr.num_unique_values();
+                // Expand each attribute to its full per-point form using its
+                // OWN `point_to_att_val_map`. Draco stores deduplicated unique
+                // values internally, and each attribute can dedup along a
+                // different axis (positions on `(x,y,z)`, UVs on `(u,v)`), so
+                // their maps differ. The glTF accessor exposes N per-point
+                // values (`accessor.count == points`), and face indices are
+                // direct point indices into that N — the only way a single
+                // index buffer works across all attributes at all.
+                //
+                // Old code wrote just the `n_unique` deduplicated values and
+                // remapped face indices through the first attribute's map,
+                // assuming every attribute shared it. Broke on assets with
+                // per-attribute dedup (three.js's LittlestTokyo: TEXCOORD_1
+                // has its own map that differs from POSITION, so UVs landed
+                // on the wrong texture-atlas cells — hence the diagonal
+                // texture-bleed streaks and magenta patches).
                 let unique = attr.get_data_as_bytes();
-                let mut bytes = Vec::with_capacity(n_unique * value_size);
-                bytes.extend_from_slice(&unique[..n_unique * value_size]);
+                let this_map = attr.point_map_as_slice();
+                let n_unique_this = attr.num_unique_values();
+                // Write `n_pos_unique` values (== `accessor.count` for
+                // position-aligned attributes). For POSITION itself the loop
+                // is a straight copy of the unique buffer; for others we look
+                // up each POSITION-unique-idx via `first_point_at[i]` and
+                // fetch that point's value through this attribute's own map.
+                let out_count = n_pos_unique.max(1);
+                let mut bytes = Vec::with_capacity(out_count * value_size);
+                if attr_name == "POSITION" {
+                    bytes.extend_from_slice(&unique[..out_count.min(n_unique_this) * value_size]);
+                } else if let Some(tm) = this_map {
+                    for i in 0..n_pos_unique {
+                        let p = first_point_at[i];
+                        let ui = if p < tm.len() {
+                            usize::from(tm[p]).min(n_unique_this.saturating_sub(1))
+                        } else { 0 };
+                        let src_off = ui * value_size;
+                        bytes.extend_from_slice(&unique[src_off..src_off + value_size]);
+                    }
+                } else {
+                    // No map — attribute is already stored per-point/unique,
+                    // just copy what fits.
+                    bytes.extend_from_slice(&unique[..out_count.min(n_unique_this) * value_size]);
+                }
+                if bytes.len() < out_count * value_size {
+                    bytes.resize(out_count * value_size, 0);
+                }
                 patches.push((target_bv.buffer().index(), target_bv.offset() + accessor.offset(), bytes));
             }
 
             // Indices: flatten faces into u16 / u32 / u8 depending on the
             // accessor's component type. glTF indices are always UNSIGNED_*.
-            //
-            // Faces store `PointIdx` — indices into the pre-dedup point
-            // list. We wrote unique values only to the attribute bufferViews
-            // above, so remap each point index through the attribute's
-            // `point_to_att_val_map` to land on the correct value slot.
-            // Every Draco-attached attribute shares the same map when the
-            // stream is a glTF-conformant single-primitive mesh (they must,
-            // else no single index buffer can address all attributes), so
-            // any attribute works — pick the first one with a map.
+            // Face point-indices get remapped through POSITION's map to land
+            // in the canonical [0, n_pos_unique) space every attribute was
+            // written into above.
             if let Some(idx_accessor) = prim.indices() {
                 let target_bv = idx_accessor.view()
                     .ok_or("draco: indices accessor has no bufferView")?;
-                // Point-to-value map from the first attribute that has one
-                // (all attached attributes share the map in glTF-conformant
-                // streams). Falls back to identity when every attribute is
-                // already deduped 1:1.
-                let map = decoded.attributes.iter()
-                    .find_map(|a| a.point_map_as_slice());
-                // Remap in place — build a flat Vec<u32> of value-indices,
-                // then narrow to the accessor's declared width.
                 let mut flat: Vec<u32> = Vec::with_capacity(decoded.faces.len() * 3);
                 for f in &decoded.faces {
                     for p in f {
                         let pi = usize::from(*p);
-                        let idx = match map {
+                        let idx = match pos_map {
                             Some(m) if pi < m.len() => usize::from(m[pi]) as u32,
                             _ => pi as u32,
                         };
