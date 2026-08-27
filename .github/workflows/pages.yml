@@ -1,10 +1,12 @@
 name: Deploy demo (GitHub Pages)
 
-# Rebuilds maquette.wasm from source and deploys docs/ to Pages, so the live
-# demo's WASM always matches the plugin source — no manual copy, no drift.
+# Rebuilds all three plugin wasms (maquette, maquette-gltf, maquette-scad)
+# from source and deploys docs/ to Pages, so the live demo's WASM always
+# matches the plugin source — no manual copy, no drift between plugins.
 #
 # The build runs inside a pinned rust:1.94.1 container (matching local rustc)
 # and uses binaryen v128 (matching local wasm-opt), so CI tooling == local.
+# Scad additionally needs cmake + clang + emsdk (Manifold C++ CSG kernel).
 
 on:
   push:
@@ -16,6 +18,7 @@ on:
       - "rust-toolchain.toml"
       - ".cargo/**"
       - "docs/**"
+      - "Makefile"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -30,6 +33,7 @@ concurrency:
 
 env:
   BINARYEN_VERSION: version_128 # matches local wasm-opt v128
+  EMSDK_VERSION: 6.0.8          # matches local emsdk (scad LTO recipe)
 
 jobs:
   build:
@@ -39,10 +43,12 @@ jobs:
     # Alpine/musl image here, it breaks actions/checkout & upload-pages-artifact.
     container: rust:1.94.1-slim-bookworm
     steps:
-      - name: System deps (git for checkout, curl for binaryen, make for the build)
+      - name: System deps (git, curl, make; cmake+clang for scad)
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git curl ca-certificates make
+          apt-get install -y --no-install-recommends \
+            git curl ca-certificates make \
+            cmake clang lld libc++-dev libc++abi-dev python3 xz-utils
 
       - uses: actions/checkout@v4
 
@@ -56,26 +62,50 @@ jobs:
             /usr/local/cargo/registry
             /usr/local/cargo/git
             target
-          key: ${{ runner.os }}-wasm-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-wasm-
+          key: ${{ runner.os }}-pages-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-pages-
 
       - name: Install binaryen ${{ env.BINARYEN_VERSION }} (match local wasm-opt)
         run: |
           curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar -xz
           echo "$PWD/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
 
+      # Emsdk provides LLVM 22+/clang++/wasm-ld for scad's LTO recipe (see
+      # Makefile scad-wasm target). Pinned + cached so we don't re-download
+      # ~400 MB every deploy.
+      - name: Cache emsdk (scad LTO)
+        id: cache-emsdk
+        uses: actions/cache@v4
+        with:
+          path: ~/emsdk
+          key: emsdk-${{ env.EMSDK_VERSION }}
+
+      - name: Install emsdk (scad LTO)
+        if: steps.cache-emsdk.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
+          ~/emsdk/emsdk install "$EMSDK_VERSION"
+          ~/emsdk/emsdk activate "$EMSDK_VERSION"
+
       - name: Versions (should match local)
         run: rustc --version && wasm-opt --version
 
-      - name: Build WASM (via Makefile — identical build to local)
+      - name: Build all plugin wasms (via Makefile — identical build to local)
         shell: bash   # ${GITHUB_SHA::7} below is a bash substring; container default shell is sh
-        # `make wasm` is the single source of truth for the cargo + wasm-opt flags.
-        # REMAP overrides the Makefile's default ($HOME) with the container's paths
-        # so nothing (registry, toolchain, workspace) leaks into the artifact.
+        # `make wasm gltf-wasm scad-wasm` is the single source of truth for the
+        # cargo + wasm-opt flags. REMAP overrides the Makefile's default ($HOME)
+        # so nothing (registry, toolchain, workspace) leaks into the artifacts.
+        # EMSDK env-var contract matches local dev — enables the scad LTO recipe.
         run: |
-          make wasm REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
-          cp crates/maquette/maquette.wasm docs/maquette.wasm
-          ls -la docs/maquette.wasm
+          export EMSDK=$HOME/emsdk
+          REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
+          make wasm      REMAP="$REMAP"
+          make gltf-wasm REMAP="$REMAP"
+          make scad-wasm REMAP="$REMAP"
+          cp crates/maquette/maquette.wasm            docs/maquette.wasm
+          cp crates/maquette-gltf/maquette-gltf.wasm  docs/maquette-gltf.wasm
+          cp crates/maquette-scad/maquette-scad.wasm  docs/maquette-scad.wasm
+          ls -la docs/maquette.wasm docs/maquette-gltf.wasm docs/maquette-scad.wasm
           # Demo models aren't committed under docs/ (canonical copies live in
           # examples/data/); stage them into the artifact the same way as the wasm.
           make demo-assets
@@ -86,9 +116,11 @@ jobs:
 
       - name: Verify no build paths leaked
         run: |
-          if grep -aE '/(home|root|Users)/[A-Za-z0-9._-]' docs/maquette.wasm; then
-            echo "::error::build path leaked into maquette.wasm"; exit 1
-          fi
+          for w in docs/maquette.wasm docs/maquette-gltf.wasm docs/maquette-scad.wasm; do
+            if grep -aE '/(home|root|Users)/[A-Za-z0-9._-]' "$w"; then
+              echo "::error::build path leaked into $w"; exit 1
+            fi
+          done
           echo "no path leaks ✓"
 
       - uses: actions/configure-pages@v5
