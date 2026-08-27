@@ -1298,6 +1298,12 @@ impl<'a> PixelShader for MaterialShader<'a> {
         // base color's tint) and volume Beer-Lambert. Diffuse contribution is
         // replaced by the transmission when the factor is 1 — matches glTF
         // spec's "diffuse light is transmitted" formulation.
+        //
+        // We also DIM the material's own alpha by (1 − transmission factor) so
+        // opaque geometry BEHIND the transmissive surface (coals under a
+        // heat-dome, wine in a glass) stays visible when render.rs routes
+        // transmissive OPAQUE materials into the WBOIT queue.
+        let mut transmission_alpha_scale = f32x4_splat(1.0);
         let (r, g, b) = if self.has_transmission {
             if let Some(env) = self.ibl_env {
                 let max_lod = env.max_lod;
@@ -1361,6 +1367,7 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 // sample × (1 − metallic) — metals never transmit.
                 let factor = f32x4_mul(f32x4_mul(self.transmission_factor, s.transmission), one_minus_metallic);
                 let inv_factor = f32x4_sub(one, factor);
+                transmission_alpha_scale = inv_factor;
                 (
                     f32x4_add(f32x4_mul(r, inv_factor), f32x4_mul(tinted_r, factor)),
                     f32x4_add(f32x4_mul(g, inv_factor), f32x4_mul(tinted_g, factor)),
@@ -1373,6 +1380,7 @@ impl<'a> PixelShader for MaterialShader<'a> {
         let g = tone_map_4(g, self.tone_map, self.exp4);
         let b = tone_map_4(b, self.tone_map, self.exp4);
 
+        let alpha = f32x4_mul(alpha, transmission_alpha_scale);
         ShadeOut4 {
             r, g, b, a: alpha,
             keep: apply_mask_cutoff(alpha, self.mask_cutoff, default_keep),

@@ -284,8 +284,19 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
             textures: &scene.textures,
         };
 
+        // Transmissive materials (KHR_materials_transmission) join the WBOIT
+        // queue even when authored OPAQUE. Our transmission shader is thin-wall
+        // IBL sampling — physically it colours the surface, but any opaque
+        // geometry sitting BEHIND (the dome over hot coals, glass over a bezel)
+        // is completely hidden by the Z-test in the overwrite path. Routing to
+        // WBOIT composites the dome/glass over the already-rasterized behind-
+        // geometry at composite time. Not refractively correct (no framebuffer
+        // sample at refracted UVs) but the emissive/opaque bits behind become
+        // visible again — the fix the user actually needs.
+        let transmissive = material.transmission_factor > 0.0;
         match material.alpha_mode {
             AlphaMode::Blend => blend_queue.push(prepared),
+            AlphaMode::Opaque | AlphaMode::Mask if transmissive => blend_queue.push(prepared),
             AlphaMode::Opaque | AlphaMode::Mask => {
                 shade_triangle(buffer, &pbr, material, &prepared, BlendMode::Overwrite);
             }
