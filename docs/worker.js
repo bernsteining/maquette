@@ -17,11 +17,14 @@
 // wasm-minimal-protocol host callbacks (they read/write via mem.buffer).
 function makePlugin(url) {
   let _args, _result, inst, mem, ensurePromise;
-  // Model bytes stashed on setModel(). callWithModel() prepends them as arg 0
-  // so main can send a 4 MB glb once per model swap instead of once per render
-  // call. Saves ~5 × 4 MB of structured-clone per helmet load, kills any
-  // "did the plugin see the same bytes as last call" cache-invalidation risk.
-  let modelBytes = null;
+  // Two-tier model cache:
+  //   activeModel  — current bytes fed to every callWithModel().
+  //   namedCache   — bytes stashed under a key (built-in preset name usually),
+  //                  so subsequent picks of the same model swap the active
+  //                  pointer with zero bytes over postMessage. Populated
+  //                  eagerly at boot by the demo's preload path.
+  let activeModel = null;
+  const namedCache = new Map();
   const imports = { typst_env: {
     wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
       new Uint8Array(mem.buffer, ptr, _args.length).set(_args),
@@ -47,7 +50,19 @@ function makePlugin(url) {
       }
       await ensurePromise;
     },
-    setModel(bytes) { modelBytes = bytes; },
+    setModel(bytes, key) {
+      activeModel = bytes;
+      if (key) namedCache.set(key, bytes);
+    },
+    // Stash bytes without touching activeModel — used by the background
+    // preload path so warming the cache doesn't yank the active model out
+    // from under a render that's currently in flight.
+    cache(key, bytes) { namedCache.set(key, bytes); },
+    useKey(key) {
+      const c = namedCache.get(key);
+      if (!c) throw new Error(`${url}: no cached model for key: ${key}`);
+      activeModel = c;
+    },
     call(fn, args) {
       const total = args.reduce((n, a) => n + a.length, 0);
       _args = new Uint8Array(total); let o = 0;
@@ -58,8 +73,8 @@ function makePlugin(url) {
       return _result;
     },
     callWithModel(fn, extraArgs) {
-      if (!modelBytes) throw new Error(`${url}: no model bound (call setModel first)`);
-      return p.call(fn, [modelBytes, ...extraArgs]);
+      if (!activeModel) throw new Error(`${url}: no model bound (call setModel/useKey first)`);
+      return p.call(fn, [activeModel, ...extraArgs]);
     },
   };
   return p;
@@ -129,7 +144,7 @@ async function loadModule(url) {
 
 // ─────────────────────────── message dispatch ───────────────────────────────
 self.onmessage = async (e) => {
-  const { id, kind, plugin, fn, args } = e.data;
+  const { id, kind, plugin, fn, args, key } = e.data;
   const p = plugins[plugin];
   if (!p) return self.postMessage({ id, ok: false, error: `unknown plugin: ${plugin}` });
   try {
@@ -137,9 +152,17 @@ self.onmessage = async (e) => {
       await p.ensure();
       self.postMessage({ id, ok: true });
     } else if (kind === "setModel") {
-      // args[0] is the model bytes; kept for subsequent callWithModel calls
-      // so main doesn't re-send them every render.
-      p.setModel(args[0]);
+      // args[0] is the model bytes; `key` (optional) also stashes them in
+      // the named cache so a later useKey(key) can activate without resend.
+      p.setModel(args[0], key);
+      self.postMessage({ id, ok: true });
+    } else if (kind === "cache") {
+      // args[0] is the model bytes; stashed under `key`, activeModel untouched.
+      p.cache(key, args[0]);
+      self.postMessage({ id, ok: true });
+    } else if (kind === "useKey") {
+      // Pure activation of a previously-cached model — no bytes over the wire.
+      p.useKey(key);
       self.postMessage({ id, ok: true });
     } else if (kind === "call" || kind === "callWithModel") {
       await p.ensure();

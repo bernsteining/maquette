@@ -24,11 +24,11 @@ worker.onmessage = (e) => {
   const p = _wPending.get(id); if (!p) return; _wPending.delete(id);
   ok ? p.resolve(result) : p.reject(new Error(error));
 };
-function wReq(kind, plugin, fn, args) {
+function wReq(kind, plugin, fn, args, key) {
   return new Promise((resolve, reject) => {
     const id = ++_wReqId;
     _wPending.set(id, { resolve, reject });
-    worker.postMessage({ id, kind, plugin, fn, args });
+    worker.postMessage({ id, kind, plugin, fn, args, key });
   });
 }
 // Proxy shape mirrors the old sync plugin — swap `.call()` for `await
@@ -42,8 +42,20 @@ function wReq(kind, plugin, fn, args) {
 function makeWorkerPlugin(name) {
   const p = {
     ready: false,
+    // Track which keys we've already stashed on the worker side so a repeat
+    // pick sends useKey() (no bytes) instead of setModel() (bytes over wire).
+    cached: new Set(),
     async ensure() { if (p.ready) return; await wReq("ensure", name); p.ready = true; },
-    async setModel(bytes) { await wReq("setModel", name, null, [bytes]); },
+    // key is optional; when set, worker stashes the bytes under that name so
+    // future useKey(key) activations skip the postMessage entirely.
+    async setModel(bytes, key = null) {
+      await wReq("setModel", name, null, [bytes], key);
+      if (key) p.cached.add(key);
+    },
+    // Preload path: stash bytes under `key` without touching activeModel.
+    // Safe to fire while a render is in flight.
+    async cache(key, bytes) { await wReq("cache", name, null, [bytes], key); p.cached.add(key); },
+    async useKey(key) { await wReq("useKey", name, null, [], key); },
     async call(fn, ...args) { return await wReq("call", name, fn, args); },
     async callWithModel(fn, ...extraArgs) { return await wReq("callWithModel", name, fn, extraArgs); },
   };
@@ -52,6 +64,16 @@ function makeWorkerPlugin(name) {
 const maquettePlugin = makeWorkerPlugin("maquette");
 const scadPlugin     = makeWorkerPlugin("maquette-scad");
 const gltfPlugin     = makeWorkerPlugin("maquette-gltf");
+
+// Bind a model into the worker. Fire-and-forget: worker's FIFO message queue
+// guarantees any subsequent render/info sees the bound bytes. Uses useKey()
+// when the plugin has already stashed this name (preload or prior pick) so
+// we skip the postMessage bytes; falls back to setModel() with a key so the
+// next time is free.
+function bindModel(plugin, key, bytes) {
+  const p = plugin.cached.has(key) ? plugin.useKey(key) : plugin.setModel(bytes, key);
+  p.catch(e => console.error("bindModel failed:", e));
+}
 
 // glTF-format extensions the maquette-gltf plugin handles. `.blg` is our
 // convention for a GLB renamed with a friendly extension (Damaged Helmet).
@@ -1216,12 +1238,13 @@ function ingest(name, bytes) {
   model = { name, bytes };
   syncPreset(name);
   renderOverride = null;
-  // Bind model bytes into the worker's per-plugin cache. All subsequent
-  // callWithModel() invocations reuse this — no 4 MB retransmit per render.
-  // Fire-and-forget: worker processes messages FIFO, so any later render/info
-  // call is guaranteed to see the bound bytes.
-  (isGltf(name) ? gltfPlugin : maquettePlugin).setModel(bytes)
-    .catch(e => console.error("setModel failed:", e));
+  // Bind the model into the worker. If we already stashed this name via
+  // preload/prior pick, a name-only useKey() flips the active pointer with
+  // ZERO bytes across postMessage. Otherwise setModel() ships the bytes and
+  // stashes them under `name` so the next pick is free. Fire-and-forget:
+  // worker processes messages FIFO, so any later render/info call is
+  // guaranteed to see the bound bytes.
+  bindModel(isGltf(name) ? gltfPlugin : maquettePlugin, name, bytes);
   // Schema swap (maquette ↔ glTF) has completely different state fields —
   // wipe + refill so the form isn't reading undefined slots.
   if (kindChanged) { resetState(); buildForm(); }
@@ -1326,6 +1349,8 @@ function renderScadResult(ply) {
   model = { name: "model.ply", scad: true, bytes: ply };
   // Fresh PLY per compile — bind into maquette plugin's worker cache so
   // the next callWithModel picks these bytes, not a previous model's.
+  // No key: scad output is transient (recompiled on every edit), caching
+  // by name would just churn.
   maquettePlugin.setModel(ply).catch(e => console.error("setModel failed:", e));
   if (kindChanged) {
     resetState();
@@ -1814,9 +1839,8 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
     model = { name, bytes };
     syncPreset(name);
     // Shared-link boot bypasses ingest() so we run its glTF-mode setup here.
-    // Bind bytes into the worker's per-plugin cache (mirrors ingest()).
-    (isGltf(name) ? gltfPlugin : maquettePlugin).setModel(bytes)
-      .catch(e => console.error("setModel failed:", e));
+    // Bind the model into the worker (uses useKey if preloaded).
+    bindModel(isGltf(name) ? gltfPlugin : maquettePlugin, name, bytes);
     syncFmtToggleForKind(name);
     if (isGltf(name)) syncGltfInfo();   // retype Animation-time to a slider when animated
     refreshGetModelsLink();
@@ -1824,5 +1848,25 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
     // Shorten the address bar to the compact form, so even a long readable
     // documentation link becomes short (and copy-ready) once it has loaded.
     if (hadConfig) bestUrl({ model: name, ...raw }).then(u => history.replaceState(null, "", u));
+    // Warm the picker's other built-in models into the worker's named cache
+    // during idle time. Uses `cache()` (not `setModel()`) so the active model
+    // isn't disturbed — every subsequent preset click flips the active
+    // pointer with zero bytes over postMessage. Runs sequentially (not
+    // parallel) so we don't saturate slow connections; fires on
+    // requestIdleCallback so it never competes with user actions.
+    const idle = window.requestIdleCallback || (cb => setTimeout(cb, 300));
+    idle(async () => {
+      for (const [presetName] of MODELS) {
+        if (presetName === "__scad__" || presetName === name) continue;
+        try {
+          const r = await fetch(presetName);
+          if (!r.ok) continue;
+          const bytes = new Uint8Array(await r.arrayBuffer());
+          const plugin = isGltf(presetName) ? gltfPlugin : maquettePlugin;
+          await plugin.ensure();
+          await plugin.cache(presetName, bytes);
+        } catch { /* one preload failure isn't fatal; try the next */ }
+      }
+    });
   } catch (e) { showErr("failed to load WASM/model: " + e.message); console.error(e); }
 })();
