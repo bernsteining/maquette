@@ -191,9 +191,7 @@ Below, `show-part` is a thin wrapper this doc uses so examples can focus on the 
 
 `scadypst(tree)` compiles a tree of Typst dicts into PLY bytes. The dicts come from helpers imported from the plugin (`cube` / `sphere` / `translate` / `difference` / `hull` / `linear-extrude` / …); each helper *builds* a node in the tree, nothing runs until `scadypst` sees the whole thing.
 
-The API mirrors OpenSCAD's own — cube, sphere, cylinder, polygon, extrusions, booleans, transforms — with Typst-native call syntax (`cube(20, center: true)` instead of `cube(20, center=true);`). For the full list see the per-function docstrings in `crates/maquette-scad/maquette-scad/maquette-scad.typ`. This doc doesn't re-document them — if you know OpenSCAD you already know the names.
-
-The reason to reach for `scadypst` over `compile-scad(read("part.scad"))` is Typst integration: because the tree is Typst code, you get Typst's own procedural facilities for free. Here a `..for` spread inside `union` places twelve spheres on a ring:
+The value of the DSL over `compile-scad(read("part.scad"))` is Typst integration: because the tree is Typst code, you get Typst's own procedural facilities for free. Here a `..for` spread inside `union` places twelve spheres on a ring:
 
 ```example
 // cols: 2 1
@@ -210,7 +208,59 @@ The reason to reach for `scadypst` over `compile-scad(read("part.scad"))` is Typ
 
 The equivalent OpenSCAD `for (i = [0:11]) { ... }` works too via `compile-scad` — but a new-in-Typst design will usually reach for Typst's iteration first, since it composes cleanly with variadic ops (`union` / `difference` / `hull` / `intersection`) via the `..` spread syntax and reads with the rest of your document code.
 
-Colours propagate through boolean ops; the emitted PLY carries per-face RGB and `render-ply` picks it up automatically:
+#pagebreak(weak: true)
+
+== DSL reference
+
+Every helper takes Typst-native named arguments (`cube(20, center: true)` instead of OpenSCAD's `cube(20, center=true);`). Signatures below list positional args first, then named. `fn: N` is the OpenSCAD `$fn` per-primitive segment count.
+
+=== 3D primitives
+
+- *`cube(size, center: false)`* — `size` is a number (uniform) or a 3-array `(x, y, z)`.
+- *`sphere(r, fn: none)`*
+- *`cylinder(h, r: none, r1: none, r2: none, center: false, fn: none)`* — pass `r` for a straight cylinder, `r1` + `r2` for a cone / frustum.
+- *`polyhedron(points, faces)`* — raw mesh: `points = ((x, y, z), …)`, `faces = ((i, j, k, …), …)`.
+
+=== 2D primitives (extrusion sources)
+
+- *`square(size, center: false)`*, *`circle(r, fn: none)`*, *`ellipse(w, h, fn: none)`*.
+- *`polygon(points, paths: none)`* — arbitrary 2D shape. `paths` is a list of index-rings into `points`: first ring is the outer boundary, rest are holes.
+- *`ngon(sides, r, fn: none)`* — regular polygon.
+- *`star(points, outer, inner)`* — n-pointed star.
+- *`rounded-square(w, h, r, fn: none)`* — rectangle with radius-`r` corners.
+- *`scad-text(str, size: 10)`* — glyph outlines from the font passed to `scadypst()`'s `font:` param.
+- *`import-mesh(file)`* — reference an STL/OBJ passed via `scadypst()`'s `bin:` dict.
+
+=== 2D → 3D lifting (and 3D → 2D)
+
+- *`linear-extrude(h, child, center: false, twist: 0, scale: 1, slices: none)`* — extrude a 2D shape to a height `h`. `twist` is degrees over the full height; `scale` is a taper factor (0..1) or an `(sx, sy)` pair.
+- *`rotate-extrude(child, angle: 360, fn: none)`* — revolve a 2D profile (living in the +x half-plane) around the z-axis.
+- *`projection(child)`* — flatten a 3D solid to its 2D shadow on the Z=0 plane.
+
+=== Transforms (2D or 3D)
+
+- *`translate(v, child)`* — `v` is a 2- or 3-vector.
+- *`rotate(deg, child)`* — Euler degrees, `(x, y, z)` or a single number (2D rotation).
+- *`scale(v, child)`* — per-axis scale.
+- *`mirror(v, child)`* — reflect across a plane whose normal is `v`.
+- *`multmatrix(m, child)`* — 4×4 (or 4×3) affine matrix; escape hatch for anything the named transforms can't do.
+- *`resize(v, child)`* — non-uniform scale to fit a target bounding box.
+- *`offset(d, child)`* — grow (`d > 0`) or shrink (`d < 0`) a 2D shape by `d`.
+- *`color(rgb, child, alpha: none)`* — RGB is a 3-array of 0..1 floats, or a 4-array `(r, g, b, a)`. See the Colours + alpha section below.
+
+=== Booleans and hulls
+
+- *`union(..items)`*, *`difference(..items)`* (first minus the rest), *`intersection(..items)`*.
+- *`hull(..items)`* — convex hull of the union (3D).
+- *`minkowski(..items)`* — Minkowski sum (3D).
+
+All variadic — use `..` spread with a Typst `for` block to feed a computed list of children.
+
+#pagebreak(weak: true)
+
+== Colours + alpha
+
+Colours propagate through boolean ops; the emitted PLY carries per-vertex RGB and `render-ply` picks it up automatically. Every part in the tree without a `color()` wrapper inherits the render config's `color:` — the "everything else is yellow" look in the OpenSCAD-logo demo comes from that fallback.
 
 ```example
 #show-part(
@@ -221,6 +271,56 @@ Colours propagate through boolean ops; the emitted PLY carries per-face RGB and 
   color: none,
 )
 ```
+
+Alpha ships end-to-end (scad → PLY → maquette rasterizer). Two forms — pick either:
+
+```typc
+color((0.9, 0.35, 0.35, 0.5), child)              // RGBA in one 4-array
+color((0.9, 0.35, 0.35), child, alpha: 0.5)       // RGB + separate alpha
+```
+
+Interior features show through translucent subtrees — this is how the OpenSCAD IDE renders `#` (highlight) modifiers, and how the demo's OpenSCAD logo shows the drilled holes and back of the sphere through the coloured cylinder.
+
+#pagebreak(weak: true)
+
+== `scadypst()` — the compile call
+
+```typc
+scadypst(node, bin: (:), font: none, fn: 32)
+```
+
+- *`node`* — the tree returned by any DSL helper. Usually the top-level `union` / `difference` / a single primitive.
+- *`bin`* — dict of sidecar bytes referenced by `import-mesh(file)`. Keys match the string passed to `import-mesh`, values are `read("path", encoding: none)`.
+- *`font`* — TTF/OTF bytes for `scad-text(...)`. One font per compile.
+- *`fn`* — default `$fn` for the whole compile. Per-primitive `fn:` overrides.
+
+Returns the same PLY `bytes` that `compile-scad` returns — pass it to `render-ply`.
+
+#pagebreak(weak: true)
+
+== Name clashes with Typst built-ins
+
+Seven DSL helpers shadow Typst built-ins when you `#import "..": *`:
+
+`scale`, `rotate`, `circle`, `square`, `ellipse`, `polygon`, `color` (plus `text` → renamed to `scad-text` at export).
+
+Two ways around it:
+
+```typ
+// Option 1 — namespace the plugin
+#import "@preview/maquette-scad:0.1.0"
+#let part = maquette-scad.scadypst(
+  maquette-scad.difference(
+    maquette-scad.cube(20, center: true),
+    maquette-scad.sphere(12, fn: 48),
+  )
+)
+
+// Option 2 — glob-import the plugin's `scad-*` aliases
+#import "@preview/maquette-scad:0.1.0": scad-color, scad-scale, scad-rotate, scad-circle, scad-square, scad-ellipse, scad-polygon
+```
+
+Both preserve Typst's own `#text` / `#circle` / etc. Aliases live alongside the originals so you can mix as needed.
 
 #pagebreak(weak: true)
 
