@@ -1126,27 +1126,20 @@ const MODELS = [
 // The `__scad__` picker entry opens an editor instead of fetching a file; its
 // output is a mesh, so give it the OpenSCAD viewport look (flat gold, no specular).
 const SCAD_DEFAULTS = { color: "#f9d72c", specular: 0, shading: "flat", cull_backface: false };
-// The canonical OpenSCAD CSG demo — a rounded cube (cube ∩ sphere) bored through
-// on all three axes. OpenSCAD's de-facto showcase model (its "Suzanne").
-const SCAD_EXAMPLE = `Logo(50);
-
-module Logo(size = 50, $fn = 100) {
-  hole = size / 2;
-  cylinderHeight = size * 1.25;
-
-  union() {
-    difference() {
-      sphere(d = size);
-      cylinder(d = hole, h = cylinderHeight, center = true);
-      rotate([0, 90, 0]) cylinder(d = hole, h = cylinderHeight, center = true);
-    }
-    // The "highlighted" cylinder from the OpenSCAD IDE preview — rendered
-    // as a solid coloured tube going right through the sphere.
-    color([0.9, 0.35, 0.35])
-      rotate([90, 0, 0])
-        cylinder(d = hole, h = cylinderHeight, center = true);
-  }
-}`;
+// Default source for the editor — the OpenSCAD project's own logo.scad,
+// served next to this app.js. Fetched on first entry into scad mode and
+// cached; the fetch is fire-and-forget so the demo boot doesn't pay for
+// bytes the user may never look at.
+const SCAD_DEFAULT_URL = "openscad-logo.scad";
+let _scadDefault = null;
+async function loadScadDefault() {
+  if (_scadDefault !== null) return _scadDefault;
+  try {
+    const r = await fetch(SCAD_DEFAULT_URL);
+    _scadDefault = r.ok ? await r.text() : "";
+  } catch { _scadDefault = ""; }
+  return _scadDefault;
+}
 
 // Per-model "showcase" config, applied when a built-in model is picked so each
 // loads looking like its documentation example. On every preset load these keys
@@ -1444,7 +1437,7 @@ async function enterScadMode(initial) {
   $("snippet-sec").open = true;
   const ta = $("scad-src");
   if (initial !== undefined) ta.value = initial;
-  else if (!ta.value.trim()) ta.value = SCAD_EXAMPLE;
+  else if (!ta.value.trim()) ta.value = await loadScadDefault();
   updateScadHighlight();
   setTab("scad");
   for (const k in SCAD_DEFAULTS) state[k] = structuredClone(SCAD_DEFAULTS[k]);
