@@ -1258,7 +1258,27 @@ async function syncGltfInfo() {
     }
     // Clamp state.time so an old value doesn't push the slider off the end.
     if (typeof state.time === "number" && state.time > maxT) state.time = 0;
+
+    // Auto-frame uploaded / unknown glTF assets against the bbox the info
+    // call reports. Presets skip this — MODEL_DEFAULTS already tunes camera
+    // for each shipped model. Without this, a millimetre-scale asset like
+    // PotOfCoals (bbox radius ~0.05 units) with the schema's default camera
+    // at [2.5, 1.5, 2.5] renders as a sub-pixel dot lost in the background.
+    if (!MODEL_DEFAULTS[model.name] && Array.isArray(info.center) && info.radius > 0) {
+      const [cx, cy, cz] = info.center;
+      const r = info.radius;
+      // Three-quarter oblique view — same silhouette every glTF sample viewer
+      // shows. Distance = 3r keeps the model comfortably inside a 40° FOV.
+      const d = r * 3;
+      state.center = [cx, cy, cz];
+      state.camera = [cx + d, cy + d * 0.75, cz + d];
+      state.up     = [0, 1, 0];
+      state.fov    = 40;
+    }
     buildForm(); refreshVisibility();
+    // The state we just wrote drives the next render — kick one now so the
+    // upload path doesn't wait for the debounced onChange to catch up.
+    onChange();
   } catch { /* info fetch failure isn't fatal — the number input stays */ }
 }
 async function loadFile(file) {
