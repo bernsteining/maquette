@@ -936,7 +936,26 @@ let t = null;
 function onChange() {
   refreshVisibility();
   renderCode();
-  clearTimeout(t); t = setTimeout(render, 120);
+  clearTimeout(t); t = setTimeout(safeRender, 120);
+}
+
+// Single in-flight coalescer for every render trigger (scheduleRender for
+// drag, safeRender for form input). Without this the worker queues one
+// render per event and only paints the last — but has already done all the
+// wasm work for the stale ones, so a rapid drag on helmet feels like the
+// UI is stuck for N × 2 seconds. The dirty flag re-fires exactly once
+// after the current render completes if any trigger came in mid-flight.
+let renderRunning = false;
+let renderDirty = false;
+async function safeRender() {
+  if (renderRunning) { renderDirty = true; return; }
+  renderRunning = true;
+  try {
+    do {
+      renderDirty = false;
+      await render();
+    } while (renderDirty);
+  } finally { renderRunning = false; }
 }
 
 let lastUrl = null;
@@ -1453,7 +1472,15 @@ async function measure() {
 function scheduleRender() {
   if (rafPending) return;
   rafPending = true;
-  requestAnimationFrame(() => { rafPending = false; renderCode(); render(); });
+  requestAnimationFrame(async () => {
+    // Await through safeRender's coalescer before releasing rafPending —
+    // otherwise a rapid drag stream queues one worker call per rAF and the
+    // worker plows through every stale frame before painting the latest.
+    // With this, drag events fired mid-render silently collapse into one
+    // re-render after the current one completes (via renderDirty).
+    renderCode();
+    try { await safeRender(); } finally { rafPending = false; }
+  });
 }
 let bboxCenter = [0, 0, 0];   // model bbox center (from get-info), for cartesian→spherical
 // Invert the plugin's up-based spherical basis (projection.rs) so an explicit
