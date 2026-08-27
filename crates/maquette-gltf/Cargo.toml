@@ -59,6 +59,13 @@ features = [
     # webp variant will now pick the webp path (which our texture decoder
     # handles). Without this feature, gltf-rs uses the top-level source only.
     "EXT_texture_webp",
+    # KHR_animation_pointer: animation channels target arbitrary properties
+    # via JSON pointer paths (e.g. /materials/N/emissiveFactor). Unlocks the
+    # PotOfCoalsAnimationPointer showcase asset and any glTF with per-frame
+    # material / light / camera property tweens. We read the pointer string
+    # via `channel.target().animation_pointer()` and dispatch to the runtime
+    # Scene fields in `scene::apply_pointer_writes`.
+    "KHR_animation_pointer",
     # KHR_materials_iridescence, KHR_materials_anisotropy, KHR_materials_dispersion,
     # KHR_materials_diffuse_transmission aren't exposed as features by the
     # crate — parsed from the raw extensions map via the `extensions` feature

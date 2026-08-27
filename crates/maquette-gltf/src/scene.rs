@@ -552,7 +552,11 @@ pub fn flatten_with_cached_textures(loaded: &LoadedGltf, opts: SceneOpts, bytes:
     let mut scene = Scene::empty();
     scene.textures = crate::cache::textures_for(bytes, loaded, opts.textures);
     scene.materials = collect_materials(loaded);
-    let anim = sample_animations(loaded, opts.time, opts.animation_index);
+    let (anim, pointer_writes) = sample_animations(loaded, opts.time, opts.animation_index);
+    // KHR_animation_pointer: tween arbitrary material/light/camera properties.
+    // Applied after material collection so scene.materials sees the interpolated
+    // values before fill_scene builds triangles.
+    apply_pointer_writes(&mut scene, &pointer_writes);
     fill_scene(&mut scene, loaded, &anim, opts.variant, opts.scene_index);
     scene
 }
@@ -655,7 +659,9 @@ pub fn flatten_geometry_only(loaded: &LoadedGltf) -> Scene {
     // `get_gltf_info` doesn't sample textures, but material paths may still
     // index into them — leak placeholder Vec once and reuse.
     scene.textures = placeholder_textures_for(loaded.document.textures().len());
-    let anim = sample_animations(loaded, 0.0, None);
+    // Geometry-only path (get_gltf_info): pointer writes ignored, only TRS
+    // affects mesh topology/skinning.
+    let (anim, _) = sample_animations(loaded, 0.0, None);
     fill_scene(&mut scene, loaded, &anim, 0, None);
     scene
 }
@@ -1308,6 +1314,19 @@ pub struct AnimSample {
     pub weights: Option<Vec<f32>>,
 }
 
+/// KHR_animation_pointer output: an animation channel whose target is a JSON
+/// pointer (e.g. `/materials/0/emissiveFactor`) rather than a node property.
+/// Applied to the runtime `Scene` in `apply_pointer_writes` after material
+/// / light / camera collection so per-frame tweens land on the collected
+/// state without re-parsing the glTF each render.
+#[derive(Clone, Debug)]
+pub struct PointerWrite {
+    pub path: String,
+    /// Interpolated scalar / vector value — length matches the accessor's
+    /// dimensions (`Scalar` = 1, `Vec3` = 3, `Vec4` / `Mat2` = 4, …).
+    pub values: Vec<f32>,
+}
+
 impl AnimSample {
     fn any(&self) -> bool {
         self.translation.is_some() || self.rotation.is_some() || self.scale.is_some()
@@ -1322,9 +1341,14 @@ impl AnimSample {
 /// behaviour). glTF assets ship animations as independent playable clips
 /// (idle, walk, run, ...) so the picker is what users normally want.
 /// Missing / out-of-range indices fall back to the stacked path.
-fn sample_animations(loaded: &LoadedGltf, time: f32, animation_index: Option<usize>) -> Vec<AnimSample> {
+fn sample_animations(
+    loaded: &LoadedGltf,
+    time: f32,
+    animation_index: Option<usize>,
+) -> (Vec<AnimSample>, Vec<PointerWrite>) {
     let n_nodes = loaded.document.nodes().count();
     let mut samples = vec![AnimSample::default(); n_nodes];
+    let mut pointer_writes: Vec<PointerWrite> = Vec::new();
 
     let animations: Box<dyn Iterator<Item = gltf::Animation>> = match animation_index {
         Some(i) if i < loaded.document.animations().len() => {
@@ -1334,8 +1358,6 @@ fn sample_animations(loaded: &LoadedGltf, time: f32, animation_index: Option<usi
     };
     for anim in animations {
         for channel in anim.channels() {
-            let node_idx = channel.target().node().index();
-            if node_idx >= n_nodes { continue; }
             let sampler = channel.sampler();
             let interp = sampler.interpolation();
             let reader = channel.reader(|buffer| {
@@ -1346,6 +1368,28 @@ fn sample_animations(loaded: &LoadedGltf, time: f32, animation_index: Option<usi
                 None => continue,
             };
             if times.is_empty() { continue; }
+
+            // KHR_animation_pointer: target has no node — path is a JSON
+            // pointer string. Read output as a raw f32 stream and sample
+            // generically over N components.
+            if channel.target().property() == gltf::animation::Property::Pointer {
+                let Some(path) = channel.target().animation_pointer() else { continue; };
+                let output = sampler.output();
+                let n_components = output.dimensions().multiplicity();
+                let flat = match read_accessor_as_f32(loaded, &output) {
+                    Some(v) if !v.is_empty() && n_components > 0 => v,
+                    _ => continue,
+                };
+                let values = sample_flat(&times, &flat, n_components, time, interp);
+                if values.len() == n_components {
+                    pointer_writes.push(PointerWrite { path: path.to_string(), values });
+                }
+                continue;
+            }
+
+            let Some(node) = channel.target().node_opt() else { continue; };
+            let node_idx = node.index();
+            if node_idx >= n_nodes { continue; }
 
             match reader.read_outputs() {
                 Some(gltf::animation::util::ReadOutputs::Translations(iter)) => {
@@ -1378,7 +1422,223 @@ fn sample_animations(loaded: &LoadedGltf, time: f32, animation_index: Option<usi
             }
         }
     }
-    samples
+    (samples, pointer_writes)
+}
+
+/// Read an F32 accessor as a flat `Vec<f32>` — no chunking by dimensions.
+/// Used for KHR_animation_pointer output where the component count varies
+/// with the target property. Returns `None` if the accessor has no view or
+/// isn't F32.
+fn read_accessor_as_f32(loaded: &LoadedGltf, acc: &gltf::Accessor) -> Option<Vec<f32>> {
+    use gltf::accessor::DataType;
+    if acc.data_type() != DataType::F32 { return None; }
+    let view = acc.view()?;
+    let buf = loaded.buffers.get(view.buffer().index())?;
+    let stride = view.stride().unwrap_or_else(|| acc.dimensions().multiplicity() * 4);
+    let start = view.offset() + acc.offset();
+    let n_scalars = acc.count() * acc.dimensions().multiplicity();
+    let mut out = Vec::with_capacity(n_scalars);
+    let per_element = acc.dimensions().multiplicity();
+    for e in 0..acc.count() {
+        let base = start + e * stride;
+        for s in 0..per_element {
+            let o = base + s * 4;
+            if o + 4 > buf.len() { return None; }
+            out.push(f32::from_le_bytes([buf[o], buf[o+1], buf[o+2], buf[o+3]]));
+        }
+    }
+    Some(out)
+}
+
+/// Generic N-component sampler used by KHR_animation_pointer. Mirrors
+/// `sample_weights`'s bracket/interpolation logic; the per-keyframe stride
+/// switches from `n` to `3 * n` for CubicSpline (in-tangent, value, out-tangent).
+fn sample_flat(times: &[f32], flat: &[f32], n: usize, t: f32, interp: gltf::animation::Interpolation) -> Vec<f32> {
+    use gltf::animation::Interpolation as I;
+    if n == 0 || flat.is_empty() { return Vec::new(); }
+    let (i, alpha) = find_bracket(times, t);
+    let (values_per_kf, val_offset) = match interp {
+        I::CubicSpline => (n * 3, n),
+        _ => (n, 0),
+    };
+    let read = |kf: usize| -> Vec<f32> {
+        let base = kf * values_per_kf + val_offset;
+        (0..n).map(|k| flat.get(base + k).copied().unwrap_or(0.0)).collect()
+    };
+    match interp {
+        I::Step => read(i),
+        I::Linear => {
+            let a = read(i);
+            let b = read((i + 1).min(times.len().saturating_sub(1)));
+            (0..n).map(|k| a[k] * (1.0 - alpha) + b[k] * alpha).collect()
+        }
+        I::CubicSpline => {
+            // Hermite: v(t) = h00·p0 + h10·(dt·m0) + h01·p1 + h11·(dt·m1)
+            let i1 = (i + 1).min(times.len().saturating_sub(1));
+            let dt = (times[i1] - times[i]).max(1e-9);
+            let (t2, t3) = (alpha * alpha, alpha * alpha * alpha);
+            let (h00, h10, h01, h11) = (
+                2.0 * t3 - 3.0 * t2 + 1.0,
+                t3 - 2.0 * t2 + alpha,
+                -2.0 * t3 + 3.0 * t2,
+                t3 - t2,
+            );
+            let p0_base = i  * values_per_kf + n;    // value slot
+            let p1_base = i1 * values_per_kf + n;
+            let m0_base = i  * values_per_kf + n * 2; // out-tangent slot
+            let m1_base = i1 * values_per_kf;         // in-tangent slot
+            (0..n).map(|k| {
+                let p0 = flat.get(p0_base + k).copied().unwrap_or(0.0);
+                let p1 = flat.get(p1_base + k).copied().unwrap_or(0.0);
+                let m0 = flat.get(m0_base + k).copied().unwrap_or(0.0);
+                let m1 = flat.get(m1_base + k).copied().unwrap_or(0.0);
+                h00 * p0 + h10 * dt * m0 + h01 * p1 + h11 * dt * m1
+            }).collect()
+        }
+    }
+}
+
+/// Apply KHR_animation_pointer writes to the collected scene state. Called
+/// between `collect_materials` and `fill_scene` so triangles pick up the
+/// tweened material values before rasterization.
+///
+/// Coverage: material properties (base color, emissive, metallic, roughness,
+/// alpha cutoff, texture strengths, and every KHR_materials_* factor we
+/// support). Unknown pointer paths are silently ignored — an asset that
+/// animates something we don't handle will render as if the animation
+/// wasn't there, which is the least-surprising failure mode.
+pub fn apply_pointer_writes(scene: &mut Scene, writes: &[PointerWrite]) {
+    for w in writes {
+        apply_pointer_write(scene, &w.path, &w.values);
+    }
+}
+
+fn apply_pointer_write(scene: &mut Scene, path: &str, v: &[f32]) {
+    // Parse the JSON pointer. RFC 6901 escape: `~0` → `~`, `~1` → `/`. Pointer
+    // channels in the wild use plain paths so the naive split is fine; the
+    // decode step is here for spec compliance.
+    let segs: Vec<String> = path.split('/').skip(1).map(decode_pointer_seg).collect();
+    match segs.first().map(String::as_str) {
+        Some("materials") => apply_material_write(scene, &segs, v),
+        _ => {}
+    }
+}
+
+fn decode_pointer_seg(s: &str) -> String {
+    s.replace("~1", "/").replace("~0", "~")
+}
+
+fn apply_material_write(scene: &mut Scene, segs: &[String], v: &[f32]) {
+    let Some(idx_s) = segs.get(1) else { return; };
+    let Ok(i) = idx_s.parse::<usize>() else { return; };
+    let Some(m) = scene.materials.get_mut(i) else { return; };
+    let tail: Vec<&str> = segs[2..].iter().map(String::as_str).collect();
+    let f = |i: usize| v.get(i).copied().unwrap_or(0.0);
+
+    // KHR_texture_transform on a per-texture texture_info. The transform lives
+    // under `/materials/N/<texture-slot>/extensions/KHR_texture_transform/<prop>`
+    // where `<texture-slot>` names a texture info (variable depth path). Try
+    // this first so we don't have to enumerate every slot in the big match.
+    if let Some(pos) = tail.iter().position(|s| *s == "KHR_texture_transform") {
+        if pos >= 2 && tail.get(pos - 1) == Some(&"extensions") {
+            // slot_segs = the texture-slot path preceding /extensions/KHR_texture_transform/…
+            let slot_segs = &tail[..pos - 1];
+            let prop = tail.get(pos + 1).copied().unwrap_or("");
+            if let Some(xform) = xform_slot_mut(m, slot_segs) {
+                apply_texture_transform_prop(xform, prop, v);
+                return;
+            }
+        }
+    }
+
+    match tail.as_slice() {
+        // Core pbrMetallicRoughness.
+        ["pbrMetallicRoughness", "baseColorFactor"] if v.len() >= 4 => {
+            m.base_color = [f(0), f(1), f(2), f(3)];
+        }
+        ["pbrMetallicRoughness", "metallicFactor"]  => m.metallic  = f(0),
+        ["pbrMetallicRoughness", "roughnessFactor"] => m.roughness = f(0),
+        // Core emissive + alpha.
+        ["emissiveFactor"] if v.len() >= 3 => m.emissive = [f(0), f(1), f(2)],
+        ["alphaCutoff"] => m.alpha_cutoff = f(0),
+        // Core texture info scalars.
+        ["normalTexture",    "scale"]    => m.normal_scale = f(0),
+        ["occlusionTexture", "strength"] => m.occlusion_strength = f(0),
+        // KHR_materials_clearcoat.
+        ["extensions", "KHR_materials_clearcoat", "clearcoatFactor"]          => m.clearcoat_factor    = f(0),
+        ["extensions", "KHR_materials_clearcoat", "clearcoatRoughnessFactor"] => m.clearcoat_roughness = f(0),
+        ["extensions", "KHR_materials_clearcoat", "clearcoatNormalTexture", "scale"]
+                                                                             => m.clearcoat_normal_scale = f(0),
+        // KHR_materials_sheen.
+        ["extensions", "KHR_materials_sheen", "sheenColorFactor"] if v.len() >= 3
+                                                                             => m.sheen_color = [f(0), f(1), f(2)],
+        ["extensions", "KHR_materials_sheen", "sheenRoughnessFactor"]        => m.sheen_roughness = f(0),
+        // KHR_materials_ior + specular.
+        ["extensions", "KHR_materials_ior", "ior"]                           => m.ior             = f(0),
+        ["extensions", "KHR_materials_specular", "specularFactor"]           => m.specular_factor = f(0),
+        ["extensions", "KHR_materials_specular", "specularColorFactor"] if v.len() >= 3
+                                                                             => m.specular_color = [f(0), f(1), f(2)],
+        // KHR_materials_transmission.
+        ["extensions", "KHR_materials_transmission", "transmissionFactor"]   => m.transmission_factor = f(0),
+        // KHR_materials_volume.
+        ["extensions", "KHR_materials_volume", "thicknessFactor"]            => m.thickness_factor    = f(0),
+        ["extensions", "KHR_materials_volume", "attenuationDistance"]        => m.attenuation_distance = f(0),
+        ["extensions", "KHR_materials_volume", "attenuationColor"] if v.len() >= 3
+                                                                             => m.attenuation_color = [f(0), f(1), f(2)],
+        // KHR_materials_iridescence.
+        ["extensions", "KHR_materials_iridescence", "iridescenceFactor"]     => m.iridescence_factor = f(0),
+        ["extensions", "KHR_materials_iridescence", "iridescenceIor"]        => m.iridescence_ior    = f(0),
+        ["extensions", "KHR_materials_iridescence", "iridescenceThicknessMinimum"]
+                                                                             => m.iridescence_thickness_min = f(0),
+        ["extensions", "KHR_materials_iridescence", "iridescenceThicknessMaximum"]
+                                                                             => m.iridescence_thickness_max = f(0),
+        // KHR_materials_anisotropy.
+        ["extensions", "KHR_materials_anisotropy", "anisotropyStrength"]     => m.anisotropy_strength = f(0),
+        ["extensions", "KHR_materials_anisotropy", "anisotropyRotation"]     => m.anisotropy_rotation = f(0),
+        // KHR_materials_dispersion.
+        ["extensions", "KHR_materials_dispersion", "dispersion"]             => m.dispersion = f(0),
+        // KHR_materials_diffuse_transmission.
+        ["extensions", "KHR_materials_diffuse_transmission", "diffuseTransmissionFactor"]
+                                                                             => m.diffuse_transmission_factor = f(0),
+        ["extensions", "KHR_materials_diffuse_transmission", "diffuseTransmissionColorFactor"] if v.len() >= 3
+                                                                             => m.diffuse_transmission_color = [f(0), f(1), f(2)],
+        // Unknown / unsupported — silently drop rather than break the render.
+        _ => {}
+    }
+}
+
+/// Resolve a KHR_texture_transform pointer's texture-slot path to a mutable
+/// `TextureTransform` on the material. Returns `None` for slots we don't
+/// track (thickness / iridescence textures aren't kept as separate xforms
+/// in `Material` — those channels get silently dropped, which is fine
+/// because the corresponding textures also aren't sampled).
+fn xform_slot_mut<'a>(m: &'a mut Material, slot: &[&str]) -> Option<&'a mut TextureTransform> {
+    match slot {
+        ["normalTexture"]                                                        => Some(&mut m.xform_normal),
+        ["occlusionTexture"]                                                     => Some(&mut m.xform_occlusion),
+        ["emissiveTexture"]                                                      => Some(&mut m.xform_emissive),
+        ["pbrMetallicRoughness", "baseColorTexture"]                             => Some(&mut m.xform_base),
+        ["pbrMetallicRoughness", "metallicRoughnessTexture"]                     => Some(&mut m.xform_mr),
+        ["extensions", "KHR_materials_transmission", "transmissionTexture"]      => Some(&mut m.xform_transmission),
+        ["extensions", "KHR_materials_clearcoat", "clearcoatNormalTexture"]      => Some(&mut m.xform_clearcoat_normal),
+        ["extensions", "KHR_materials_diffuse_transmission", "diffuseTransmissionTexture"] |
+        ["extensions", "KHR_materials_diffuse_transmission", "diffuseTransmissionColorTexture"]
+                                                                                 => Some(&mut m.xform_diffuse_transmission),
+        _ => None,
+    }
+}
+
+fn apply_texture_transform_prop(x: &mut TextureTransform, prop: &str, v: &[f32]) {
+    match prop {
+        "rotation" => {
+            let r = v.first().copied().unwrap_or(0.0);
+            x.rot_cos = r.cos();
+            x.rot_sin = r.sin();
+        }
+        "offset" if v.len() >= 2 => x.offset = [v[0], v[1]],
+        "scale"  if v.len() >= 2 => x.scale  = [v[0], v[1]],
+        _ => {}
+    }
 }
 
 fn sample_weights(times: &[f32], flat: &[f32], num_targets: usize, t: f32, interp: gltf::animation::Interpolation) -> Vec<f32> {
