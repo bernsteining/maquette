@@ -83,18 +83,40 @@ function bindModel(plugin, key, bytes) {
   p.catch(e => console.error("bindModel failed:", e));
 }
 
+// Touchscreen phones / save-data mode / low-RAM laptops: skip preload
+// entirely. iOS Safari has a ~200 MB per-tab wasm ceiling, and warming
+// 3 wasm plugins + several MB of model bytes on boot pushes past it —
+// symptom: worker gets OOM-killed and every subsequent render silently
+// hangs. On these devices we only ever compile a plugin + hold a model
+// when the user actually picks one. `hover: none + pointer: coarse` is
+// the canonical "primarily touch" media query (catches iPhone/iPad/most
+// Android); the two other checks catch save-data and known-low-memory
+// hardware where the same headroom problem applies.
+const isConstrainedDevice = () =>
+  matchMedia("(hover: none) and (pointer: coarse)").matches ||
+  navigator.connection?.saveData === true ||
+  (navigator.deviceMemory ?? 8) < 4;
+
 // Warm the picker's other built-in models into the worker's named cache
 // during idle time. Uses `cache()` (not `setModel()`) so the active model
 // isn't disturbed — every subsequent preset click then flips the active
 // pointer with zero bytes over postMessage. Runs sequentially so we don't
 // saturate slow connections; fires on requestIdleCallback so it never
-// competes with user actions for main-thread cycles.
+// competes with user actions for main-thread cycles. Skipped on mobile /
+// low-memory devices, and even on desktop we HEAD-probe first and skip
+// any asset > 2 MB (tokyo, crankshaft) — those still work on click, they
+// just don't ride in the JS heap the whole session.
 function preloadDemoModels(skipName) {
+  if (isConstrainedDevice()) return;
   const idle = window.requestIdleCallback || (cb => setTimeout(cb, 300));
   idle(async () => {
     for (const [presetName] of MODELS) {
       if (presetName === "__scad__" || presetName === skipName) continue;
       try {
+        const head = await fetch(presetName, { method: "HEAD" });
+        if (!head.ok) continue;
+        const len = +(head.headers.get("content-length") || 0);
+        if (len > 2 * 1024 * 1024) continue;
         const r = await fetch(presetName);
         if (!r.ok) continue;
         const bytes = new Uint8Array(await r.arrayBuffer());
