@@ -33,11 +33,19 @@ function wReq(kind, plugin, fn, args) {
 }
 // Proxy shape mirrors the old sync plugin — swap `.call()` for `await
 // .call()` at every callsite, everything else stays the same.
+//
+// `.setModel(bytes)` + `.callWithModel(fn, ...extra)` are the perf-critical
+// pair: on model swap the bytes cross to the worker ONCE via setModel; every
+// subsequent render/info call passes just the config, and the worker prepends
+// the cached bytes as arg 0 wasm-side. Without this, a helmet.glb render
+// posts the same 4 MB buffer 3–5× per swap (info + preview + full + tweaks).
 function makeWorkerPlugin(name) {
   const p = {
     ready: false,
     async ensure() { if (p.ready) return; await wReq("ensure", name); p.ready = true; },
+    async setModel(bytes) { await wReq("setModel", name, null, [bytes]); },
     async call(fn, ...args) { return await wReq("call", name, fn, args); },
+    async callWithModel(fn, ...extraArgs) { return await wReq("callWithModel", name, fn, extraArgs); },
   };
   return p;
 }
@@ -952,7 +960,7 @@ async function render() {
       if (cold) {
         try {
           const preview = { ...cfg, no_textures: true, antialias: 1, fxaa: false, ssao: undefined };
-          const previewOut = await gltfPlugin.call("render_gltf", model.bytes, ENC.encode(JSON.stringify(preview)));
+          const previewOut = await gltfPlugin.callWithModel("render_gltf", ENC.encode(JSON.stringify(preview)));
           if (token !== renderToken) return;   // superseded by a newer render while awaiting the worker
           paint(previewOut);
           // Yield to the browser so the preview actually paints before we
@@ -961,7 +969,7 @@ async function render() {
           if (token !== renderToken) return;
         } catch (e) { /* preview failure isn't fatal — try full pass anyway */ }
       }
-      const fullOut = await gltfPlugin.call("render_gltf", model.bytes, ENC.encode(JSON.stringify(cfg)));
+      const fullOut = await gltfPlugin.callWithModel("render_gltf", ENC.encode(JSON.stringify(cfg)));
       if (token !== renderToken) return;
       paint(fullOut);
       const ms = performance.now() - t0;
@@ -976,7 +984,7 @@ async function render() {
   try {
     const token = ++renderToken;
     const t0 = performance.now();
-    const out = await maquettePlugin.call(fn, model.bytes, ENC.encode(JSON.stringify(renderConfig())));
+    const out = await maquettePlugin.callWithModel(fn, ENC.encode(JSON.stringify(renderConfig())));
     if (token !== renderToken) return;   // superseded while awaiting the worker
     const ms = performance.now() - t0;
     // Raster output is raw RGBA ([0x00][w][h][rgba8…]); grid / turntable / debug /
@@ -1208,6 +1216,12 @@ function ingest(name, bytes) {
   model = { name, bytes };
   syncPreset(name);
   renderOverride = null;
+  // Bind model bytes into the worker's per-plugin cache. All subsequent
+  // callWithModel() invocations reuse this — no 4 MB retransmit per render.
+  // Fire-and-forget: worker processes messages FIFO, so any later render/info
+  // call is guaranteed to see the bound bytes.
+  (isGltf(name) ? gltfPlugin : maquettePlugin).setModel(bytes)
+    .catch(e => console.error("setModel failed:", e));
   // Schema swap (maquette ↔ glTF) has completely different state fields —
   // wipe + refill so the form isn't reading undefined slots.
   if (kindChanged) { resetState(); buildForm(); }
@@ -1229,7 +1243,7 @@ function ingest(name, bytes) {
 async function syncGltfInfo() {
   try {
     await gltfPlugin.ensure();
-    const raw = await gltfPlugin.call("get_gltf_info", model.bytes, ENC.encode("{}"));
+    const raw = await gltfPlugin.callWithModel("get_gltf_info", ENC.encode("{}"));
     const info = JSON.parse(DEC.decode(raw));
     const maxT = +info.max_animation_time || 0;
     const f = GLTF_TIME_FIELD;   // cached at module load — no search per call
@@ -1310,6 +1324,9 @@ function renderScadResult(ply) {
   // `state._hemi.__on` (undefined).
   const kindChanged = kindDiffers(model && model.name, "model.ply");
   model = { name: "model.ply", scad: true, bytes: ply };
+  // Fresh PLY per compile — bind into maquette plugin's worker cache so
+  // the next callWithModel picks these bytes, not a previous model's.
+  maquettePlugin.setModel(ply).catch(e => console.error("setModel failed:", e));
   if (kindChanged) {
     resetState();
     // Re-apply SCAD's flat-shading look after the wipe.
@@ -1391,7 +1408,7 @@ async function measure() {
   const fn = INFO_FN[ext(model.name)];
   if (!fn) return;
   try {
-    const info = JSON.parse(DEC.decode(await maquettePlugin.call(fn, model.bytes, ENC.encode("{}"))));
+    const info = JSON.parse(DEC.decode(await maquettePlugin.callWithModel(fn, ENC.encode("{}"))));
     if (Array.isArray(info.bbox_center)) bboxCenter = info.bbox_center;   // for cartesian→spherical orbit
     const n = (x) => Number.isInteger(x) ? x.toLocaleString() : (+x).toPrecision(3);
     const stats = [];
@@ -1797,6 +1814,9 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
     model = { name, bytes };
     syncPreset(name);
     // Shared-link boot bypasses ingest() so we run its glTF-mode setup here.
+    // Bind bytes into the worker's per-plugin cache (mirrors ingest()).
+    (isGltf(name) ? gltfPlugin : maquettePlugin).setModel(bytes)
+      .catch(e => console.error("setModel failed:", e));
     syncFmtToggleForKind(name);
     if (isGltf(name)) syncGltfInfo();   // retype Animation-time to a slider when animated
     refreshGetModelsLink();

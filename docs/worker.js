@@ -17,13 +17,18 @@
 // wasm-minimal-protocol host callbacks (they read/write via mem.buffer).
 function makePlugin(url) {
   let _args, _result, inst, mem, ensurePromise;
+  // Model bytes stashed on setModel(). callWithModel() prepends them as arg 0
+  // so main can send a 4 MB glb once per model swap instead of once per render
+  // call. Saves ~5 × 4 MB of structured-clone per helmet load, kills any
+  // "did the plugin see the same bytes as last call" cache-invalidation risk.
+  let modelBytes = null;
   const imports = { typst_env: {
     wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
       new Uint8Array(mem.buffer, ptr, _args.length).set(_args),
     wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
       { _result = new Uint8Array(mem.buffer, ptr, len).slice(); },
   }};
-  return {
+  const p = {
     ready: false,
     // Memoize the in-flight load. Without this, two overlapping ensure() calls
     // (e.g. syncGltfInfo firing at t=0 and render() at t=120ms) each start
@@ -42,6 +47,7 @@ function makePlugin(url) {
       }
       await ensurePromise;
     },
+    setModel(bytes) { modelBytes = bytes; },
     call(fn, args) {
       const total = args.reduce((n, a) => n + a.length, 0);
       _args = new Uint8Array(total); let o = 0;
@@ -51,7 +57,12 @@ function makePlugin(url) {
       if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || `${url} call failed`);
       return _result;
     },
+    callWithModel(fn, extraArgs) {
+      if (!modelBytes) throw new Error(`${url}: no model bound (call setModel first)`);
+      return p.call(fn, [modelBytes, ...extraArgs]);
+    },
   };
+  return p;
 }
 
 const plugins = {
@@ -124,10 +135,15 @@ self.onmessage = async (e) => {
   try {
     if (kind === "ensure") {
       await p.ensure();
-      self.postMessage({ id, ok: true, ready: p.ready });
-    } else if (kind === "call") {
+      self.postMessage({ id, ok: true });
+    } else if (kind === "setModel") {
+      // args[0] is the model bytes; kept for subsequent callWithModel calls
+      // so main doesn't re-send them every render.
+      p.setModel(args[0]);
+      self.postMessage({ id, ok: true });
+    } else if (kind === "call" || kind === "callWithModel") {
       await p.ensure();
-      const result = p.call(fn, args);
+      const result = kind === "callWithModel" ? p.callWithModel(fn, args) : p.call(fn, args);
       // Transfer the result's underlying buffer — main thread only reads it,
       // and we don't retain a reference here. Saves a copy for big renders
       // (helmet's ~500 KB RGBA blob at 512×512).
