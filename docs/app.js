@@ -1128,17 +1128,21 @@ const MODELS = [
 const SCAD_DEFAULTS = { color: "#f9d72c", specular: 0, shading: "flat", cull_backface: false };
 // The canonical OpenSCAD CSG demo — a rounded cube (cube ∩ sphere) bored through
 // on all three axes. OpenSCAD's de-facto showcase model (its "Suzanne").
-const SCAD_EXAMPLE = `// The classic OpenSCAD CSG example, compiled to a watertight
-// mesh in your browser. Edit freely — it recompiles as you type.
-$fn = 64;
-difference() {
-  intersection() {
-    cube(20, center = true);
-    sphere(13);
+const SCAD_EXAMPLE = `// The OpenSCAD logo — sphere drilled through on all three axes.
+// From openscad/openscad, examples/Basics/logo.scad · CC0.
+// Compiled to a watertight mesh in your browser; edit freely.
+Logo(50);
+
+module Logo(size = 50, $fn = 100) {
+  hole = size / 2;
+  cylinderHeight = size * 1.25;
+
+  difference() {
+    sphere(d = size);
+    cylinder(d = hole, h = cylinderHeight, center = true);
+    rotate([90, 0, 0]) cylinder(d = hole, h = cylinderHeight, center = true);
+    rotate([0, 90, 0]) cylinder(d = hole, h = cylinderHeight, center = true);
   }
-  cylinder(h = 30, r = 6, center = true);
-  rotate([90, 0, 0]) cylinder(h = 30, r = 6, center = true);
-  rotate([0, 90, 0]) cylinder(h = 30, r = 6, center = true);
 }`;
 
 // Per-model "showcase" config, applied when a built-in model is picked so each

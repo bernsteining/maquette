@@ -7,8 +7,8 @@
 // is watertight (0 open edges) and every part renders solid from every angle.
 // Sources + .ply are gitignored; to reproduce, put the repo's Source_files/ in
 // examples/scad/cyclone-src/ then `cargo run --release --example repro`.
-#import "../../scad/maquette-scad.typ": *
-#import "../../maquette/maquette.typ": render-ply
+#import "../../crates/maquette-scad/maquette-scad.typ": *
+#import "../../crates/maquette/maquette/maquette.typ": render-ply
 #set page(width: 2000pt, height: auto, margin: 24pt, fill: rgb("#e9e9ec"))
 #set text(font: "DejaVu Sans", size: 22pt)
 
