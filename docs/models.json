@@ -3,6 +3,7 @@
     ["bunny.obj", "Bunny (OBJ)"],
     ["__scad__", "OpenSCAD"],
     ["helmet.blg", "Damaged Helmet (glTF PBR)"],
+    ["tokyo.glb", "Littlest Tokyo (glTF animated)"],
     ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
     ["teapot.obj", "Teapot (OBJ)"],
     ["crankshaft.obj", "Crankshaft (OBJ)"],
@@ -30,6 +31,10 @@
       "background": "#181820",
       "ground": { "__on": true, "color": "#282838", "size_scale": 3.0, "roughness": 0.9 },
       "ssao":   { "__on": true, "samples": 16, "radius": 0.4, "bias": 0.02, "strength": 1.0 }
+    },
+    "tokyo.glb": {
+      "camera": [290, 464, 774], "center": [-86, 5, -25], "up": [0, 1, 0], "fov": 40,
+      "background": "#182028"
     },
     "fox.glb": {
       "camera": [120, 90, 180], "center": [0, 40, 0], "up": [0, 1, 0], "fov": 40,

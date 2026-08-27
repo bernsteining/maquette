@@ -10,3 +10,5 @@ scripts/
 docs/*.obj
 docs/*.stl
 docs/*.ply
+docs/*.glb
+docs/*.blg
