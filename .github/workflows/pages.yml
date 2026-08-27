@@ -10,7 +10,7 @@ on:
   push:
     branches: [master]
     paths:
-      - "src/**"
+      - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
