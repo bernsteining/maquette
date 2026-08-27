@@ -10,9 +10,9 @@
   ],
   "defaults": {
     "__scad__": {
-      "color": "#f9d72c", "specular": 0, "shading": "flat", "cull_backface": false,
-      "up": [0, 0, 1],
-      "camera": [40, 40, 40], "fov": 40, "zoom": 1.2
+      "_cam": "spherical",
+      "azimuth": 219, "elevation": 33, "fov": 40, "zoom": 1.2,
+      "color": "#f9d72c", "specular": 0, "cull_backface": false, "shading": "flat"
     },
     "brain_skull.obj": {
       "highlight": [["Skull", "#e8e8e8"], ["Brain", "#ee69b4"]],

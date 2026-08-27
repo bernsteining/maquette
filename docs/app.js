@@ -1540,9 +1540,11 @@ function ensureSpherical() {
   };
   const orbitBy = (dx, dy, ptype) => {
     if (isGltf(model.name)) { orbitGltfBy(dx, dy, ptype); return; }
-    // Touch reads as direct manipulation, so its horizontal orbit is inverted vs a
-    // mouse orbit; a mouse keeps the -1 direction.
-    const xdir = ptype === "mouse" ? -1 : 1;
+    // Turntable convention: drag right rotates azimuth positive. Touch
+    // reads as direct manipulation (grab-and-drag), which is the inverse
+    // — grabbing on the right and pulling right spins the model the
+    // other way.
+    const xdir = ptype === "mouse" ? 1 : -1;
     state.azimuth = Math.round((state.azimuth + xdir * dx * 0.5) * 10) / 10;
     state.elevation = Math.max(-89, Math.min(89, Math.round((state.elevation + dy * 0.5) * 10) / 10));
     controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation);
