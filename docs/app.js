@@ -1118,15 +1118,8 @@ const modelsReady = fetch("models.json").then(r => r.json()).then(j => {
   MODELS = j.models;
   MODEL_DEFAULTS = j.defaults;
   // Union of every override key ever used — reset target on preset load.
-  DEFAULTS_KEYS = [...new Set([
-    ...Object.values(MODEL_DEFAULTS).flatMap(Object.keys),
-    ...Object.keys(SCAD_DEFAULTS),
-  ])];
+  DEFAULTS_KEYS = [...new Set(Object.values(MODEL_DEFAULTS).flatMap(Object.keys))];
 });
-
-// The `__scad__` picker entry opens an editor instead of fetching a file; its
-// output is a mesh, so give it the OpenSCAD viewport look (flat gold, no specular).
-const SCAD_DEFAULTS = { color: "#f9d72c", specular: 0, shading: "flat", cull_backface: false };
 // Default source for the editor — the OpenSCAD project's own logo.scad,
 // served next to this app.js. Fetched on first entry into scad mode and
 // cached; the fetch is fire-and-forget so the demo boot doesn't pay for
@@ -1344,7 +1337,8 @@ function renderScadResult(ply) {
   if (kindChanged) {
     resetState();
     // Re-apply SCAD's flat-shading look after the wipe.
-    for (const k in SCAD_DEFAULTS) state[k] = structuredClone(SCAD_DEFAULTS[k]);
+    const sd = MODEL_DEFAULTS.__scad__ || {};
+    for (const k in sd) state[k] = structuredClone(sd[k]);
     buildForm();
     syncFmtToggleForKind("model.ply");   // show the PNG/SVG toggle again
   }
@@ -1379,7 +1373,8 @@ async function enterScadMode(initial) {
   else if (!ta.value.trim()) ta.value = await loadScadDefault();
   updateScadHighlight();
   setTab("scad");
-  for (const k in SCAD_DEFAULTS) state[k] = structuredClone(SCAD_DEFAULTS[k]);
+  const sd = MODEL_DEFAULTS.__scad__ || {};
+  for (const k in sd) state[k] = structuredClone(sd[k]);
   buildForm(); refreshVisibility();
   refreshGetModelsLink();
   await compileScad();
