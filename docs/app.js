@@ -24,11 +24,14 @@ worker.onmessage = (e) => {
   const p = _wPending.get(id); if (!p) return; _wPending.delete(id);
   ok ? p.resolve(result) : p.reject(new Error(error));
 };
-function wReq(kind, plugin, fn, args, key) {
+// wReq(msg) posts an id-tagged copy of `msg` to the worker and returns a
+// Promise that resolves with the worker's response. `msg` must include at
+// least { kind, plugin }; { fn, args, key } are per-kind (see worker.js).
+function wReq(msg) {
   return new Promise((resolve, reject) => {
     const id = ++_wReqId;
     _wPending.set(id, { resolve, reject });
-    worker.postMessage({ id, kind, plugin, fn, args, key });
+    worker.postMessage({ id, ...msg });
   });
 }
 // Proxy shape mirrors the old sync plugin — swap `.call()` for `await
@@ -39,25 +42,30 @@ function wReq(kind, plugin, fn, args, key) {
 // subsequent render/info call passes just the config, and the worker prepends
 // the cached bytes as arg 0 wasm-side. Without this, a helmet.glb render
 // posts the same 4 MB buffer 3–5× per swap (info + preview + full + tweaks).
-function makeWorkerPlugin(name) {
+function makeWorkerPlugin(plugin) {
   const p = {
     ready: false,
     // Track which keys we've already stashed on the worker side so a repeat
     // pick sends useKey() (no bytes) instead of setModel() (bytes over wire).
     cached: new Set(),
-    async ensure() { if (p.ready) return; await wReq("ensure", name); p.ready = true; },
+    async ensure() { if (p.ready) return; await wReq({ kind: "ensure", plugin }); p.ready = true; },
     // key is optional; when set, worker stashes the bytes under that name so
     // future useKey(key) activations skip the postMessage entirely.
     async setModel(bytes, key = null) {
-      await wReq("setModel", name, null, [bytes], key);
+      await wReq({ kind: "setModel", plugin, args: [bytes], key });
       if (key) p.cached.add(key);
     },
     // Preload path: stash bytes under `key` without touching activeModel.
     // Safe to fire while a render is in flight.
-    async cache(key, bytes) { await wReq("cache", name, null, [bytes], key); p.cached.add(key); },
-    async useKey(key) { await wReq("useKey", name, null, [], key); },
-    async call(fn, ...args) { return await wReq("call", name, fn, args); },
-    async callWithModel(fn, ...extraArgs) { return await wReq("callWithModel", name, fn, extraArgs); },
+    async cache(key, bytes) {
+      await wReq({ kind: "cache", plugin, args: [bytes], key });
+      p.cached.add(key);
+    },
+    async useKey(key) { await wReq({ kind: "useKey", plugin, key }); },
+    async call(fn, ...args) { return await wReq({ kind: "call", plugin, fn, args }); },
+    async callWithModel(fn, ...extraArgs) {
+      return await wReq({ kind: "callWithModel", plugin, fn, args: extraArgs });
+    },
   };
   return p;
 }
@@ -73,6 +81,29 @@ const gltfPlugin     = makeWorkerPlugin("maquette-gltf");
 function bindModel(plugin, key, bytes) {
   const p = plugin.cached.has(key) ? plugin.useKey(key) : plugin.setModel(bytes, key);
   p.catch(e => console.error("bindModel failed:", e));
+}
+
+// Warm the picker's other built-in models into the worker's named cache
+// during idle time. Uses `cache()` (not `setModel()`) so the active model
+// isn't disturbed — every subsequent preset click then flips the active
+// pointer with zero bytes over postMessage. Runs sequentially so we don't
+// saturate slow connections; fires on requestIdleCallback so it never
+// competes with user actions for main-thread cycles.
+function preloadDemoModels(skipName) {
+  const idle = window.requestIdleCallback || (cb => setTimeout(cb, 300));
+  idle(async () => {
+    for (const [presetName] of MODELS) {
+      if (presetName === "__scad__" || presetName === skipName) continue;
+      try {
+        const r = await fetch(presetName);
+        if (!r.ok) continue;
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        const plugin = isGltf(presetName) ? gltfPlugin : maquettePlugin;
+        await plugin.ensure();
+        await plugin.cache(presetName, bytes);
+      } catch { /* one preload failure isn't fatal; try the next */ }
+    }
+  });
 }
 
 // glTF-format extensions the maquette-gltf plugin handles. `.blg` is our
@@ -1875,25 +1906,6 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
     // Shorten the address bar to the compact form, so even a long readable
     // documentation link becomes short (and copy-ready) once it has loaded.
     if (hadConfig) bestUrl({ model: name, ...raw }).then(u => history.replaceState(null, "", u));
-    // Warm the picker's other built-in models into the worker's named cache
-    // during idle time. Uses `cache()` (not `setModel()`) so the active model
-    // isn't disturbed — every subsequent preset click flips the active
-    // pointer with zero bytes over postMessage. Runs sequentially (not
-    // parallel) so we don't saturate slow connections; fires on
-    // requestIdleCallback so it never competes with user actions.
-    const idle = window.requestIdleCallback || (cb => setTimeout(cb, 300));
-    idle(async () => {
-      for (const [presetName] of MODELS) {
-        if (presetName === "__scad__" || presetName === name) continue;
-        try {
-          const r = await fetch(presetName);
-          if (!r.ok) continue;
-          const bytes = new Uint8Array(await r.arrayBuffer());
-          const plugin = isGltf(presetName) ? gltfPlugin : maquettePlugin;
-          await plugin.ensure();
-          await plugin.cache(presetName, bytes);
-        } catch { /* one preload failure isn't fatal; try the next */ }
-      }
-    });
+    preloadDemoModels(name);
   } catch (e) { showErr("failed to load WASM/model: " + e.message); console.error(e); }
 })();
