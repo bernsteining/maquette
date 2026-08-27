@@ -1600,7 +1600,13 @@ function ensureSpherical() {
 
   stage.addEventListener("wheel", (e) => {
     e.preventDefault();
-    setZoom(e.deltaY < 0 ? 1.1 : 1 / 1.1);
+    // Scale the zoom factor by |deltaY| so one mouse-wheel detent (≈100)
+    // and one trackpad tick (≈4) both feel proportional. Clamp deltaY —
+    // some browsers emit spikes (>1000) on inertial flicks that would
+    // otherwise send the camera into orbit. exp(-100 * 0.0011) ≈ 0.9 keeps
+    // the historic "wheel = 10 %" feel while making trackpads sane.
+    const dy = Math.max(-200, Math.min(200, e.deltaY));
+    setZoom(Math.exp(-dy * 0.0011));
     scheduleRender();
   }, { passive: false });
 })();
