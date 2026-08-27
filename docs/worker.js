@@ -16,7 +16,7 @@
 // Per-plugin state. `_args` / `_result` are module-level for the
 // wasm-minimal-protocol host callbacks (they read/write via mem.buffer).
 function makePlugin(url) {
-  let _args, _result, inst, mem;
+  let _args, _result, inst, mem, ensurePromise;
   const imports = { typst_env: {
     wasm_minimal_protocol_write_args_to_buffer: (ptr) =>
       new Uint8Array(mem.buffer, ptr, _args.length).set(_args),
@@ -25,12 +25,22 @@ function makePlugin(url) {
   }};
   return {
     ready: false,
+    // Memoize the in-flight load. Without this, two overlapping ensure() calls
+    // (e.g. syncGltfInfo firing at t=0 and render() at t=120ms) each start
+    // their own fetch+compile+instantiate; the second one overwrites `inst`
+    // AFTER the first has already run and cached scene/texture data in the
+    // first instance's memory. Subsequent calls hit a fresh instance and
+    // re-decode everything, ballooning helmet renders from ~2s to ~19s.
     async ensure() {
       if (inst) return;
-      const module = await loadModule(url);
-      const i = await WebAssembly.instantiate(module, imports);
-      inst = i; mem = i.exports.memory;
-      this.ready = true;
+      if (!ensurePromise) {
+        ensurePromise = (async () => {
+          const module = await loadModule(url);
+          const i = await WebAssembly.instantiate(module, imports);
+          inst = i; mem = i.exports.memory;
+        })();
+      }
+      await ensurePromise;
     },
     call(fn, args) {
       const total = args.reduce((n, a) => n + a.length, 0);
