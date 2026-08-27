@@ -1107,21 +1107,22 @@ async function copyText(text) {
 
 // ─────────────────────────────── model I/O ────────────────────────────────
 // Built-in models — fetched lazily (only when picked), same origin as bunny.obj.
-// Picker order: bunny (the OBJ showcase) → OpenSCAD (compiled in-browser) →
-// helmet (glTF PBR) → Rubik cloud (PLY point cloud) → the rest. Puts one
-// representative of each renderer at the top.
-const MODELS = [
-  ["bunny.obj", "Bunny (OBJ)"],
-  ["__scad__", "OpenSCAD"],
-  // glTF asset — routed to the maquette-gltf plugin. One demo model for now;
-  // extras (Fox, BoomBox, ToyCar, CesiumMan) live in examples/data/gltf/ for
-  // local dev but aren't shipped in the demo to keep the download slim.
-  ["helmet.blg", "Damaged Helmet (glTF PBR)"],
-  ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
-  ["teapot.obj", "Teapot (OBJ)"],
-  ["crankshaft.obj", "Crankshaft (OBJ)"],
-  ["brain_skull.obj", "Brain + skull (OBJ)"],
-];
+// The picker order + per-model showcase overrides live in docs/models.json,
+// loaded once at module init and shared with initPresets() + boot(). Splitting
+// them out keeps app.js focused on logic; the JSON is safe to hand-edit and
+// even preview-diff without touching code.
+let MODELS = [];
+let MODEL_DEFAULTS = {};
+let DEFAULTS_KEYS = [];
+const modelsReady = fetch("models.json").then(r => r.json()).then(j => {
+  MODELS = j.models;
+  MODEL_DEFAULTS = j.defaults;
+  // Union of every override key ever used — reset target on preset load.
+  DEFAULTS_KEYS = [...new Set([
+    ...Object.values(MODEL_DEFAULTS).flatMap(Object.keys),
+    ...Object.keys(SCAD_DEFAULTS),
+  ])];
+});
 
 // The `__scad__` picker entry opens an editor instead of fetching a file; its
 // output is a mesh, so give it the OpenSCAD viewport look (flat gold, no specular).
@@ -1141,70 +1142,7 @@ async function loadScadDefault() {
   return _scadDefault;
 }
 
-// Per-model "showcase" config, applied when a built-in model is picked so each
-// loads looking like its documentation example. On every preset load these keys
-// are first reset to their schema defaults, then the picked model's overrides
-// applied — so switching models never leaves another model's styling behind.
-const MODEL_DEFAULTS = {
-  // White skull with a pink brain revealed through x-ray (see documentation.pdf).
-  "brain_skull.obj": {
-    highlight: [["Skull", "#e8e8e8"], ["Brain", "#ee69b4"]],
-    mode: "x-ray", xray_opacity: 0.3,
-  },
-  // Brushed-steel grey; crankshaft is modelled -Y up (as the documentation uses).
-  "crankshaft.obj": {
-    color: "#7d8590", specular: 0.6, shininess: 48, up: [0, -1, 0],
-  },
-  // Point-cloud reconstruction framed like the documentation's Rubik scan.
-  "rubi_scan.ply": {
-    point_size: 0.024, point_boundary: 110,
-    _cam: "spherical", azimuth: -119, elevation: 24.5, up: [0, 1, 0], zoom: 2.254,
-  },
-  // glTF presets — camera + IBL colours matched to each asset's authoring intent.
-  "helmet.blg": {
-    camera: [2.5, 1.5, 2.5], center: [0, 0, 0], up: [0, 1, 0], fov: 40,
-    background: "#181820",
-    // Inherits the GLTF_SCHEMA defaults for ibl/shadows/tone-map/SSAA — only
-    // overrides the fields where the helmet showcase wants something specific
-    // (ground plane on with a matching cool tone, SSAO on for grounding).
-    ground: { __on: true, color: "#282838", size_scale: 3.0, roughness: 0.9 },
-    ssao: { __on: true, samples: 16, radius: 0.4, bias: 0.02, strength: 1.0 },
-  },
-  "fox.glb": {
-    camera: [120, 90, 180], center: [0, 40, 0], up: [0, 1, 0], fov: 40,
-    background: "#1a1a22",
-    ibl: { __on: true, sky: "#c0d0f0", ground: "#503020", intensity: 1.3, rotation: 0 },
-    shadows: { __on: true, resolution: 1024, softness: 1, bias: 0.001, normal_bias: 1.5, slope_bias: 2, pcss_light_size: 0 },
-    ground: { __on: true, color: "#3a2a20", size_scale: 3, roughness: 0.85 },
-  },
-  "boombox.glb": {
-    camera: [0.011, 0.008, 0.017], center: [0, 0, 0], up: [0, 1, 0], fov: 30,
-    background: "#181820",
-    ibl: { __on: true, sky: "#dae4ff", ground: "#403020", intensity: 1.5, rotation: 0 },
-    shadows: { __on: true, resolution: 1024, softness: 1, bias: 0.0005, normal_bias: 1.5, slope_bias: 1.5, pcss_light_size: 0 },
-    ground: { __on: true, color: "#2a2a34", size_scale: 3, roughness: 0.9 },
-    exposure: 1.3,
-  },
-  "toycar.glb": {
-    camera: [0.4, 0.3, 0.55], center: [0, 0.05, 0], up: [0, 1, 0], fov: 30,
-    background: "#181820",
-    ibl: { __on: true, sky: "#dae4ff", ground: "#403020", intensity: 1.4, rotation: 0 },
-    shadows: { __on: true, resolution: 1024, softness: 1, bias: 0.001, normal_bias: 1.5, slope_bias: 2, pcss_light_size: 0 },
-    ground: { __on: true, color: "#282838", size_scale: 3, roughness: 0.9 },
-    exposure: 1.2,
-  },
-  "cesiumman.glb": {
-    camera: [2.5, 1, 2.5], center: [0, 0.9, 0], up: [0, 1, 0], fov: 30,
-    background: "#1a1a22",
-    ibl: { __on: true, sky: "#c0d0f0", ground: "#503020", intensity: 1.3, rotation: 0 },
-    shadows: { __on: true, resolution: 1024, softness: 1, bias: 0.001, normal_bias: 1.5, slope_bias: 2.5, pcss_light_size: 0 },
-    ground: { __on: true, color: "#2a2a34", size_scale: 3, roughness: 0.9 },
-  },
-};
-const DEFAULTS_KEYS = [...new Set([
-  ...Object.values(MODEL_DEFAULTS).flatMap(Object.keys),
-  ...Object.keys(SCAD_DEFAULTS),   // so switching away from OpenSCAD resets its flat look
-])];
+// MODELS + MODEL_DEFAULTS live in docs/models.json — see the modelsReady loader above.
 // Field-by-key lookups. `topFields()` returns the flat {k → field} map for
 // the currently-active schema. Cached per-schema in a WeakMap so hot callers
 // (applyConfig walks it once per config key) don't repeat the flatMap. Both
@@ -1351,7 +1289,8 @@ function syncPreset(name) {
   if (!custom) { custom = document.createElement("option"); custom.dataset.custom = "1"; sel.append(custom); }
   custom.value = name; custom.textContent = name + " (loaded)"; sel.value = name;
 }
-(function initPresets() {
+(async function initPresets() {
+  await modelsReady;
   const sel = $("preset");
   for (const [v, t] of MODELS) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.append(o); }
   sel.onchange = () => {
@@ -1884,8 +1823,10 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
   buildForm(); refreshVisibility();
   try {
     // Worker handles fetch → compile → IDB cache → instantiate for the
-    // maquette plugin. Return here means it's ready to `.call()`.
-    await maquettePlugin.ensure();
+    // maquette plugin. Return here means it's ready to `.call()`. In
+    // parallel, wait for MODEL_DEFAULTS to arrive (needed by applyModel-
+    // Defaults() below and by preloadDemoModels()'s MODELS iteration).
+    await Promise.all([maquettePlugin.ensure(), modelsReady]);
     // Load the model named in the URL (any file present in the demo dir — not
     // just picker built-ins, so documentation deep-links resolve), else bunny.
     const wanted = urlModel || "bunny.obj";

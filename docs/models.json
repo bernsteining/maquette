@@ -1,0 +1,60 @@
+{
+  "models": [
+    ["bunny.obj", "Bunny (OBJ)"],
+    ["__scad__", "OpenSCAD"],
+    ["helmet.blg", "Damaged Helmet (glTF PBR)"],
+    ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
+    ["teapot.obj", "Teapot (OBJ)"],
+    ["crankshaft.obj", "Crankshaft (OBJ)"],
+    ["brain_skull.obj", "Brain + skull (OBJ)"]
+  ],
+  "defaults": {
+    "brain_skull.obj": {
+      "highlight": [["Skull", "#e8e8e8"], ["Brain", "#ee69b4"]],
+      "mode": "x-ray", "xray_opacity": 0.3
+    },
+    "crankshaft.obj": {
+      "color": "#7d8590", "specular": 0.6, "shininess": 48, "up": [0, -1, 0]
+    },
+    "rubi_scan.ply": {
+      "point_size": 0.024, "point_boundary": 110,
+      "_cam": "spherical", "azimuth": -119, "elevation": 24.5, "up": [0, 1, 0], "zoom": 2.254
+    },
+    "helmet.blg": {
+      "camera": [2.5, 1.5, 2.5], "center": [0, 0, 0], "up": [0, 1, 0], "fov": 40,
+      "background": "#181820",
+      "ground": { "__on": true, "color": "#282838", "size_scale": 3.0, "roughness": 0.9 },
+      "ssao":   { "__on": true, "samples": 16, "radius": 0.4, "bias": 0.02, "strength": 1.0 }
+    },
+    "fox.glb": {
+      "camera": [120, 90, 180], "center": [0, 40, 0], "up": [0, 1, 0], "fov": 40,
+      "background": "#1a1a22",
+      "ibl":     { "__on": true, "sky": "#c0d0f0", "ground": "#503020", "intensity": 1.3, "rotation": 0 },
+      "shadows": { "__on": true, "resolution": 1024, "softness": 1, "bias": 0.001, "normal_bias": 1.5, "slope_bias": 2, "pcss_light_size": 0 },
+      "ground":  { "__on": true, "color": "#3a2a20", "size_scale": 3, "roughness": 0.85 }
+    },
+    "boombox.glb": {
+      "camera": [0.011, 0.008, 0.017], "center": [0, 0, 0], "up": [0, 1, 0], "fov": 30,
+      "background": "#181820",
+      "ibl":     { "__on": true, "sky": "#dae4ff", "ground": "#403020", "intensity": 1.5, "rotation": 0 },
+      "shadows": { "__on": true, "resolution": 1024, "softness": 1, "bias": 0.0005, "normal_bias": 1.5, "slope_bias": 1.5, "pcss_light_size": 0 },
+      "ground":  { "__on": true, "color": "#2a2a34", "size_scale": 3, "roughness": 0.9 },
+      "exposure": 1.3
+    },
+    "toycar.glb": {
+      "camera": [0.4, 0.3, 0.55], "center": [0, 0.05, 0], "up": [0, 1, 0], "fov": 30,
+      "background": "#181820",
+      "ibl":     { "__on": true, "sky": "#dae4ff", "ground": "#403020", "intensity": 1.4, "rotation": 0 },
+      "shadows": { "__on": true, "resolution": 1024, "softness": 1, "bias": 0.001, "normal_bias": 1.5, "slope_bias": 2, "pcss_light_size": 0 },
+      "ground":  { "__on": true, "color": "#282838", "size_scale": 3, "roughness": 0.9 },
+      "exposure": 1.2
+    },
+    "cesiumman.glb": {
+      "camera": [2.5, 1, 2.5], "center": [0, 0.9, 0], "up": [0, 1, 0], "fov": 30,
+      "background": "#1a1a22",
+      "ibl":     { "__on": true, "sky": "#c0d0f0", "ground": "#503020", "intensity": 1.3, "rotation": 0 },
+      "shadows": { "__on": true, "resolution": 1024, "softness": 1, "bias": 0.001, "normal_bias": 1.5, "slope_bias": 2.5, "pcss_light_size": 0 },
+      "ground":  { "__on": true, "color": "#2a2a34", "size_scale": 3, "roughness": 0.9 }
+    }
+  }
+}
