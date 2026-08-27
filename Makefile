@@ -56,11 +56,12 @@ doc: doc-maquette
 # Picker models first, then extras only referenced by documentation deep-links.
 DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj rubi_scan.ply \
               cube.stl colored_cube.stl cube.obj rubi_blender.ply
-# glTF demo models — Damaged Helmet (PBR static) + Littlest Tokyo (animated,
-# Draco-compressed). Additional assets (fox, boombox, toycar, cesiumman) live
-# in examples/data/gltf/ for local dev; add them here to include them in the
-# demo's model list.
-DEMO_GLTF_MODELS = helmet.blg tokyo.glb
+# glTF demo models — Littlest Tokyo (animated, Draco-compressed) is our sole
+# glTF showcase in the picker. Damaged Helmet (helmet.blg) still lives in
+# examples/data/gltf/ for the PDF documentation build + local dev; add it
+# back here to reinclude it in the demo's model list. Other assets (fox,
+# boombox, toycar, cesiumman, potofcoals) are dev-only in the same way.
+DEMO_GLTF_MODELS = tokyo.glb
 
 # Copy the demo models into docs/ (gitignored there — regenerated, not committed).
 demo-assets:
