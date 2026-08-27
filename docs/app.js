@@ -1280,9 +1280,17 @@ async function loadFile(file) {
 async function loadPreset(name) {
   try {
     const bytes = new Uint8Array(await (await fetch(name)).arrayBuffer());
-    applyModelDefaults(name);
-    buildForm(); refreshVisibility();   // reflect the new state in the form controls
+    // Ingest first so the schema swap + resetState happen BEFORE we apply
+    // the preset's MODEL_DEFAULTS overrides. Historically the order was
+    // reversed (apply then ingest) which worked only because helmet's
+    // overrides happened to equal the gltf schema defaults — tokyo has
+    // world-space camera coords ~x1000 those defaults, so ingest's
+    // resetState wiped them and the user saw the model rendered from
+    // essentially inside its bounding box.
     ingest(name, bytes);
+    applyModelDefaults(name);
+    buildForm(); refreshVisibility();
+    onChange();
   } catch (e) { showErr("failed to load " + name + ": " + e.message); }
 }
 // Reflect the active model in the dropdown; a dropped file gets a transient entry.
