@@ -335,12 +335,28 @@ const SCHEMA = [
 // accepts (see crates/maquette-gltf/src/config.rs).
 const GLTF_SCHEMA = [
   { s: "Camera & viewport", fields: [
-    { k: "camera",     label: "Position [x,y,z]", t: "vec", def: [2.5, 1.5, 2.5] },
+    // Cartesian is the default because ingest() auto-populates state.camera
+    // from the asset's bounding sphere. Spherical is available for docs that
+    // want the orbit knobs directly — az/el/dist take over as soon as the
+    // user switches modes; state.camera stops being exported (see `when`).
+    { k: "_cam", label: "Camera mode", t: "sel", def: "cartesian",
+      opts: [["cartesian", "Cartesian (x,y,z)"], ["spherical", "Spherical (az/el/dist)"]] },
+    { k: "camera",    label: "Position [x,y,z]", t: "vec", def: [2.5, 1.5, 2.5],
+      when: s => s._cam === "cartesian" },
+    { k: "azimuth",   label: "Azimuth °",   t: "num", def: 30, when: s => s._cam === "spherical" },
+    { k: "elevation", label: "Elevation °", t: "num", def: 20, when: s => s._cam === "spherical" },
+    { k: "distance",  label: "Distance (0 = auto)", t: "num", def: 0,
+      omitIf: v => v === 0, when: s => s._cam === "spherical" },
     { k: "center",     label: "Look-at",          t: "vec", def: [0, 0, 0] },
     { k: "up",         label: "Up",               t: "vec", def: [0, 1, 0] },
     { k: "fov",        label: "Field of view °",  t: "num", def: 40 },
+    { k: "auto_center", label: "Auto-center on bbox", t: "bool", def: true },
+    { k: "auto_fit",    label: "Auto-fit distance",   t: "bool", def: true },
+    { k: "camera_auto_use", label: "Prefer glTF-authored camera when present", t: "bool", def: true },
     { k: "camera_name",  label: "Named camera (from glTF, blank = ignore)", t: "txt", def: "", allowBlank: true },
     { k: "camera_index", label: "Camera index (-1 = ignore)", t: "num", def: -1, omitIf: v => v === -1 },
+    { k: "scene_index",  label: "Scene index (-1 = default)", t: "num", def: -1, omitIf: v => v === -1 },
+    { k: "cull_backface", label: "Back-face culling", t: "bool", def: true },
     { k: "background", label: "Background", t: "col", def: "#181820" },
     { k: "width",      label: "Render width px",  t: "num", def: 700, noExport: true },
     { k: "height",     label: "Render height px", t: "num", def: 700, noExport: true },
@@ -379,11 +395,15 @@ const GLTF_SCHEMA = [
 
   { s: "Ground plane", fields: [
     { k: "ground", label: "Ground plane", t: "grp", toggle: true, bool: true, def: {
-        color: "#282838", size_scale: 3.0, roughness: 0.9
+        color: "#282838", size_scale: 3.0, roughness: 0.9, y: 0
       }, fields: [
       { k: "color",      label: "Colour",     t: "col", def: "#282838" },
       { k: "size_scale", label: "Size scale × bbox radius", t: "num", def: 3.0 },
       { k: "roughness",  label: "Roughness",  t: "rng", def: 0.9, min: 0, max: 1, step: 0.01 },
+      // Plugin treats a missing `y` as "sit the plane at `bbox_min.y - ε`".
+      // 0 in the form means "leave unset" — the group's serialiser skips it
+      // via omitIf, so the plugin never sees `y: 0` and picks its default.
+      { k: "y",          label: "Y position (0 = auto)", t: "num", def: 0, omitIf: v => v === 0 },
     ]},
   ]},
 
@@ -410,6 +430,7 @@ const GLTF_SCHEMA = [
     // to the asset's actual animation duration (see get_gltf_info's
     // max_animation_time). Same field key either way.
     { k: "time",             label: "Animation time (s)", t: "num", def: 0 },
+    { k: "animation_index",  label: "Animation clip (-1 = stack all)", t: "num", def: -1, omitIf: v => v === -1 },
     { k: "material_variant", label: "Material variant (KHR_materials_variants)", t: "num", def: 0, omitIf: v => v === 0 },
     { k: "no_textures",      label: "Skip textures (fast preview)", t: "bool", def: false },
     { k: "texture_max_size", label: "Texture max size (0 = full)", t: "num", def: 0, omitIf: v => v === 0 },
@@ -434,6 +455,9 @@ const HELP = {
   pan: "Shift the framing in screen space, [right, up] as a fraction of the viewport.",
   auto_center: "Center the camera on the model's bounding box.",
   auto_fit: "Scale the model to fill the viewport.", background: "Background color.",
+  camera_auto_use: "If the glTF ships an authored camera, use it instead of your framing arguments.",
+  scene_index: "Pick a scene by index. -1 uses the asset's authored default scene (typically scene 0).",
+  animation_index: "Pick a single animation clip by index (0-based). -1 plays every clip stacked.",
   _bgNone: "Render on a transparent background instead of a color.",
   width: "Render resolution width in pixels.", height: "Render resolution height in pixels.",
   color: "Base model fill color.", opacity: "Whole-model opacity (0 = invisible, 1 = opaque).",
@@ -1551,7 +1575,13 @@ function ensureSpherical() {
     const forward = norm(cross(right, up));
     let el = Math.asin(Math.max(-1, Math.min(1, dot(v, up))));
     let az = Math.atan2(dot(v, forward), dot(v, right));
-    const xdir = ptype === "mouse" ? -1 : 1;
+    // Same convention as the maquette `orbitBy` path: mouse = turntable
+    // (drag right → camera orbits right around the model → model appears to
+    // rotate left), touch = direct manipulation (drag right → grabbed side
+    // comes toward you). Prior version had the signs inverted, so glTF
+    // scenes rotated the opposite way from bunny/teapot for the same drag,
+    // and touch inverted what mouse did within the same plugin.
+    const xdir = ptype === "mouse" ? 1 : -1;
     az += xdir * dx * 0.5 * Math.PI / 180;
     el = Math.max(-89, Math.min(89, el * 180 / Math.PI + dy * 0.5)) * Math.PI / 180;
     // Reconstitute the offset from (az, el, dist) in the same basis.
