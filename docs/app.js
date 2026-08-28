@@ -1575,12 +1575,13 @@ function ensureSpherical() {
     const forward = norm(cross(right, up));
     let el = Math.asin(Math.max(-1, Math.min(1, dot(v, up))));
     let az = Math.atan2(dot(v, forward), dot(v, right));
-    // Touch inverts BOTH axes relative to mouse on gltf. The finger drags
-    // the grabbed side of the model with it (drag right → right side comes
-    // toward you; drag down → top comes toward you), which is the opposite
-    // az/el delta from the mouse's turntable orbit. Verified live: mouse
-    // convention kept, touch flips both signs.
-    const xdir = ptype === "mouse" ? 1 : -1;
+    // Touch on gltf: Y stays inverted from mouse (confirmed good), X
+    // matches mouse (drag right → grabbed side of the model comes toward
+    // you). The touch-X sign has been flipped repeatedly; if the phone
+    // still feels wrong here after a hard reload, my mental model of the
+    // trig direction is off and we need to trace it visually rather than
+    // guess signs.
+    const xdir = 1;
     const ydir = ptype === "mouse" ? 1 : -1;
     az += xdir * dx * 0.5 * Math.PI / 180;
     el = Math.max(-89, Math.min(89, el * 180 / Math.PI + ydir * dy * 0.5)) * Math.PI / 180;
