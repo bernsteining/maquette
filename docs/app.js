@@ -1581,29 +1581,13 @@ function ensureSpherical() {
     // still feels wrong here after a hard reload, my mental model of the
     // trig direction is off and we need to trace it visually rather than
     // guess signs.
+    // Unified with the maquette orbitBy path below: no ptype split on
+    // either axis. Touch and mouse produce the same rotation for the same
+    // drag delta. Y stays as originally emitted (dy > 0 → el increases →
+    // camera pans up so top of model tilts down in view).
     const xdir = 1;
-    const ydir = ptype === "mouse" ? 1 : -1;
-    const dazDeg = xdir * dx * 0.5;
-    const delDeg = ydir * dy * 0.5;
-    az += dazDeg * Math.PI / 180;
-    el = Math.max(-89, Math.min(89, el * 180 / Math.PI + delDeg)) * Math.PI / 180;
-    // Temporary on-screen instrumentation for the recurring "phone X is
-    // inverted" report. Sign-flip attempts have gone in circles because
-    // I have no way to see runtime state on iOS Safari. Shows the last
-    // orbit event's pointerType, drag delta, applied direction multipliers,
-    // and the actual delta-az / delta-el fed into the trig — that's the
-    // authoritative view of which way the model *will* rotate. Remove
-    // once the phone-X sign question is settled.
-    if (typeof document !== "undefined") {
-      let d = document.getElementById("orbit-dbg");
-      if (!d) {
-        d = document.createElement("div");
-        d.id = "orbit-dbg";
-        d.style.cssText = "position:fixed;top:6px;left:6px;z-index:9999;padding:4px 6px;background:rgba(0,0,0,.7);color:#fff;font:11px/1.2 monospace;border-radius:4px;pointer-events:none;white-space:pre";
-        document.body.appendChild(d);
-      }
-      d.textContent = `ptype=${ptype}\ndx=${dx.toFixed(1)}  dy=${dy.toFixed(1)}\nxdir=${xdir}  ydir=${ydir}\ndaz=${dazDeg.toFixed(2)}°  del=${delDeg.toFixed(2)}°`;
-    }
+    az += xdir * dx * 0.5 * Math.PI / 180;
+    el = Math.max(-89, Math.min(89, el * 180 / Math.PI + dy * 0.5)) * Math.PI / 180;
     // Reconstitute the offset from (az, el, dist) in the same basis.
     const cosEl = Math.cos(el);
     const nx = right[0]*cosEl*Math.cos(az) + forward[0]*cosEl*Math.sin(az) + up[0]*Math.sin(el);
@@ -1631,12 +1615,10 @@ function ensureSpherical() {
   };
   const orbitBy = (dx, dy, ptype) => {
     if (isGltf(model.name)) { orbitGltfBy(dx, dy, ptype); return; }
-    // Turntable convention: drag right rotates azimuth positive. Touch
-    // reads as direct manipulation (grab-and-drag), which is the inverse
-    // — grabbing on the right and pulling right spins the model the
-    // other way.
-    const xdir = ptype === "mouse" ? 1 : -1;
-    state.azimuth = Math.round((state.azimuth + xdir * dx * 0.5) * 10) / 10;
+    // Same convention for mouse and touch: no ptype split. Prior version
+    // inverted X on touch under a "grab-and-drag" reading, which had the
+    // model rotate the wrong way for the finger direction on phone.
+    state.azimuth = Math.round((state.azimuth + dx * 0.5) * 10) / 10;
     state.elevation = Math.max(-89, Math.min(89, Math.round((state.elevation + dy * 0.5) * 10) / 10));
     controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation);
   };
