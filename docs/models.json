@@ -9,6 +9,7 @@
     ["brain_skull.obj", "Brain + skull (OBJ)"]
   ],
   "defaults": {
+    "bunny.obj": { "color": "#4488cc" },
     "__scad__": {
       "_cam": "spherical",
       "azimuth": 219, "elevation": 33, "fov": 40, "zoom": 1.2,
