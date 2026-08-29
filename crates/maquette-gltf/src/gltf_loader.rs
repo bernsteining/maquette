@@ -49,7 +49,8 @@ fn parse_impl(bytes: &[u8], sidecars: HashMap<String, Vec<u8>>) -> Result<Loaded
     // handing the JSON off we synthesise the missing bufferViews + a
     // placeholder buffer the Draco pass fills in below.
     let patched;
-    let bytes: &[u8] = match preprocess_draco_json(bytes, &sidecars) {
+    let mut draco_cache: DracoCache = HashMap::new();
+    let bytes: &[u8] = match preprocess_draco_json(bytes, &sidecars, &mut draco_cache) {
         Ok(Some(p)) => { patched = p; &patched }
         Ok(None) => bytes,      // no Draco primitives → pass through untouched
         Err(e) => return Err(e),
@@ -107,8 +108,10 @@ fn parse_impl(bytes: &[u8], sidecars: HashMap<String, Vec<u8>>) -> Result<Loaded
     // KHR_draco_mesh_compression: per-primitive Draco payloads. Same idea
     // as meshopt above — decode up front, write the vertex attributes +
     // indices into the accessors' fallback bufferView locations so scene
-    // traversal never has to know Draco existed.
-    decompress_draco(&document, &mut buffers, bytes)?;
+    // traversal never has to know Draco existed. `draco_cache` was
+    // populated by preprocess above (one decode per primitive); when it
+    // holds the mesh already, `decompress_draco` skips the second decode.
+    decompress_draco(&document, &mut buffers, bytes, &mut draco_cache)?;
 
     Ok(LoadedGltf { document, buffers, sidecars })
 }
@@ -178,9 +181,17 @@ const DRACO_PLACEHOLDER_URI_PREFIX: &str = "draco-placeholder:";
 /// Supports both `.gltf` (JSON) and `.glb` (binary) inputs — for GLB the
 /// JSON chunk is rewritten in place and the wrapping header/lengths are
 /// recomputed. The BIN chunk (if any) rides along unchanged.
+/// Cache keyed by `(mesh_idx, primitive_idx)`. Populated by
+/// `preprocess_draco_json` (which needs a full decode to size accessors)
+/// and consumed by `decompress_draco` (which needs the same data to write
+/// per-point attributes). Owning `Mesh` lets us skip the second decode —
+/// worth ~500 ms on tokyo.
+pub(crate) type DracoCache = HashMap<(usize, usize), draco_oxide_core::mesh::Mesh>;
+
 fn preprocess_draco_json(
     raw: &[u8],
     sidecars: &HashMap<String, Vec<u8>>,
+    cache: &mut DracoCache,
 ) -> Result<Option<Vec<u8>>, String> {
     // Split JSON out of whichever container we got. Also remember the tail
     // (chunk-1 BIN block for GLB) so we can rebuild the container after +
@@ -234,7 +245,7 @@ fn preprocess_draco_json(
     // panics on small meshes whose declared count is < num_points, and
     // silently reads garbage on ones where it's larger.
     let bin_data_slice: &[u8] = &glb_bin_data;
-    patch_draco_accessor_counts(&mut json, bin_data_slice, sidecars)?;
+    patch_draco_accessor_counts(&mut json, bin_data_slice, sidecars, cache)?;
     let meshes = json.get("meshes").and_then(|v| v.as_array())
         .ok_or("draco preprocess: meshes vanished after count patch")?.clone();
 
@@ -383,6 +394,7 @@ fn patch_draco_accessor_counts(
     json: &mut serde_json::Value,
     glb_bin: &[u8],
     sidecars: &HashMap<String, Vec<u8>>,
+    cache: &mut DracoCache,
 ) -> Result<(), String> {
     use draco_oxide_decoder::Decoder;
 
@@ -394,10 +406,10 @@ fn patch_draco_accessor_counts(
     let mut patches: Vec<(Vec<usize>, Option<usize>, usize, usize)> = Vec::new();
 
     let mut data_uri_cache: HashMap<usize, Vec<u8>> = HashMap::new();
-    for mesh in &meshes {
+    for (mesh_idx, mesh) in meshes.iter().enumerate() {
         let prims = mesh.get("primitives").and_then(|v| v.as_array())
             .cloned().unwrap_or_default();
-        for prim in &prims {
+        for (prim_idx, prim) in prims.iter().enumerate() {
             let Some(ext) = prim.get("extensions").and_then(|e| e.get("KHR_draco_mesh_compression")) else { continue; };
             let src_bv_idx = ext.get("bufferView").and_then(|v| v.as_u64())
                 .ok_or("draco preprocess: extension missing bufferView")? as usize;
@@ -434,6 +446,9 @@ fn patch_draco_accessor_counts(
             }
             let idx_acc = prim.get("indices").and_then(|v| v.as_u64()).map(|v| v as usize);
             patches.push((attr_accs, idx_acc, num_points, num_faces));
+            // Stash the decoded mesh — `decompress_draco` will reuse it
+            // rather than decode the same payload a second time.
+            cache.insert((mesh_idx, prim_idx), decoded);
         }
     }
 
@@ -532,6 +547,7 @@ fn decompress_draco(
     document: &gltf::Document,
     buffers: &mut Vec<Vec<u8>>,
     _raw: &[u8],
+    cache: &mut DracoCache,
 ) -> Result<(), String> {
     use draco_oxide_decoder::Decoder;
 
@@ -541,28 +557,34 @@ fn decompress_draco(
     // primitive loop.
     let mut patches: Vec<(usize, usize, Vec<u8>)> = Vec::new();
 
-    for mesh in document.meshes() {
-        for prim in mesh.primitives() {
+    for (mesh_idx, mesh) in document.meshes().enumerate() {
+        for (prim_idx, prim) in mesh.primitives().enumerate() {
             let Some(ext) = prim.extension_value("KHR_draco_mesh_compression") else { continue; };
             let src_bv_idx = ext.get("bufferView").and_then(|v| v.as_u64())
                 .ok_or("draco: missing bufferView")? as usize;
             let attr_map = ext.get("attributes").and_then(|v| v.as_object())
                 .ok_or("draco: missing attributes map")?;
 
-            // Locate + slice the Draco payload.
-            let src_bv = document.views().nth(src_bv_idx)
-                .ok_or("draco: source bufferView index out of range")?;
-            let src_buf = buffers.get(src_bv.buffer().index())
-                .ok_or("draco: source buffer index out of range")?;
-            let src_start = src_bv.offset();
-            let src_end = src_start + src_bv.length();
-            let src = src_buf.get(src_start..src_end)
-                .ok_or("draco: source bufferView slice out of range")?;
-
-            // Decode. Returns a Mesh with per-point-indexed attributes plus
-            // a faces list of PointIdx triples.
-            let decoded = Decoder::new().decode_mesh(src)
-                .map_err(|e| format!("draco decode error: {:?}", e))?;
+            // Hot path: preprocess already decoded this primitive for the
+            // accessor.count patch — take the cached mesh instead of a
+            // second decode (Draco decode is ~ half the total Draco parse
+            // cost on tokyo). Cold path (cache miss) only fires if the
+            // preprocess couldn't reach this primitive, e.g. a `.gltf` with
+            // an external buffer we didn't have at preprocess time.
+            let decoded = if let Some(m) = cache.remove(&(mesh_idx, prim_idx)) {
+                m
+            } else {
+                let src_bv = document.views().nth(src_bv_idx)
+                    .ok_or("draco: source bufferView index out of range")?;
+                let src_buf = buffers.get(src_bv.buffer().index())
+                    .ok_or("draco: source buffer index out of range")?;
+                let src_start = src_bv.offset();
+                let src_end = src_start + src_bv.length();
+                let src = src_buf.get(src_start..src_end)
+                    .ok_or("draco: source bufferView slice out of range")?;
+                Decoder::new().decode_mesh(src)
+                    .map_err(|e| format!("draco decode error: {:?}", e))?
+            };
 
             // Emit per-point (`num_points` values per attribute), indexed by
             // each attribute's OWN `point_to_att_val_map`. Face indices are

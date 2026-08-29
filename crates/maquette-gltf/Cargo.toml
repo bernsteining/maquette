@@ -22,6 +22,11 @@ meshopt-rs = { version = "0.1", features = ["experimental"] }
 # decoder crate directly, not on `draco-oxide`, so the encoder never links.
 # Alpha pre-release — pin the exact version to insulate against API drift.
 draco-oxide-decoder = { version = "=0.1.0-alpha.10", default-features = false, features = ["dequantize"] }
+# Core types (Mesh, Attribute, PointIdx) so we can name them in the payload
+# cache passed between preprocess and decompress. `draco-oxide-decoder`
+# already pulls this in as a direct dep at the same version; we just need
+# it in scope so a shared cache typed as `HashMap<..., Mesh>` compiles.
+draco-oxide-core = { version = "=0.1.0-alpha.10", default-features = false }
 # MikkTSpace: consistent per-vertex tangents when TANGENT attribute is missing.
 mikktspace = { version = "0.3", default-features = false, features = ["glam"] }
 
