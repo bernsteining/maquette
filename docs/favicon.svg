@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Placeholder favicon: rounded indigo tile matching the demo's --accent
+       colour, with a bold sans "m" for maquette. Real logo drops in later —
+       same file path, same <link rel="icon"> in index.html. -->
+  <rect width="32" height="32" rx="6" fill="#4f46e5"/>
+  <text x="16" y="23" text-anchor="middle"
+        font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+        font-size="22" font-weight="800" fill="#ffffff">m</text>
+</svg>
