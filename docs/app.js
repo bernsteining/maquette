@@ -1090,8 +1090,16 @@ let t = null;
 // Share, and lets a reload restore what they were looking at. Kept
 // separate from the render debounce so a fast drag doesn't spam
 // history.replaceState (which is cheap but not free).
+//
+// SCAD mode carries a synthesized model name ("model.ply") that no fetch
+// can restore, and its yellow flat-shading defaults would bleed into
+// whatever the boot fallback loads (bunny). Skip the URL sync while
+// the SCAD source is the model — sharing SCAD sessions is a separate
+// story (source lives in the editor, not the URL) and the previous
+// static URL persists until the user picks a real model again.
 let urlT = null;
 function scheduleUrlSync() {
+  if (model && model.scad) return;
   clearTimeout(urlT);
   urlT = setTimeout(async () => {
     try {
@@ -2068,7 +2076,17 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
     if (urlModel && !hadConfig) { applyModelDefaults(wanted); buildForm(); }
     let name = wanted, bytes;
     try { const r = await fetch(wanted); if (!r.ok) throw 0; bytes = new Uint8Array(await r.arrayBuffer()); }
-    catch { name = "bunny.obj"; bytes = new Uint8Array(await (await fetch("bunny.obj")).arrayBuffer()); }
+    catch {
+      // Wanted model unreachable (typical: URL carries "model.ply" from a
+      // prior SCAD session, which no fetch can restore). Fall back to
+      // bunny AND wipe the URL-restored state — otherwise settings tied
+      // to the missing model (e.g. SCAD's yellow flat-shading) contaminate
+      // the fallback render.
+      name = "bunny.obj";
+      bytes = new Uint8Array(await (await fetch("bunny.obj")).arrayBuffer());
+      resetState();
+      history.replaceState(null, "", location.pathname);
+    }
     model = makeModel(name, bytes);
     syncPreset(name);
     // Shared-link boot bypasses ingest() so we run its glTF-mode setup here.
