@@ -19,7 +19,7 @@
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #0e0f13; --panel: #16181e; --line: #262932; --ink: #e8e9ec; --ink-soft: #b9bdc7;
-      --muted: #767c88; --accent: #818cf8; --accent-soft: #1c1e2e;
+      --muted: #828a99; --accent: #818cf8; --accent-soft: #1c1e2e;  /* was #767c88 — sub-AA (4.23:1) against --panel */
       --code-bg: #121319; --err: #f87171; --shadow: 0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.6);
       --s-dir: #c792ea; --s-str: #9ece6a; --s-num: #ff9e64; --s-key: #7aa2f7; --s-kw: #f7768e; --s-punct: #565f7a;
     }
@@ -278,6 +278,8 @@
             <div class="editor-bar">
               <button id="tab-scad" class="tab" hidden>model.scad</button>
               <button id="tab-typst" class="tab on">preview.typ</button>
+              <!-- One-line UX hint when the scad tab is active — auto-shows/hides via setTab(). -->
+              <span id="scad-hint" class="muted" hidden>edit the source; recompiles on every change</span>
               <span id="scad-status" class="muted"></span>
               <button id="copy">Copy</button>
             </div>
@@ -295,7 +297,10 @@
       <div id="measure"></div>
     </section>
 
-    <section id="stage">
+    <section id="stage" aria-label="Rendered model — drag to orbit, drop a file to load">
+      <!-- A11y drop-target: names the stage for screen readers so drag-and-drop
+           has a spoken affordance beyond the visible #hint text below. -->
+
       <div id="tools">
         <div class="seg" id="fmt" title="Output format">
           <button data-fmt="png" class="on">PNG</button>
@@ -314,11 +319,11 @@
       <div id="busy" aria-hidden="true"><span class="spinner"></span><span id="busy-cap">rendering…</span></div>
       <div id="rtime" aria-live="polite" aria-atomic="true"></div>
       <div id="err" role="alert" aria-live="assertive" aria-atomic="true"></div>
-      <div id="hint">drag to orbit · scroll to zoom · drop a .obj/.stl/.ply/.glb</div>
+      <div id="hint">drag to orbit · scroll to zoom · drop a model file anywhere (.obj/.stl/.ply/.glb/.gltf/.blg/.scad)</div>
     </section>
   </main>
 
   <div id="tip" role="tooltip"></div>
-  <script src="app.js?v=28"></script>
+  <script src="app.js?v=29"></script>
 </body>
 </html>

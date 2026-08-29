@@ -1084,10 +1084,27 @@ function refreshVisibility() {
 
 // ─────────────────────────────── update loop ──────────────────────────────
 let t = null;
+// Debounced URL sync: 400 ms after the last state edit, rewrite the
+// address bar to a shareable link for the current state. Makes copy/paste
+// from the browser bar always work without the user having to click
+// Share, and lets a reload restore what they were looking at. Kept
+// separate from the render debounce so a fast drag doesn't spam
+// history.replaceState (which is cheap but not free).
+let urlT = null;
+function scheduleUrlSync() {
+  clearTimeout(urlT);
+  urlT = setTimeout(async () => {
+    try {
+      const u = await bestUrl(shareConfig());
+      history.replaceState(null, "", u);
+    } catch { /* URL sync is best-effort */ }
+  }, 400);
+}
 function onChange() {
   refreshVisibility();
   renderCode();
   clearTimeout(t); t = setTimeout(safeRender, 120);
+  scheduleUrlSync();
 }
 
 // Single in-flight coalescer for every render trigger (scheduleRender for
@@ -1469,6 +1486,7 @@ function setTab(which) {
   $("tab-scad").classList.toggle("on", which === "scad");
   $("tab-typst").classList.toggle("on", which === "typst");
   $("scad-editor").hidden = which !== "scad";
+  const hint = $("scad-hint"); if (hint) hint.hidden = which !== "scad";
   elCode.style.display = which === "typst" ? "" : "none";
 }
 $("tab-scad").onclick = () => setTab("scad");
@@ -1769,6 +1787,25 @@ function ensureSpherical() {
     setZoom(Math.exp(-dy * 0.0011));
     scheduleRender();
   }, { passive: false });
+
+  // Keyboard-only camera controls: arrow keys orbit ±5°, PageUp/Down zoom.
+  // Stage is now `tabindex="0"` (set in index.html) so keyboard users can
+  // focus it and drive the view without touching the form fields.
+  stage.tabIndex = 0;
+  stage.addEventListener("keydown", (e) => {
+    // Only when the stage itself has focus (not a nested control).
+    if (document.activeElement !== stage) return;
+    const step = e.shiftKey ? 30 : 10;    // shift = coarse
+    let handled = true;
+    if (e.key === "ArrowLeft")  orbitBy(-step, 0, "mouse");
+    else if (e.key === "ArrowRight") orbitBy( step, 0, "mouse");
+    else if (e.key === "ArrowUp")    orbitBy(0, -step, "mouse");
+    else if (e.key === "ArrowDown")  orbitBy(0,  step, "mouse");
+    else if (e.key === "PageUp"   || e.key === "+" || e.key === "=") setZoom(Math.exp( 0.1));
+    else if (e.key === "PageDown" || e.key === "-" || e.key === "_") setZoom(Math.exp(-0.1));
+    else handled = false;
+    if (handled) { e.preventDefault(); scheduleRender(); }
+  });
 })();
 
 // ── download / share / reset ───────────────────────────────────────────────
@@ -1975,6 +2012,25 @@ $("btn-reset").onclick = () => {
 // The first manual edit of any control drops the deep-link override, so from
 // there the render follows the (editable) state instead of the frozen link config.
 $("form").addEventListener("input", () => { renderOverride = null; }, true);
+
+// Power-user shortcuts. Bindings match common editor conventions
+// (Cmd/Ctrl+S save / share, Esc = revert, Cmd/Ctrl+Shift+D download).
+// Skipped when the target is an editable text field (typing 's' in the
+// SCAD editor shouldn't trigger share).
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  const editable = t && (t.matches?.("input, textarea, select, [contenteditable]"));
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+    e.preventDefault(); $("btn-share").click();
+  } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
+    e.preventDefault(); $("btn-download").click();
+  } else if (e.key === "Escape" && !editable) {
+    // Escape resets, but only when focus isn't in an input — otherwise
+    // it'd cancel typed edits and users would lose context.
+    e.preventDefault(); $("btn-reset").click();
+  }
+});
 
 $("search").addEventListener("input", () => filterForm($("search").value));
 
