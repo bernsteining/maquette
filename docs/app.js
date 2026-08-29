@@ -141,7 +141,7 @@ const PROJ = ["perspective","orthographic","isometric","dimetric","trimetric","m
   "cabinet","cavalier","fisheye","stereographic","curvilinear","cylindrical","pannini","tiny-planet"];
 
 const SCHEMA = [
-  { s: "Point cloud (PLY)", open: true, when: () => ext(model.name) === "ply", fields: [
+  { s: "Point cloud (PLY)", open: true, when: () => model._ext === "ply", fields: [
     { k: "point_size", label: "Point size / radius (0 = auto)", t: "num", def: 0, omitIf: v => v === 0 },
     { k: "point_neighbors", label: "Neighbors k (higher = fewer holes)", t: "num", def: 12, omitIf: v => v === 12 },
     { k: "point_boundary", label: "Boundary cut angle ° (0 = off)", t: "num", def: 60, omitIf: v => v === 60 },
@@ -440,7 +440,7 @@ const GLTF_SCHEMA = [
 // Which SCHEMA drives the panel for the current model — swaps in GLTF_SCHEMA
 // when a .glb / .gltf / .blg is selected. Also used by the form builder,
 // renderConfig, buildTypst, refreshVisibility, and applyModelDefaults.
-function getSchema() { return isGltf(model && model.name) ? GLTF_SCHEMA : SCHEMA; }
+function getSchema() { return model._gltf ? GLTF_SCHEMA : SCHEMA; }
 
 // Tooltips (hover a label) — keyed by field key. Covers top-level fields and
 // group headers, whose keys are unique. Shown via the native title attribute.
@@ -502,12 +502,20 @@ let lastRender = null;    // {kind:"raw"} or {kind:"svg", bytes} of the most rec
 let rafPending = false;
 
 // ──────────────────────────── state (nested) ──────────────────────────────
-// `model` + `ext` are declared before initState/state because getSchema()
-// (called from initState) reads `model.name` via `ext()` via `isGltf()`.
-// Without this hoist we'd hit a TDZ ReferenceError at page load and the
-// script would stop before the form is built ("demo looks incomplete").
-let model = { name: "bunny.obj", bytes: null };
+// `model` is declared before initState/state because getSchema() (called
+// from initState) reads `model._gltf` — an uninitialised model would hit
+// a TDZ ReferenceError and the form would never build.
 const ext = (name) => name.split(".").pop().toLowerCase();
+// Every ingest/boot goes through this so `model._ext` and `model._gltf`
+// stay in sync with `model.name` without recomputing on every render or
+// drag. Hot paths read the cached props instead of re-running `ext(...)`
+// or `isGltf(...)` on the string each time.
+const makeModel = (name, bytes, extra = null) => {
+  const e = ext(name);
+  return extra ? { name, bytes, _ext: e, _gltf: GLTF_EXTS.has(e), ...extra }
+               : { name, bytes, _ext: e, _gltf: GLTF_EXTS.has(e) };
+};
+let model = makeModel("bunny.obj", null);
 function initState() {
   const st = {};
   for (const sec of getSchema()) for (const f of sec.fields) {
@@ -519,8 +527,20 @@ function initState() {
 const state = initState();
 
 // ─────────────────────── Typst / config value helpers ─────────────────────
-const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+// Fast paths for the two common shapes on hot buildTypst inequality checks
+// (primitives → `===`, small flat arrays → element-wise). Falls back to
+// JSON.stringify for nested dicts, which the schema uses sparingly.
+const eq = (a, b) => {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  return JSON.stringify(a) === JSON.stringify(b);
+};
 const num = (v) => Number.isInteger(v) ? String(v) : String(+v.toFixed(4));
+const round3 = (x) => Math.round(x * 1000) / 1000;
 function fmtT(v) {                                  // JS value → Typst literal
   if (typeof v === "string") return `"${v}"`;
   if (typeof v === "boolean") return v ? "true" : "false";
@@ -589,7 +609,7 @@ function buildConfig() {
   // For glTF the ambient/background fields are plain scalars — they come out of
   // the SCHEMA walk directly, no polymorphic hemispheric-ambient / transparent-
   // background handling needed. For maquette they're polymorphic and set below.
-  const gltf = isGltf(model.name);
+  const gltf = model._gltf;
   for (const sec of getSchema()) for (const f of sec.fields) {
     if (f.when && !f.when(state, state)) continue;
     if (f.k[0] === "_") continue;                     // UI-only fields
@@ -617,9 +637,9 @@ function buildConfig() {
 // ─────────────────────── build Typst snippet (minimal) ────────────────────
 function buildTypst() {
   // Different Typst function name + import path for glTF (a different plugin).
-  const gltf = isGltf(model.name);
+  const gltf = model._gltf;
   const fn = gltf ? "render-gltf"
-    : ({ obj: "render-obj", stl: "render-stl", ply: "render-ply" }[ext(model.name)] || "render-obj");
+    : ({ obj: "render-obj", stl: "render-stl", ply: "render-ply" }[model._ext] || "render-obj");
   const P = [];
   const push = (k, v) => P.push(`${k}: ${v}`);
   for (const sec of getSchema()) for (const f of sec.fields) {
@@ -755,7 +775,12 @@ function updateScadHighlight() {
 }
 
 // ─────────────────────────────── DOM engine ───────────────────────────────
-const $ = (id) => document.getElementById(id);
+// `$(id)` is called ~30 sites; every one is a `document.getElementById`. The
+// DOM shape is static (nothing gets replaceChild'd), so memoise the lookup:
+// null results cache too (via `in`), which avoids repeatedly asking the DOM
+// for elements that don't exist in the current build.
+const _elCache = {};
+const $ = (id) => id in _elCache ? _elCache[id] : (_elCache[id] = document.getElementById(id));
 // `model` + `ext` declared above `initState()` (in the state section) so that
 // getSchema() can safely read `model.name` during initial state build.
 const conds = []; // {node, when, local} for visibility refresh
@@ -963,6 +988,10 @@ function buildForm() {
     const d = document.createElement("details"); if (sec.open) d.open = true;
     const sum = document.createElement("summary"); sum.textContent = sec.s; d.append(sum);
     const body = document.createElement("div"); body.className = "body";
+    // Per-section list wired straight into the section entry so filterForm
+    // can check "does this section have any match?" in O(items-in-section)
+    // instead of scanning the full searchItems array per section.
+    const secItems = [];
     for (const f of sec.fields) {
       let node;
       if (f.t === "grp") node = groupNode(f);
@@ -972,11 +1001,12 @@ function buildForm() {
       else if (f.t === "views") node = labelWrap(f, viewsNode(f));
       else node = ctl(f, state, state);
       body.append(node);
-      searchItems.push({ node, section: d, text: fieldText(f) });
+      const it = { node, text: fieldText(f) };
+      searchItems.push(it); secItems.push(it);
     }
     d.append(body); root.append(d);
     if (sec.when) conds.push({ node: d, when: sec.when, local: state });
-    searchSections.push({ el: d, open: !!sec.open });
+    searchSections.push({ el: d, open: !!sec.open, items: secItems });
   }
 }
 
@@ -986,7 +1016,7 @@ function filterForm(query) {
   const q = (query || "").trim().toLowerCase();
   for (const it of searchItems) it.node.classList.toggle("search-hidden", !!q && !it.text.includes(q));
   for (const sec of searchSections) {
-    const hit = searchItems.some(it => it.section === sec.el && !it.node.classList.contains("search-hidden"));
+    const hit = sec.items.some(it => !it.node.classList.contains("search-hidden"));
     sec.el.classList.toggle("search-hidden", !!q && !hit);
     sec.el.open = q ? hit : sec.open;
   }
@@ -1048,7 +1078,7 @@ async function render() {
   // glTF assets take a separate code path — different plugin (lazily loaded),
   // different config schema, always raster output (SVG mode not supported yet
   // for glTF).
-  if (isGltf(model.name)) {
+  if (model._gltf) {
     try {
       await gltfPlugin.ensure();
       // Paint a decoded RGBA blob straight to the canvas.
@@ -1097,8 +1127,8 @@ async function render() {
     } catch (e) { showErr(String(e && e.message || e)); }
     return;
   }
-  const fn = (outputFormat === "svg" ? RFN_SVG : RFN_PNG)[ext(model.name)];
-  if (!fn) return showErr(`unsupported file type: .${ext(model.name)}`);
+  const fn = (outputFormat === "svg" ? RFN_SVG : RFN_PNG)[model._ext];
+  if (!fn) return showErr(`unsupported file type: .${model._ext}`);
   try {
     const token = ++renderToken;
     const t0 = performance.now();
@@ -1251,8 +1281,7 @@ const GET_MODELS_LINKS = {
 function refreshGetModelsLink() {
   const el = $("get-models"); if (!el) return;
   const kind = $("preset").value === "__scad__" ? "scad"
-             : isGltf(model && model.name)      ? "gltf"
-             : ext(model && model.name || "");
+             : model._gltf ? "gltf" : model._ext;
   const spec = GET_MODELS_LINKS[kind];
   if (!spec) { el.textContent = ""; el.removeAttribute("href"); return; }
   el.textContent = spec.label;
@@ -1262,7 +1291,7 @@ function refreshGetModelsLink() {
 // Shared ingestion for both dropped/browsed files and built-in presets.
 function ingest(name, bytes) {
   const kindChanged = kindDiffers(model && model.name, name);
-  model = { name, bytes };
+  model = makeModel(name, bytes);
   syncPreset(name);
   renderOverride = null;
   // Bind the model into the worker. If we already stashed this name via
@@ -1393,7 +1422,7 @@ function renderScadResult(ply) {
   // state for SCHEMA before rendering — otherwise buildConfig throws on
   // `state._hemi.__on` (undefined).
   const kindChanged = kindDiffers(model && model.name, "model.ply");
-  model = { name: "model.ply", scad: true, bytes: ply };
+  model = makeModel("model.ply", ply, { scad: true });
   // Fresh PLY per compile — bind into maquette plugin's worker cache so
   // the next callWithModel picks these bytes, not a previous model's.
   // No key: scad output is transient (recompiled on every edit), caching
@@ -1479,7 +1508,7 @@ const INFO_FN = { obj: "get_obj_info", stl: "get_stl_info", ply: "get_ply_info" 
 async function measure() {
   elMeasure.innerHTML = "";
   if (!maquettePlugin.ready || !model.bytes) return;
-  const fn = INFO_FN[ext(model.name)];
+  const fn = INFO_FN[model._ext];
   if (!fn) return;
   try {
     const info = JSON.parse(DEC.decode(await maquettePlugin.callWithModel(fn, ENC.encode("{}"))));
@@ -1541,7 +1570,7 @@ function ensureSpherical() {
   if (sph) {
     state.azimuth = Math.round(sph.azimuth * 10) / 10;
     state.elevation = Math.max(-89, Math.min(89, Math.round(sph.elevation * 10) / 10));
-    state.distance = Math.round(sph.distance * 1000) / 1000;
+    state.distance = round3(sph.distance);
     controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation); controlRefs.distance?.(state.distance);
   }
   state._cam = "spherical"; controlRefs._cam?.("spherical"); refreshVisibility();
@@ -1594,7 +1623,7 @@ function ensureSpherical() {
     const ny = right[1]*cosEl*Math.cos(az) + forward[1]*cosEl*Math.sin(az) + up[1]*Math.sin(el);
     const nz = right[2]*cosEl*Math.cos(az) + forward[2]*cosEl*Math.sin(az) + up[2]*Math.sin(el);
     state.camera = [c[0] + nx * dist, c[1] + ny * dist, c[2] + nz * dist];
-    state.camera = state.camera.map(v => Math.round(v * 1000) / 1000);
+    state.camera = state.camera.map(round3);
     controlRefs.camera?.(state.camera);
   };
   const zoomGltfBy = (f) => {
@@ -1603,18 +1632,18 @@ function ensureSpherical() {
     const off = [state.camera[0] - c[0], state.camera[1] - c[1], state.camera[2] - c[2]];
     // Inverted convention: wheel-up (f>1) shows more detail → move camera IN.
     const s = 1 / f;
-    state.camera = [c[0] + off[0]*s, c[1] + off[1]*s, c[2] + off[2]*s].map(v => Math.round(v * 1000) / 1000);
+    state.camera = [c[0] + off[0]*s, c[1] + off[1]*s, c[2] + off[2]*s].map(round3);
     controlRefs.camera?.(state.camera);
   };
 
   const setZoom = (f) => {
-    if (isGltf(model.name)) { zoomGltfBy(f); return; }
+    if (model._gltf) { zoomGltfBy(f); return; }
     renderOverride = null;                       // zooming unfreezes a deep-link render
-    state.zoom = Math.max(0.3, Math.min(4, Math.round(state.zoom * f * 1000) / 1000));
+    state.zoom = Math.max(0.3, Math.min(4, round3(state.zoom * f)));
     controlRefs.zoom?.(state.zoom);
   };
   const orbitBy = (dx, dy, ptype) => {
-    if (isGltf(model.name)) { orbitGltfBy(dx, dy, ptype); return; }
+    if (model._gltf) { orbitGltfBy(dx, dy, ptype); return; }
     // Same convention for mouse and touch: no ptype split. Prior version
     // inverted X on touch under a "grab-and-drag" reading, which had the
     // model rotate the wrong way for the finger direction on phone.
@@ -1631,7 +1660,7 @@ function ensureSpherical() {
     stage.classList.add("grabbing");
     // Maquette side: convert current cartesian→spherical so orbit updates
     // az/el instead of dropping the user's view. glTF stays cartesian.
-    if (!isGltf(model.name)) ensureSpherical();
+    if (!model._gltf) ensureSpherical();
     if (pts.size === 2) seedPinch();                        // enter pinch
   });
 
@@ -1798,7 +1827,7 @@ async function applyStateFromUrl() {
   // same rebuild fires in the reverse direction so old maquette links still
   // work after we've been in glTF mode.
   if (name && kindDiffers(name, model.name)) {
-    model = { name, bytes: null };
+    model = makeModel(name, null);
     resetState();
   }
   applyConfig(raw);
@@ -1911,7 +1940,7 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
     let name = wanted, bytes;
     try { const r = await fetch(wanted); if (!r.ok) throw 0; bytes = new Uint8Array(await r.arrayBuffer()); }
     catch { name = "bunny.obj"; bytes = new Uint8Array(await (await fetch("bunny.obj")).arrayBuffer()); }
-    model = { name, bytes };
+    model = makeModel(name, bytes);
     syncPreset(name);
     // Shared-link boot bypasses ingest() so we run its glTF-mode setup here.
     // Bind the model into the worker (uses useKey if preloaded).
