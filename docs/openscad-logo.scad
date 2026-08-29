@@ -8,7 +8,7 @@ module Logo(size = 50, $fn = 100) {
       cylinder(d = hole, h = cylinderHeight, center = true);
       rotate([90, 0, 0]) cylinder(d = hole, h = cylinderHeight, center = true);
     }
-    color([1.0, 0.4, 0.4, 0.3])
+    color([0.5, 0.3, 0.1, 0.6])
       rotate([0, 90, 0])
         cylinder(d = hole, h = cylinderHeight, center = true);
   }
