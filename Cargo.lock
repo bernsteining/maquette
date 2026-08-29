@@ -502,6 +502,7 @@ dependencies = [
 name = "maquette-gltf"
 version = "0.1.0"
 dependencies = [
+ "draco-oxide-core",
  "draco-oxide-decoder",
  "gltf",
  "maquette-core",
