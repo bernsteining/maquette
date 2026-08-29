@@ -524,6 +524,22 @@ function initState() {
   }
   return st;
 }
+// Pick a render size that fits the viewport instead of always defaulting
+// to 700 × 700. On a phone CSS caps it to the stage anyway; on a wide
+// desktop we bump the render up so the canvas fills more of the stage
+// space instead of floating small in the middle. Runs once at module
+// load; the picked default is baked into every relevant schema field's
+// `def` so `applyModelDefaults` and Reset both respect it.
+(function pickDefaultRenderSize() {
+  const w = Math.max(320, Math.min(1200, (window.innerWidth  || 900) - 380));
+  const h = Math.max(320, Math.min(1200, (window.innerHeight || 800) - 180));
+  const s = Math.max(360, Math.min(w, h));   // square, no bigger than viewport allows
+  for (const sch of [SCHEMA, GLTF_SCHEMA]) {
+    for (const sec of sch) for (const f of sec.fields) {
+      if (f.k === "width" || f.k === "height") f.def = s;
+    }
+  }
+})();
 const state = initState();
 
 // ─────────────────────── Typst / config value helpers ─────────────────────
@@ -807,6 +823,11 @@ const ambientCfg = () => state._hemi.__on
   : state.ambient;
 const bgCfg = () => state._bgNone ? "none" : state.background;
 
+// Axis labels for vec inputs so each per-component input carries a distinct
+// screen-reader name ("Position X" / "Position Y" / …). 4-arrays are rare
+// but exist (RGBA colour groups on the maquette side).
+const VEC_AXES = ["X", "Y", "Z", "W"];
+
 function ctl(f, slot, local) {
   const wrap = document.createElement("div");
   wrap.className = "ctl";
@@ -818,6 +839,8 @@ function ctl(f, slot, local) {
     labelEl = document.createElement("label"); labelEl.className = "chk";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!cur;
     cb.onchange = () => set(cb.checked);
+    // The <label> wraps text + input, so the checkbox is properly labelled
+    // for screen readers already — no extra aria-label needed.
     labelEl.append(cb, document.createTextNode(f.label)); wrap.append(labelEl);
     sync = (v) => { cb.checked = !!v; };
   } else {
@@ -828,29 +851,50 @@ function ctl(f, slot, local) {
       input = document.createElement("select");
       for (const [v, t] of f.opts) { const o = document.createElement("option"); o.value = v; o.textContent = t; input.append(o); }
       input.value = cur;
+      input.setAttribute("aria-label", f.label);
       input.onchange = () => set(f.num ? +input.value : input.value);
       sync = (v) => { input.value = v; };
     } else if (f.t === "rng") {
       valEl = document.createElement("span"); valEl.className = "val"; valEl.textContent = (+cur).toFixed(2); labelEl.append(valEl);
       input = document.createElement("input"); input.type = "range"; input.min = f.min; input.max = f.max; input.step = f.step; input.value = cur;
-      input.oninput = () => { valEl.textContent = (+input.value).toFixed(2); set(+input.value); };
-      sync = (v) => { input.value = v; valEl.textContent = (+v).toFixed(2); };
+      // A11y: name + spoken value. `aria-valuetext` beats aria-valuenow for
+      // fractional values because SRs read the raw number otherwise ("point
+      // eight five" instead of the rounded 0.85 shown next to the slider).
+      input.setAttribute("aria-label", f.label);
+      input.setAttribute("aria-valuetext", (+cur).toFixed(2));
+      input.oninput = () => {
+        const t = (+input.value).toFixed(2);
+        valEl.textContent = t;
+        input.setAttribute("aria-valuetext", t);
+        set(+input.value);
+      };
+      sync = (v) => {
+        const t = (+v).toFixed(2);
+        input.value = v;
+        valEl.textContent = t;
+        input.setAttribute("aria-valuetext", t);
+      };
     } else if (f.t === "num") {
       input = document.createElement("input"); input.type = "number"; input.value = cur; input.step = "any";
+      input.setAttribute("aria-label", f.label);
       input.oninput = () => set(input.value === "" ? f.def : +input.value);
       sync = (v) => { input.value = v; };
     } else if (f.t === "col") {
       input = document.createElement("input"); input.type = "color"; input.value = cur || "#000000";
+      input.setAttribute("aria-label", f.label);
       input.oninput = () => set(input.value);
       sync = (v) => { input.value = v || "#000000"; };
     } else if (f.t === "txt") {
       input = document.createElement("input"); input.type = "text"; input.value = cur;
+      input.setAttribute("aria-label", f.label);
       input.oninput = () => set(input.value);
       sync = (v) => { input.value = v; };
     } else if (f.t === "vec") {
       input = document.createElement("div"); input.className = "row";
+      input.setAttribute("role", "group"); input.setAttribute("aria-label", f.label);
       cur.forEach((n, i) => {
         const ni = document.createElement("input"); ni.type = "number"; ni.value = n; ni.step = "any";
+        ni.setAttribute("aria-label", `${f.label} ${VEC_AXES[i] || i}`);
         ni.oninput = () => { const a = slot[f.k].slice(); a[i] = +ni.value; set(a); };
         input.append(ni);
       });
@@ -1054,15 +1098,40 @@ function onChange() {
 // after the current render completes if any trigger came in mid-flight.
 let renderRunning = false;
 let renderDirty = false;
+// UX: flag the stage as busy while a render is in flight — flips a CSS
+// class that shows a small spinner + "rendering…" caption, and sets
+// aria-busy so screen readers announce it. Delayed 150 ms so cheap
+// renders (bunny drag, small tweak) never flash the indicator; only
+// visible on the second-plus renders where users actually wonder.
+const BUSY_DELAY_MS = 150;
+let busyTimer = null;
+function setStageBusy(on, label) {
+  const stage = $("stage");
+  if (on) {
+    if (busyTimer) return;
+    busyTimer = setTimeout(() => {
+      busyTimer = null;
+      stage.classList.add("busy");
+      stage.setAttribute("aria-busy", "true");
+      const cap = $("busy-cap");
+      if (cap) cap.textContent = label || "rendering…";
+    }, BUSY_DELAY_MS);
+  } else {
+    if (busyTimer) { clearTimeout(busyTimer); busyTimer = null; }
+    stage.classList.remove("busy");
+    stage.removeAttribute("aria-busy");
+  }
+}
 async function safeRender() {
   if (renderRunning) { renderDirty = true; return; }
   renderRunning = true;
+  setStageBusy(true, "rendering…");
   try {
     do {
       renderDirty = false;
       await render();
     } while (renderDirty);
-  } finally { renderRunning = false; }
+  } finally { renderRunning = false; setStageBusy(false); }
 }
 
 let lastUrl = null;
@@ -1128,7 +1197,7 @@ async function render() {
     return;
   }
   const fn = (outputFormat === "svg" ? RFN_SVG : RFN_PNG)[model._ext];
-  if (!fn) return showErr(`unsupported file type: .${model._ext}`);
+  if (!fn) return showErr(`unsupported file type: .${model._ext} — supported: .obj, .stl, .ply, .glb, .gltf, .blg, .scad`);
   try {
     const token = ++renderToken;
     const t0 = performance.now();
@@ -1926,6 +1995,10 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
 (async function boot() {
   const { name: urlModel, hadConfig, raw } = await applyStateFromUrl();  // shared model + config, if any
   buildForm(); refreshVisibility();
+  // First-load UX: the wasm compile below can take a couple of seconds
+  // (cold IDB, iOS Safari). Show the busy indicator immediately so the
+  // blank canvas isn't mistaken for a broken page.
+  setStageBusy(true, "loading plugin…");
   try {
     // Worker handles fetch → compile → IDB cache → instantiate for the
     // maquette plugin. Return here means it's ready to `.call()`. In
