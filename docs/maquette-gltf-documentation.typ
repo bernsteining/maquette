@@ -128,29 +128,30 @@
 
 = Introduction
 
-*maquette-gltf* extends #link("maquette-documentation.pdf")[`maquette`] with glTF 2.0 support: `.glb` or `.gltf` in, rendered frame out. The plugin adds a PBR pipeline (Cook-Torrance GGX + Karis split-sum IBL + WBOIT translucency) on top of maquette's shared rasterizer, plus glTF-specific machinery for authored cameras/lights/materials/animations and the ecosystem's compression + texture extensions.
+*maquette-gltf* renders `.glb` and `.gltf` assets as images inside a Typst document. Two entry points:
 
-This document only covers what maquette-gltf *adds*. The shared rendering knobs — camera framing, background, shadows, ground plane, SSAO/FXAA/SSAA, tone mapping — are already documented in maquette's manual and behave identically here. `render-gltf` accepts the same option dicts.
+- *`render-gltf(model, ..options)`* — the render call. Returns a Typst `image`.
+- *`get-gltf-info(model, ..options)`* — returns a metadata dict (bbox, triangle count, animation length) without rendering.
+
+Camera framing, background, shadows, ground plane, anti-aliasing and tone mapping are inherited unchanged from #link("maquette-documentation.pdf")[`maquette`]. This document only covers what `render-gltf` adds on top of that base — see the maquette manual for the shared options.
 
 #pagebreak(weak: true)
 
 = Where to find sample glTF assets
 
-The examples below use canonical glTF sample models (Damaged Helmet, Fox, CesiumMan, ToyCar). Any `.glb` or `.gltf` works — the plugin handles compression extensions (Draco, meshopt, KTX2, WebP), quantization, and animations transparently.
+The examples below use models from Khronos's sample set (Damaged Helmet, Fox, CesiumMan, ToyCar). Any `.glb` or `.gltf` should work — compression, quantization, and animations are handled transparently.
 
-- #link("https://github.com/KhronosGroup/glTF-Sample-Assets")[KhronosGroup/glTF-Sample-Assets] — the canonical sample set every glTF viewer uses. Every extension has a dedicated test asset here.
-- #link("https://polyhaven.com/models")[Poly Haven Models] — CC0, glTF-native. High-quality PBR assets with authored materials.
-- #link("https://sketchfab.com/3d-models?features=downloadable")[Sketchfab] (downloadable filter) — largest general library; downloads default to glTF.
+- #link("https://github.com/KhronosGroup/glTF-Sample-Assets")[KhronosGroup/glTF-Sample-Assets] — the reference sample set. Every extension has a dedicated test asset.
+- #link("https://polyhaven.com/models")[Poly Haven Models] — CC0, glTF-native, authored PBR materials.
+- #link("https://sketchfab.com/3d-models?features=downloadable")[Sketchfab] (downloadable filter) — largest general library.
 
-For the HDR environment maps that feed the IBL section:
-
-- #link("https://polyhaven.com/hdris")[Poly Haven HDRIs] — CC0 8K/16K equirectangular HDRs. Bundle with your `.typ` and pass the bytes to `ibl: (hdr: ...)`.
+For the IBL section, HDR environment maps come from #link("https://polyhaven.com/hdris")[Poly Haven HDRIs] (CC0). Bundle one with your `.typ` and pass the bytes as `ibl: (hdr: ...)`.
 
 = Quickstart
 
-Two input shapes, both handled transparently.
+Two input shapes, one entry point.
 
-*`.glb` or fully-embedded `.gltf`* — pass the bytes directly. This is the common case (Damaged Helmet, boombox, most Sketchfab downloads).
+*Self-contained `.glb` or fully-embedded `.gltf`.* Pass the bytes. This covers most Sketchfab downloads, Damaged Helmet, boombox, and so on.
 
 #{
   align(center)[
@@ -160,7 +161,7 @@ Two input shapes, both handled transparently.
   ]
 }
 
-*Split `.gltf`* — the `.gltf` JSON references external `.bin` + textures by relative URI. Pass the *path string* plus an inline `read:` lambda; the wrapper walks the JSON, discovers every URI, reads each one through your lambda, packs them into a sidecar bundle for the plugin. You write zero filenames.
+*Split `.gltf`.* The JSON references external `.bin` and textures by relative URI. Pass the path string and an inline `read:` lambda; the wrapper walks the JSON, resolves every URI through your lambda, and packs the results into a sidecar bundle for the plugin.
 
 #{
   align(center)[
@@ -170,15 +171,15 @@ Two input shapes, both handled transparently.
   ]
 }
 
-The `read:` lambda has to be an *inline lambda*, not a bare `read` reference. Typst resolves `read()` paths against the source file the call is textually in — a bare reference stays bound to the package's own path context. Wrapping in `p => read(p, ...)` gives the wrapper a filesystem handle scoped to your `.typ`.
+The `read:` argument must be an inline lambda, not a bare `read` reference. Typst resolves `read()` paths against the file the call textually lives in; a bare reference from the package binds to the package's own directory. `p => read(p, ...)` gives the wrapper a filesystem handle rooted at your `.typ`.
 
 #pagebreak(weak: true)
 
 = Shared rendering config
 
-Camera framing (`camera` / `center` / `up` / `fov` / `azimuth` / `elevation`), `background`, `shadows`, `ground`, `ssao`, `antialias`, `tone_mapping` — all inherited from #link("maquette-documentation.pdf")[maquette] and behave the same on `render-gltf`. Don't repeat the tour here; refer to that manual.
+`camera`, `center`, `up`, `fov`, `azimuth`, `elevation`, `background`, `shadows`, `ground`, `ssao`, `antialias`, and `tone_mapping` all work exactly as they do on `render-obj` / `render-stl` / `render-ply`. See the #link("maquette-documentation.pdf")[maquette manual] for the full option surface.
 
-One glTF-only knob to note: *`camera_auto_use: false`*. If the loaded asset ships an authored camera, `render-gltf` uses it by default (glTF viewer convention). Set this to `false` to force your Cartesian/spherical arguments to win instead.
+One glTF-only option: *`camera_auto_use`*. If the asset ships an authored camera, `render-gltf` uses it by default. Pass `camera_auto_use: false` to force your own framing arguments instead.
 
 ```example
 #render-gltf(helmet, read: R,
@@ -191,7 +192,7 @@ One glTF-only knob to note: *`camera_auto_use: false`*. If the loaded asset ship
 
 = Image-Based Lighting
 
-The dominant visual lever for PBR: an environment map lights the whole scene. Enabling `ibl` without an `hdr` bytes payload falls back to a procedural hemispheric sky.
+`ibl:` enables environment lighting. Without an `hdr` payload it uses a procedural sky/ground gradient.
 
 == Procedural IBL
 
@@ -205,7 +206,7 @@ The dominant visual lever for PBR: an environment map lights the whole scene. En
 
 == HDR environment
 
-Pass Radiance `.hdr` bytes as `ibl.hdr`. The prefilter builds a diffuse irradiance map + a specular mip chain up-front (once per HDR, cached).
+Pass Radiance `.hdr` file bytes as `ibl.hdr`.
 
 ```typ
 #render-gltf(helmet, read: R,
@@ -215,7 +216,7 @@ Pass Radiance `.hdr` bytes as `ibl.hdr`. The prefilter builds a diffuse irradian
 
 == IBL rotation
 
-The `rotation` field spins the environment around the up axis (radians). Useful for aligning studio HDRs to your camera composition.
+`rotation` (radians) spins the environment around the up axis. Use it to align the environment's light direction to your camera composition.
 
 ```example
 #render-gltf(helmet, read: R,
@@ -229,7 +230,7 @@ The `rotation` field spins the environment around the up axis (radians). Useful 
 
 = Animations
 
-Assets with animation channels get replayed at `time` seconds. `get-gltf-info` returns `max_animation_time` so you can build a scrub slider bounded to the actual clip length.
+`time:` (seconds) picks a sample point along the asset's animation. `get-gltf-info` reports `max_animation_time` so you can bound a scrub slider to the clip's real length.
 
 ```example
 // cols: 1 1
@@ -242,7 +243,7 @@ Assets with animation channels get replayed at `time` seconds. `get-gltf-info` r
 )
 ```
 
-When the asset ships multiple clips (idle / walk / run / ...), pick one with `animation_index`. `None` (the default) plays every clip stacked — last-write-wins per node channel — which is almost never what you want for multi-clip assets.
+When the asset ships multiple clips (idle / walk / run / …), pick one with `animation_index`.
 
 ```example
 #render-gltf(cesiumman,
@@ -259,7 +260,7 @@ When the asset ships multiple clips (idle / walk / run / ...), pick one with `an
 
 = Material variants
 
-`KHR_materials_variants` lets an asset ship multiple material sets. Pick one with `material_variant` (0-indexed).
+`material_variant:` (0-indexed) picks one of the alternate material sets an asset may ship.
 
 ```example
 #render-gltf(toycar,
@@ -272,7 +273,7 @@ When the asset ships multiple clips (idle / walk / run / ...), pick one with `an
 
 = Diffuse transmission
 
-`KHR_materials_diffuse_transmission` — matte back-lit lambertian. Common on cloth, leaves, paper. The example asset is a factor × color grid; the bottom rows show the green DT color activating as the factor increases.
+Assets using `KHR_materials_diffuse_transmission` render with the extension's back-lit contribution.
 
 ```example
 #render-gltf(dt-test,
@@ -285,17 +286,9 @@ When the asset ships multiple clips (idle / walk / run / ...), pick one with `an
 
 #pagebreak(weak: true)
 
-= Compression + quantization
+= Compressed and quantized assets
 
-The plugin decodes three common wire formats up-front, so downstream traversal never has to care.
-
-== EXT_meshopt_compression
-
-Emitted by `gltfpack` (Meshopt's own tool). Interleaved buffer decompression, transparent.
-
-== KHR_draco_mesh_compression
-
-Google Draco. Decoded via `draco-oxide` (pure Rust). Up to ~20× geometry compression on typical assets, no size penalty at render time.
+These are decoded transparently — no options to set. Renders identically to an uncompressed version of the same asset.
 
 ```example
 #render-gltf(box-draco, read: R,
@@ -305,37 +298,11 @@ Google Draco. Decoded via `draco-oxide` (pure Rust). Up to ~20× geometry compre
 )
 ```
 
-== KHR_mesh_quantization
-
-`gltfpack` also emits quantized POSITION/NORMAL/TANGENT (i8/u8/i16/u16) paired with `KHR_texture_transform` for UV dequantization. Renders pixel-identically to the non-quantized asset — verified on the Duck below.
-
-```example
-#render-gltf(duck-quant, read: R,
-  camera: (2.5, 1.5, 2.5), center: (0, 0, 0), up: (0, 1, 0), fov: 40,
-  width: 40%,
-)
-```
-
 #pagebreak(weak: true)
 
 = Texture formats
 
-Beyond the base PNG + JPEG:
-
-== EXT_texture_webp
-
-`image-webp` (pure Rust) handles both VP8 and VP8L variants. Second-most-common texture format in production glTF (Shopify AR, IKEA, Blender's default export in 3.4+).
-
-```example
-#render-gltf(duck-webp, read: R,
-  camera: (2.5, 1.5, 2.5), center: (0, 0, 0), up: (0, 1, 0), fov: 40,
-  width: 40%,
-)
-```
-
-== Unsupported formats
-
-`KHR_texture_basisu` (KTX2 / Basis Universal) and `EXT_texture_avif` aren't decoded — they'd pull in ~1 MB of decoder deps for formats we ship without today. Assets using them render with a *placeholder white texture* per material (geometry stays intact) rather than crashing. Below: the same Duck with KTX2 textures, silhouette-shaded because the base color reads as white:
+PNG, JPEG, and WebP textures are decoded natively. KTX2 (Basis Universal) and AVIF fall back to a plain white texture — geometry renders correctly, but the material's albedo is lost. If your asset targets KTX2, pre-transcode with #link("https://gltf-transform.dev")[`gltf-transform`] to WebP or PNG.
 
 ```example
 #render-gltf(duck-ktx, read: R,
@@ -345,13 +312,11 @@ Beyond the base PNG + JPEG:
 )
 ```
 
-Workaround: pre-transcode via [`gltf-transform`](https://gltf-transform.dev) to WebP or PNG.
-
 #pagebreak(weak: true)
 
 = Metadata
 
-`get-gltf-info` returns a dict — bounding box, triangle count, animation length. Useful for driving auto-framing or a scrub slider without touching the render path.
+`get-gltf-info` returns a dict with the asset's bounding box, triangle count, and animation length — enough to drive an auto-frame calculation or a scrub slider without going through the render path.
 
 ```example
 // cols: 2 1
@@ -370,20 +335,6 @@ Workaround: pre-transcode via [`gltf-transform`](https://gltf-transform.dev) to 
 
 #pagebreak(weak: true)
 
-= What's supported vs. not
+= Asset compatibility
 
-*Core spec:* glTF 2.0 JSON + GLB (single-file and split with external `.bin`/textures), meshes (POINTS/LINES/TRIANGLES), skinning (JOINTS_0 + JOINTS_1, WEIGHTS_0 + WEIGHTS_1, up to 8 influences per vertex), morph targets, animations (TRS + morph weights, all three interpolation modes), multiple UV sets (TEXCOORD_0/1/2), vertex colors, cameras (perspective + orthographic), multiple scenes, multiple animations, textures with samplers, sparse accessors, KHR_mesh_quantization.
-
-*Rendering:* Cook-Torrance GGX PBR, IBL from HDR (Radiance / RGBE), shadow maps (PCF + PCSS), alpha modes (OPAQUE / MASK / BLEND via WBOIT), double-sided normal flip, SSAO, FXAA, SSAA ×2/×4.
-
-*Extensions:* `KHR_lights_punctual`, `KHR_materials_unlit`, `KHR_materials_transmission`, `KHR_materials_ior`, `KHR_materials_specular`, `KHR_materials_emissive_strength`, `KHR_materials_volume`, `KHR_materials_clearcoat`, `KHR_materials_sheen`, `KHR_materials_iridescence`, `KHR_materials_anisotropy`, `KHR_materials_dispersion`, `KHR_materials_diffuse_transmission`, `KHR_texture_transform`, `KHR_materials_pbrSpecularGlossiness`, `KHR_materials_variants`, `EXT_texture_webp`, `EXT_meshopt_compression`, `KHR_draco_mesh_compression`.
-
-*Not supported* (assets render with graceful fallback — placeholder white texture or silent skip):
-
-- `KHR_texture_basisu` (KTX2). Biggest gap — dominant production texture format.
-- `EXT_texture_avif`. Rare in the wild.
-- `KHR_animation_pointer`. Animations targeting material / light / camera properties via JSON pointer are ignored.
-- TEXCOORD_N for N ≥ 3 (collapses to slot 2).
-- Sparse accessors combined with quantization.
-
-See `crates/maquette-gltf/README.md` for the full compliance matrix and per-extension notes.
+If your asset renders in a mainstream glTF viewer, it should render here. Textures use PNG / JPEG / WebP; KTX2 and AVIF fall back to a white texture (see the previous section). See `crates/maquette-gltf/README.md` for the full per-feature compliance matrix.

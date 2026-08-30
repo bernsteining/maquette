@@ -137,28 +137,28 @@
 
 = Introduction
 
-*maquette-scad* is a Typst plugin that turns OpenSCAD-flavored geometry into meshes for #link("maquette-documentation.pdf")[`maquette`] to render. Two entry points, both returning PLY bytes you feed to `render-ply`:
+*maquette-scad* produces a PLY mesh (or 2D SVG) from a geometry description. Two ways to write the description:
 
-- *`scadypst(tree)`* — build geometry with Typst expressions (`cube`, `sphere`, `difference`, `translate`, …). The tree is a plain dict of dicts you compose with Typst's own `for` / `range` / `calc`.
-- *`compile-scad(source, files?, bin?, font?, fn?, trace?)`* — hand in the text of an existing `.scad` file. Full OpenSCAD language surface: `function`, `module`, `for`, list comprehensions, `include` / `use`, `$fn` / `$fa` / `$fs`.
+- *`scadypst(tree)`* — build geometry from Typst-native helpers (`cube`, `sphere`, `difference`, `translate`, …) composed with Typst's own `for`, `range`, and `calc`. Returns PLY bytes.
+- *`compile-scad(source)`* — pass the text of an existing `.scad` file. Returns PLY bytes.
 
-The CSG kernel is #link("https://github.com/elalish/manifold")[Manifold] — every boolean is guaranteed watertight, no BSP-style open faces on non-trivial cuts.
+Both entry points also have a `-svg` sibling (`scadypst-svg`, `compile-scad-svg`) for direct 2D vector output — no rasterizer in the loop.
 
-This doc covers the maquette-scad *API*: the Typst-side entry points, their options, and the patterns for using them. It does *not* teach OpenSCAD — for that see the #link("https://openscad.org/documentation.html")[OpenSCAD Users Manual] (language) or `crates/maquette-scad/maquette-scad/maquette-scad.typ` (per-function docstrings for every DSL helper). Once you have PLY bytes, downstream rendering (camera, lighting, materials, shadows, tone mapping) is maquette's job — see #link("maquette-documentation.pdf")[maquette's documentation]. See `crates/maquette-scad/FIDELITY.md` for the exhaustive OpenSCAD language coverage tracker.
+This document is the plugin's Typst API reference: what each helper accepts, what the compile calls return, and how to route sidecar assets. Downstream rendering options (camera, lighting, shadows, tone mapping) belong to `maquette` — see its #link("maquette-documentation.pdf")[manual]. For the OpenSCAD language itself see the #link("https://openscad.org/documentation.html")[OpenSCAD Users Manual].
 
 #pagebreak(weak: true)
 
 = Where to find sample `.scad` files
 
-The DSL examples below run inline — no external files needed. To exercise the `.scad` ingestion path (`compile-scad(read(...))`), grab source from:
+The DSL examples in this document build their geometry inline, so no external source is needed. For the `compile-scad(read("..."))` path, `.scad` sources are easy to find:
 
-- #link("https://github.com/openscad/openscad/tree/master/examples")[openscad/openscad `examples/`] — the official example set that ships with the OpenSCAD editor.
-- #link("https://github.com/BelfrySCAD/BOSL2")[BOSL2] — comprehensive OpenSCAD utility library with hundreds of documented example fragments.
-- #link("https://www.thingiverse.com/tag:openscad")[Thingiverse (openscad tag)] — large community archive; many things ship the `.scad` source alongside the `.stl`.
+- #link("https://github.com/openscad/openscad/tree/master/examples")[openscad/openscad `examples/`] — the set that ships with the OpenSCAD editor.
+- #link("https://github.com/BelfrySCAD/BOSL2")[BOSL2] — a large utility library with hundreds of documented fragments.
+- #link("https://www.thingiverse.com/tag:openscad")[Thingiverse (openscad tag)] — community archive; many entries ship the `.scad` alongside the `.stl`.
 
 = Quickstart
 
-Two entry points, one plugin. Route the returned PLY to `render-ply` with whatever config you'd give any other mesh.
+Both entry points return PLY bytes; pass them to `render-ply` with the usual maquette configuration.
 
 ```typ
 #import "@preview/maquette-scad:0.1.0": scadypst, cube, sphere, difference
@@ -173,7 +173,7 @@ Two entry points, one plugin. Route the returned PLY to `render-ply` with whatev
 #render-ply(part, camera: (40, 40, 40), up: (0, 0, 1))
 ```
 
-`compile-scad` is the same shape but takes source text:
+`compile-scad` has the same shape but takes source text:
 
 ```typ
 #import "@preview/maquette-scad:0.1.0": compile-scad
@@ -183,15 +183,15 @@ Two entry points, one plugin. Route the returned PLY to `render-ply` with whatev
 #render-ply(part)
 ```
 
-Below, `show-part` is a thin wrapper this doc uses so examples can focus on the geometry without repeating render config. In real use you'd inline the `render-ply(bytes, ..)` call.
+Examples below use a `show-part` wrapper so the code can focus on geometry; in real documents you would inline the `render-ply(bytes, ...)` call.
 
 #pagebreak(weak: true)
 
 = Building geometry from Typst — `scadypst`
 
-`scadypst(tree)` compiles a tree of Typst dicts into PLY bytes. The dicts come from helpers imported from the plugin (`cube` / `sphere` / `translate` / `difference` / `hull` / `linear-extrude` / …); each helper *builds* a node in the tree, nothing runs until `scadypst` sees the whole thing.
+`scadypst(tree)` walks a tree of Typst dicts and returns PLY bytes. Each helper (`cube`, `sphere`, `translate`, …) builds a node; nothing runs until `scadypst` receives the whole tree.
 
-The value of the DSL over `compile-scad(read("part.scad"))` is Typst integration: because the tree is Typst code, you get Typst's own procedural facilities for free. Here a `..for` spread inside `union` places twelve spheres on a ring:
+Because the tree is Typst code, iteration and arithmetic come from Typst. A `..for` spread inside `union` places twelve spheres on a ring:
 
 ```example
 // cols: 2 1
@@ -206,13 +206,13 @@ The value of the DSL over `compile-scad(read("part.scad"))` is Typst integration
 #show-part(scadypst(ring))
 ```
 
-The equivalent OpenSCAD `for (i = [0:11]) { ... }` works too via `compile-scad` — but a new-in-Typst design will usually reach for Typst's iteration first, since it composes cleanly with variadic ops (`union` / `difference` / `hull` / `intersection`) via the `..` spread syntax and reads with the rest of your document code.
+Variadic ops (`union`, `difference`, `hull`, `intersection`) accept `..items` — spread a Typst `for` block to feed a computed list.
 
 #pagebreak(weak: true)
 
 == DSL reference
 
-Every helper takes Typst-native named arguments (`cube(20, center: true)` instead of OpenSCAD's `cube(20, center=true);`). Signatures below list positional args first, then named. `fn: N` is the OpenSCAD `$fn` per-primitive segment count.
+Every helper takes Typst-native named arguments (`cube(20, center: true)`). Signatures below list positional args first, then named. `fn: N` sets the per-primitive segment count.
 
 === 3D primitives
 
@@ -258,9 +258,9 @@ All variadic — use `..` spread with a Typst `for` block to feed a computed lis
 
 #pagebreak(weak: true)
 
-== Colours + alpha
+== Colours and alpha
 
-Colours propagate through boolean ops; the emitted PLY carries per-vertex RGB and `render-ply` picks it up automatically. Every part in the tree without a `color()` wrapper inherits the render config's `color:` — the "everything else is yellow" look in the OpenSCAD-logo demo comes from that fallback.
+Colours propagate through boolean operations. The emitted PLY carries per-vertex RGB and `render-ply` picks it up automatically. Any part without a `color()` wrapper inherits the render config's `color:` argument.
 
 ```example
 #show-part(
@@ -272,14 +272,14 @@ Colours propagate through boolean ops; the emitted PLY carries per-vertex RGB an
 )
 ```
 
-Alpha ships end-to-end (scad → PLY → maquette rasterizer). Two forms — pick either:
+Alpha is supported. Two equivalent forms:
 
 ```typc
 color((0.9, 0.35, 0.35, 0.5), child)              // RGBA in one 4-array
 color((0.9, 0.35, 0.35), child, alpha: 0.5)       // RGB + separate alpha
 ```
 
-Interior features show through translucent subtrees — this is how the OpenSCAD IDE renders `#` (highlight) modifiers, and how the demo's OpenSCAD logo shows the drilled holes and back of the sphere through the coloured cylinder.
+Interior geometry shows through translucent subtrees, so a coloured cover can reveal the shape's internal features.
 
 #pagebreak(weak: true)
 
@@ -300,9 +300,9 @@ Returns the same PLY `bytes` that `compile-scad` returns — pass it to `render-
 
 == Name clashes with Typst built-ins
 
-Seven DSL helpers shadow Typst built-ins when you `#import "..": *`:
+A glob-import (`#import "..": *`) shadows seven of Typst's own functions:
 
-`scale`, `rotate`, `circle`, `square`, `ellipse`, `polygon`, `color` (plus `text` → renamed to `scad-text` at export).
+`scale`, `rotate`, `circle`, `square`, `ellipse`, `polygon`, `color`. (Additionally, the OpenSCAD `text` primitive is re-exported as `scad-text` to avoid shadowing `#text`.)
 
 Two ways around it:
 
@@ -320,20 +320,20 @@ Two ways around it:
 #import "@preview/maquette-scad:0.1.0": scad-color, scad-scale, scad-rotate, scad-circle, scad-square, scad-ellipse, scad-polygon
 ```
 
-Both preserve Typst's own `#text` / `#circle` / etc. Aliases live alongside the originals so you can mix as needed.
+Both leave Typst's own `#text` / `#circle` / … intact. The `scad-*` aliases live alongside the unprefixed names, so you can mix approaches within one document.
 
 #pagebreak(weak: true)
 
 = Compiling `.scad` sources — `compile-scad`
 
-For standalone `.scad` files, `compile-scad(source_text)` is all you need:
+For a standalone `.scad` file, one call is enough:
 
 ```typ
 #let part = compile-scad(read("part.scad"))
 #render-ply(part)
 ```
 
-Real-world `.scad` files rarely stand alone — they `use` / `include` a library, `import` an STL/OBJ for a fastener, or ship a font for embossed text. The wasm sandbox has no filesystem, so sidecars are passed explicitly as bytes:
+Real-world `.scad` files rarely stand alone: they `use` / `include` a library, `import` an STL or OBJ for a fastener, or ship a font for embossed text. The wasm sandbox has no filesystem, so every sidecar is passed explicitly as bytes:
 
 ```typ
 #compile-scad(read("main.scad"),
@@ -353,62 +353,34 @@ Real-world `.scad` files rarely stand alone — they `use` / `include` a library
 
 Options:
 
-- *`source`* (positional string) — the `.scad` text. `read("path.scad")` is the usual way to get it.
-- *`files`* (dict, optional) — every `use <name>` / `include <name>` resolves against this dict. Keys are the exact names the `.scad` uses; nested paths (`MCAD/foo.scad`) are dict keys with slashes.
-- *`bin`* (dict, optional) — sidecar mesh files referenced by `import()` in the source. Keys match the `import` argument. Decoded formats: STL and OBJ (DXF, 3MF and AMF are not).
-- *`font`* (bytes, optional) — a TTF/OTF file for `text()` glyph rendering. One font per compile.
-- *`fn`* (int, optional) — default `$fn` for the whole compile. Per-primitive `fn:` overrides.
-- *`trace`* (string, optional) — dump the evaluator trace to this path. Useful when a nested `for` or `module` isn't producing what you expected.
+- *`source`* (positional string) — the `.scad` text. Almost always `read("path.scad")`.
+- *`files`* (dict) — resolves every `use <name>` / `include <name>` in the source. Keys are the exact names the `.scad` uses; nested paths like `MCAD/foo.scad` are keys with slashes.
+- *`bin`* (dict) — sidecar mesh files referenced by `import()`. Keys match the `import` argument. Recognised formats: STL and OBJ (DXF, 3MF, and AMF are not).
+- *`font`* (bytes) — a TTF or OTF file used by `text()`. One font per compile.
+- *`fn`* (int) — default `$fn` for this compile. Any per-primitive `fn:` overrides it.
+- *`trace`* (string) — dump the evaluator trace to this path. Handy when a nested `for` or `module` isn't producing what you expected.
 
 #pagebreak(weak: true)
 
-= Real-world showcase — Cyclone-PCB-Factory
+= Escape hatch: precompiled `.ply`
 
-For `.scad` projects big enough that the wasm plugin's ~1 GB memory budget gets in the way, precompile natively and hand `render-ply` a `.ply` blob directly. `examples/scad/cyclone.typ` in the repo shows the pattern.
-
-The #link("https://github.com/carlosgs/Cyclone-PCB-Factory")[Cyclone PCB Factory] CNC mill — a full assembly with MCAD, obiscad, and standard_parts under `include <Cyclone.scad>` — compiles to an ~11 MB mesh. Too big for the wasm plugin, so it's compiled once by the native harness at `crates/maquette-scad/examples/repro.rs` into a `.ply`, then rendered by maquette:
+The wasm plugin has a memory budget of about 1 GB. Very large assemblies can outgrow it. When that happens, compile once natively (e.g. `cargo run --release --example repro -p maquette-scad`) and pass the resulting `.ply` bytes straight to `render-ply`:
 
 ```typ
 #import "@preview/maquette:0.1.3": render-ply
 
 #let full = read("cyclone-full.ply", encoding: none)
-#let openscad-view = (camera: (400, 400, 200), up: (0, 0, 1), fov: 40)
-#let shot = (az, el) => render-ply(full,
-  openscad-view + (azimuth: az, elevation: el, antialias: 2, zoom: 1.4),
-  width: 100%,
-)
-#shot(35, 20)
-#shot(125, 28)
+#render-ply(full, camera: (400, 400, 200), up: (0, 0, 1), fov: 40)
 ```
 
-The Manifold kernel keeps the whole assembly watertight (0 open edges) — every part renders solid from every angle even where several dozen booleans stack across the MCAD library. To reproduce: obtain `Source_files/` from the upstream repo, drop it into `examples/scad/cyclone-src/`, then
-
-```
-cargo run --release --example repro -p maquette-scad
-```
-
-which produces `cyclone-full.ply` alongside the `.typ`.
+`examples/scad/cyclone.typ` in the repo shows the full pattern with parameterised camera shots.
 
 #pagebreak(weak: true)
 
-= Language coverage
+= What `compile-scad` accepts
 
-The `.scad` evaluator is complete for everything a typical file uses. TL;DR:
+If your `.scad` source works in the OpenSCAD editor, it should work here — the evaluator covers everything a typical file uses. Known gaps: `surface()` (heightmap import), `import()` of DXF, `$vpr` / `$vpt` / `$vpd` / `$vpf` viewport variables, and adaptive tessellation from `$fa` / `$fs` (we use `$fn` or the per-primitive `fn:` instead). Any external STL / OBJ mesh referenced by `import()` must be routed through the `bin:` argument since the plugin has no filesystem access.
 
-*Supported (✅)* — comments, numbers, bool, string, `undef`, vectors, ranges, variable assignment (last-wins scope), `let()` expression, member access, indexing, all standard operators, `$fn` / `$t` / `$preview` / `$children`, all 2D + 3D primitives, all transforms (`translate`, `rotate`, `scale`, `mirror`, `resize`, `multmatrix`, `color`, `offset`), all booleans (`union`, `difference`, `intersection`), extrusions (`linear_extrude` with twist / scale / slices, `rotate_extrude`), `hull`, `minkowski`, `projection`, list comprehensions, `for`, `if`, `intersection_for`, `function`, `module`, `render`, string ops, math functions, `include` + `use`, `color()` with per-face RGB propagation.
+The exhaustive per-feature tracker lives at `crates/maquette-scad/FIDELITY.md`.
 
-*Partial (🟡)* — `$fa` / `$fs` are defined so libraries reading them work, but our primitive builder tessellates from `$fn` (or `fn:` on the primitive), not adaptively.
-
-*Not supported (❌)* — `import()` of external STL/OBJ/DXF (wasm sandbox has no filesystem — pass bytes via `bin:` instead), `surface()` heightmap import, `$vpr` / `$vpt` / `$vpd` / `$vpf` viewport variables (n/a — no viewport at eval time), font-dependent text glyphs beyond basic Latin-1 skeletons.
-
-See `crates/maquette-scad/FIDELITY.md` for the exhaustive per-feature tracker.
-
-#pagebreak(weak: true)
-
-= Design notes
-
-*Why Manifold?* — the previous kernel we used (`csgrs` 0.20.1, BSP-based) left about 20% of faces open on any non-trivial boolean (bores, notches, partial overlaps). Manifold guarantees watertight, correctly-triangulated output. Every mesh this crate emits has zero open edges, verified on the full test corpus.
-
-*Why compile in-crate?* — a `.scad`-then-shell-out design would need a filesystem, a working OpenSCAD binary on the host, and IPC across a process boundary. The wasm plugin has none of that. Ingesting `.scad` text ourselves keeps the whole compile deterministic under Typst's sandbox — same input, same PDF, cross-platform.
-
-*Two wasm modules.* — `maquette-scad.wasm` (this crate) compiles geometry to PLY. `maquette.wasm` (the sibling plugin) renders the PLY. They only exchange the PLY blob; you can also send `scadypst(...)`'s output to `maquette-gltf` via a `.gltf` wrapper if you want PBR shading on procedural geometry.
+*Two wasm modules cooperate.* `maquette-scad.wasm` (this crate) compiles geometry to PLY. `maquette.wasm` renders it. They exchange nothing but the PLY blob, so you can also feed a `scadypst(...)` output into `maquette-gltf` (wrapped in a minimal `.gltf`) when you want PBR shading on procedural geometry.
