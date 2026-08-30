@@ -135,6 +135,23 @@
   )
 }
 
+// Direct 2D → SVG variant of `scadypst`. Errors if the tree resolves to a
+// 3D solid — vector output only makes sense for 2D geometry (circles,
+// polygons, extruded-then-projected shapes). The returned bytes are an
+// SVG document, hand it straight to Typst's built-in `image()`:
+//
+//   #image(scadypst-svg(union(circle(5), square(4, center: true))))
+//
+// Skips maquette entirely — resolution-independent, editable in Inkscape,
+// laser-cutter-ready.
+#let scadypst-svg(node, bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  _scad-plugin.build_svg(
+    bytes(json.encode(node)), bytes(json.encode((fn: fn))), _pack-bin(assets),
+  )
+}
+
 // Compile REAL OpenSCAD source text (a string, or bytes from `read("x.scad")`)
 // to PLY bytes. Supports a substantial subset: primitives, transforms, booleans,
 // hull/minkowski, extrudes (incl. twist/scale), `for`/`if`, list comprehensions,
@@ -165,6 +182,23 @@
     bytes(src),
     bytes(json.encode(files)),
     bytes(json.encode(opts)),
+    _pack-bin(assets),
+  )
+}
+
+// Direct 2D `.scad` → SVG variant of `compile-scad`. Errors if the source
+// resolves to a 3D solid — SVG output only covers 2D geometry. Same
+// files/bin/font/fn contract; returns SVG bytes instead of PLY. Hand the
+// result to `image(..)` directly:
+//
+//   #image(compile-scad-svg(read("gasket.scad")))
+#let compile-scad-svg(src, files: (:), bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  _scad-plugin.build_scad_svg(
+    bytes(src),
+    bytes(json.encode(files)),
+    bytes(json.encode((fn: fn))),
     _pack-bin(assets),
   )
 }

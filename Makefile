@@ -156,5 +156,6 @@ SCAD_WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette-scad/0.1.0/ma
 scad-build: scad-wasm
 	mkdir -p $(dir $(SCAD_WASM_PKG))
 	cp $(SCAD_WASM_OUT) $(SCAD_WASM_PKG)
+	cp crates/maquette-scad/maquette-scad.typ crates/maquette-scad/typst.toml $(dir $(SCAD_WASM_PKG))
 
 .PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build

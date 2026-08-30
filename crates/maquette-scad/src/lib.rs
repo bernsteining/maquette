@@ -1038,6 +1038,90 @@ fn finish(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
     Ok(to_ply(&mesh))
 }
 
+/// Same setup as `finish`, but the tree must evaluate to a 2D result — a
+/// CrossSection which we walk into SVG paths. 3D input errors out with a
+/// pointer to `build_ply` (the mesh path via maquette) because there's no
+/// meaningful vector output for a 3D solid without picking a camera and
+/// doing hidden-line removal, and we deliberately don't want to reimplement
+/// what maquette's SVG mode already does.
+fn finish_svg(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
+    PALETTE.with(|p| p.borrow_mut().clear());
+    NODE_HASH.with(|m| {
+        let mut m = m.borrow_mut();
+        m.clear();
+        prehash(tree, &mut m);
+    });
+    MEMO.with(|m| m.borrow_mut().clear());
+    let geo = build(tree, DEFAULT_RGB, defaults)?;
+    let (cs, color) = match geo {
+        Geo::D2(c, col) => (c, col),
+        Geo::D3(_) => return Err(
+            "scad → svg: input is 3D. Direct SVG output only covers 2D geometry; \
+             for a 3D-rendered image, use build_ply and pipe the result through \
+             maquette's render-ply (raster) or its SVG mode.".into()),
+    };
+    Ok(cross_section_to_svg(&cs, color).into_bytes())
+}
+
+/// Emit an SVG document containing a single `<path>` per closed contour.
+/// Coordinates are Y-flipped (SVG's Y grows downward; OpenSCAD's grows
+/// upward). viewBox is fit to the tight bounding box with a small pad so
+/// hairline strokes at zero stroke-width still render on typical viewers.
+/// Fill rule is `evenodd` — the CrossSections built by the SCAD evaluator
+/// come from `from_polygons_with_fill_rule(..., EvenOdd)`, so outer rings
+/// and holes carry the same convention through the SVG.
+fn cross_section_to_svg(cs: &CrossSection, color: Rgb) -> String {
+    let rings = cs.to_polygons();
+    if rings.is_empty() {
+        // Empty input still yields a well-formed empty SVG so callers can
+        // paint a placeholder / detect no-geometry without a parse error.
+        return String::from(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\" \
+             width=\"1\" height=\"1\"></svg>"
+        );
+    }
+    let (mut xmin, mut ymin) = (f64::INFINITY, f64::INFINITY);
+    let (mut xmax, mut ymax) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for ring in &rings {
+        for &[x, y] in ring {
+            if x < xmin { xmin = x; }
+            if y < ymin { ymin = y; }
+            if x > xmax { xmax = x; }
+            if y > ymax { ymax = y; }
+        }
+    }
+    let w = (xmax - xmin).max(1e-6);
+    let h = (ymax - ymin).max(1e-6);
+    let pad = (w.max(h) * 0.02).max(0.5);
+    let vb_x = xmin - pad;
+    let vb_y = -(ymax) - pad;      // Y-flip: SVG top corresponds to OpenSCAD ymax
+    let vb_w = w + 2.0 * pad;
+    let vb_h = h + 2.0 * pad;
+
+    let mut d = String::with_capacity(rings.iter().map(|r| r.len() * 16).sum());
+    for ring in &rings {
+        if ring.is_empty() { continue; }
+        for (i, &[x, y]) in ring.iter().enumerate() {
+            // 4 decimal places — matches OpenSCAD's usual round-to-µm scale
+            // and keeps SVG size reasonable on high-poly outputs.
+            let cmd = if i == 0 { 'M' } else { 'L' };
+            if !d.is_empty() { d.push(' '); }
+            d.push(cmd);
+            use std::fmt::Write as _;
+            let _ = write!(d, " {:.4} {:.4}", x, -y);
+        }
+        d.push_str(" Z");
+    }
+    let fill = format!("#{:02x}{:02x}{:02x}", color.0[0], color.0[1], color.0[2]);
+    let opacity = color.0[3] as f32 / 255.0;
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{:.4} {:.4} {:.4} {:.4}\" \
+         width=\"{:.4}\" height=\"{:.4}\">\
+         <path d=\"{}\" fill=\"{}\" fill-opacity=\"{:.4}\" fill-rule=\"evenodd\"/></svg>",
+        vb_x, vb_y, vb_w, vb_h, vb_w, vb_h, d, fill, opacity,
+    )
+}
+
 /// Entry point: DSL tree (JSON bytes) + options (JSON bytes) -> binary PLY.
 #[wasm_func]
 fn build_ply(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
@@ -1058,6 +1142,33 @@ fn build_scad(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u
         }
     }
     compile_scad(text, file_map, opt_seg(opts), parse_bin(bin))
+}
+
+/// Direct 2D SCAD → SVG. Same input shape as `build_ply`, but the tree
+/// must resolve to a 2D CrossSection. No maquette in the loop — the
+/// returned bytes are an SVG document ready to hand to Typst's `image()`
+/// or write to disk.
+#[wasm_func]
+fn build_svg(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let tree = json::parse(dsl)?;
+    finish_svg(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+}
+
+/// Direct 2D `.scad` source → SVG. Same input shape as `build_scad`,
+/// but the source must produce a 2D result.
+#[wasm_func]
+fn build_scad_svg(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let text = std::str::from_utf8(src).map_err(|_| "scad: source is not valid UTF-8")?;
+    let mut file_map = HashMap::new();
+    if let Ok(Json::Obj(entries)) = json::parse(files) {
+        for (k, v) in entries {
+            if let Some(s) = v.as_str() {
+                file_map.insert(k, s.to_string());
+            }
+        }
+    }
+    let tree = scad::scad_to_dsl(text, file_map)?;
+    finish_svg(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
 }
 
 /// Compile `.scad` source (with resolved library `files` + binary `bin` assets)
