@@ -164,6 +164,12 @@
     border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 2px 9px; border-radius: 6px; cursor: pointer; transition: .12s; }
   #copy:hover { color: var(--accent); border-color: var(--accent); }
   .editor-body { padding: 9px 0; overflow-x: auto; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; scrollbar-width: thin; }
+  /* SCAD-mode footer: hint on the left, compile-status on the right, one
+     line only. Hidden entirely outside SCAD mode (see setTab / ingest). */
+  #scad-foot { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    border-top: 1px solid var(--line); background: color-mix(in srgb, var(--code-bg) 60%, var(--panel));
+    color: var(--muted); font-size: 11px; }
+  #scad-foot #scad-status { margin-left: auto; font-variant-numeric: tabular-nums; }
   .cline { display: flex; }
   .gutter { flex: 0 0 auto; width: 2.4em; text-align: right; padding: 0 11px 0 4px; color: var(--muted); opacity: .5; user-select: none; position: sticky; left: 0; background: var(--code-bg); }
   .src { white-space: pre; padding-right: 14px; }
@@ -278,9 +284,6 @@
             <div class="editor-bar">
               <button id="tab-scad" class="tab" hidden>model.scad</button>
               <button id="tab-typst" class="tab on">preview.typ</button>
-              <!-- One-line UX hint when the scad tab is active — auto-shows/hides via setTab(). -->
-              <span id="scad-hint" class="muted" hidden>edit the source; recompiles on every change</span>
-              <span id="scad-status" class="muted"></span>
               <button id="copy">Copy</button>
             </div>
             <!-- OpenSCAD editor: transparent textarea over a highlighted <pre> -->
@@ -290,6 +293,13 @@
             </div>
             <!-- generated Typst (read-only) -->
             <div id="code" class="editor-body"></div>
+            <!-- Footer strip: hint + compile status. Shown only while the SCAD
+                 tab is active (toggled via setTab). Kept out of the editor-bar
+                 above so it doesn't compete with the tabs for horizontal space. -->
+            <div id="scad-foot" hidden>
+              <span id="scad-hint">edit the source; recompiles on every change</span>
+              <span id="scad-status"></span>
+            </div>
           </div>
         </div>
       </details>
@@ -324,6 +334,6 @@
   </main>
 
   <div id="tip" role="tooltip"></div>
-  <script src="app.js?v=30"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>

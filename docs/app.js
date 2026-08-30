@@ -1494,7 +1494,11 @@ function setTab(which) {
   $("tab-scad").classList.toggle("on", which === "scad");
   $("tab-typst").classList.toggle("on", which === "typst");
   $("scad-editor").hidden = which !== "scad";
-  const hint = $("scad-hint"); if (hint) hint.hidden = which !== "scad";
+  // Footer (hint + status) is a SCAD-only strip — hide it whenever the
+  // tab isn't scad. Clearing the status here also stops a stale
+  // "compiled in N ms" from lingering after a switch back to Typst.
+  const foot = $("scad-foot"); if (foot) foot.hidden = which !== "scad";
+  if (which !== "scad") { const s = $("scad-status"); if (s) s.textContent = ""; }
   elCode.style.display = which === "typst" ? "" : "none";
 }
 $("tab-scad").onclick = () => setTab("scad");
