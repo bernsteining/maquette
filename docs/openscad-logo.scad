@@ -1,4 +1,4 @@
-module rod(d, h) cylinder(d = d, h = h, center = true);
+module rod(d, h) cylinder(h, d = d, center = true);
 
 module Logo(size = 50, $fn = 100) {
   hole = size / 2;
