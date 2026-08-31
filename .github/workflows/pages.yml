@@ -50,13 +50,13 @@ jobs:
             git curl ca-certificates make \
             cmake clang lld libc++-dev libc++abi-dev python3 xz-utils
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Ensure wasm target
         run: rustup target add wasm32-unknown-unknown
 
       - name: Cache cargo & target
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             /usr/local/cargo/registry
@@ -66,8 +66,13 @@ jobs:
           restore-keys: ${{ runner.os }}-pages-
 
       - name: Install binaryen ${{ env.BINARYEN_VERSION }} (match local wasm-opt)
+        # `--retry-all-errors` eats transient DNS/connection blips on
+        # release-assets.githubusercontent.com (GH runners occasionally
+        # can't resolve their own CDN).
         run: |
-          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar -xz
+          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+            "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" \
+            | tar -xz
           echo "$PWD/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
 
       # Emsdk provides LLVM 22+/clang++/wasm-ld for scad's LTO recipe (see
@@ -75,7 +80,7 @@ jobs:
       # ~400 MB every deploy.
       - name: Cache emsdk (scad LTO)
         id: cache-emsdk
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/emsdk
           key: emsdk-${{ env.EMSDK_VERSION }}
@@ -123,9 +128,9 @@ jobs:
           done
           echo "no path leaks ✓"
 
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs
 
@@ -137,4 +142,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
