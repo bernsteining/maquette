@@ -106,6 +106,20 @@ struct Defaults {
     seg: usize, // default facet count ($fn)
     /// Binary assets from Typst (name -> bytes) for `import()`.
     bin: HashMap<String, Vec<u8>>,
+    /// If set, run Manifold's `calculate_normals(0, angle)` on the final mesh
+    /// before serializing to PLY. `angle` is the crease-preservation threshold
+    /// in degrees. Absent = no per-vertex normals (renders faceted).
+    smooth_normals: Option<f64>,
+}
+
+impl Defaults {
+    /// Build a `Defaults` from the raw `opts` JSON blob and framed `bin`
+    /// asset blob — the standard shape every wasm entry point sees. One place
+    /// to grow when a new opt lands (rather than nine identical constructor
+    /// sites, one of which will inevitably be forgotten).
+    fn from_opts(opts: &[u8], bin: &[u8]) -> Self {
+        Self { seg: opt_seg(opts), bin: parse_bin(bin), smooth_normals: opt_smooth_normals(opts) }
+    }
 }
 
 /// Decode the framed binary blob: repeated [u32 name_len][name][u32 data_len][data].
@@ -619,6 +633,37 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             }
             Ok(Geo::D3(register(Manifold::hull_pts(&pts), &color)))
         }
+        "simplify" => {
+            // Douglas-Peucker style vertex reduction — collapses edges shorter
+            // than `epsilon` in the input's units. Works on both 2D
+            // (CrossSection) and 3D (Manifold) inputs; dispatches on the child
+            // dimension. Cheap way to strip micro-detail from booleans or to
+            // downsize a mesh before shipping it through PLY.
+            let eps = num(node, "epsilon").unwrap_or(0.01);
+            if !eps.is_finite() || eps < 0.0 {
+                return Err("simplify: epsilon must be a non-negative finite number".into());
+            }
+            Ok(match build(child_of(node)?, color, d)? {
+                Geo::D3(m) => Geo::D3(m.simplify(eps)),
+                Geo::D2(c, col) => Geo::D2(c.simplify(eps), col),
+            })
+        }
+        "calculate_normals" => {
+            // Attach per-vertex normals to a 3D mesh; edges sharper than
+            // `sharp_angle` (degrees) get their own vertices so creases stay
+            // crisp. Stored at property slot 3 in the Manifold's vertex table;
+            // `to_ply` emits them as nx/ny/nz when present, and maquette's PLY
+            // reader picks them up for smooth shading.
+            let angle = num(node, "sharp_angle").unwrap_or(60.0);
+            if !angle.is_finite() {
+                return Err("calculate_normals: sharp_angle must be finite".into());
+            }
+            let mesh = build(child_of(node)?, color.clone(), d)?.into_manifold("calculate_normals")?;
+            // `normal_idx` is a USER-property slot (position at meshgl 0..2 is
+            // implicit); 0 lands the normals at meshgl slots 3..5, right where
+            // `to_ply` expects them.
+            Ok(Geo::D3(mesh.calculate_normals(0, angle)))
+        }
 
         // ---- transforms (dimension-agnostic) ----
         "translate" => {
@@ -1000,21 +1045,31 @@ fn parse_obj(data: &[u8]) -> Option<(Vec<f64>, Vec<u64>)> {
     Some((verts, tris))
 }
 
-/// Serialize a Manifold to binary little-endian PLY with per-vertex color.
-/// Triangles are non-indexed (3 fresh vertices each) so each face carries its own
-/// flat color — recovered per triangle from Manifold's run/original-ID metadata
-/// via [`PALETTE`]. This is the shape maquette's PLY reader consumes.
+/// Serialize a Manifold to binary little-endian PLY.
+///
+/// Emits indexed geometry: each output vertex is keyed by
+/// `(manifold_vertex_id, per-face-color)` so corners of adjacent triangles
+/// with the same color share a single PLY vertex, while a color boundary
+/// forces a split (per-face colors survive the way maquette expects them).
+/// Result: PLY payload shrinks ~2–3× on typical meshes vs the old
+/// de-indexed writer, without changing what any downstream consumer sees.
+///
+/// If Manifold ran `calculate_normals` (num_prop ≥ 6), we also emit
+/// nx/ny/nz per vertex; maquette's PLY reader picks those up for smooth
+/// shading — and the per-vertex splits Manifold already did at crease
+/// edges keep crisp normals crisp through the indexed layout.
 fn to_ply(mesh: &Manifold) -> Vec<u8> {
     let mg = mesh.to_meshgl64();
     let np = mg.num_prop().max(3);
-    let vp = mg.vert_properties(); // flat f64, stride np, first 3 = xyz
-    let idx = mg.tri_verts(); // flat u64, 3 per triangle
+    let vp = mg.vert_properties();
+    let idx = mg.tri_verts();
     let ntri = mg.num_tri();
+    let has_normals = np >= 6;
 
-    // Per-triangle color from the run/original-ID table.
+    // Per-triangle color from the run/original-ID table (unchanged).
     let mut tri_col: Vec<[u8; 4]> = vec![DEFAULT_RGB.0; ntri];
-    let run_index = mg.run_index(); // Vec<u64>, boundaries into the flat idx array
-    let run_oid = mg.run_original_id(); // Vec<u32>, one id per run
+    let run_index = mg.run_index();
+    let run_oid = mg.run_original_id();
     PALETTE.with(|p| {
         let pal = p.borrow();
         for (r, &oid) in run_oid.iter().enumerate() {
@@ -1027,8 +1082,53 @@ fn to_ply(mesh: &Manifold) -> Vec<u8> {
         }
     });
 
-    let vcount = ntri * 3;
-    let mut out = Vec::with_capacity(vcount * 16 + ntri * 13 + 256);
+    // Deduplicate corners by (manifold vertex id, color). Vertices that
+    // straddle a color boundary get split, so per-face color survives.
+    let n_mvert = mg.num_vert();
+    // Small-alphabet color map: `first_seen[mvert]` is `Some(unique_id)` for
+    // the first color that lands on that mvert; a second, different color
+    // falls back to the FxHashMap. Cheap fast path — most SCAD parts have
+    // large monochrome regions, so almost every vertex resolves via the Vec.
+    let mut first_col: Vec<Option<[u8; 4]>> = vec![None; n_mvert];
+    let mut first_uid: Vec<u32> = vec![u32::MAX; n_mvert];
+    let mut spill: FxHashMap<(u64, [u8; 4]), u32> = FxHashMap::default();
+    let mut tri_indices: Vec<[u32; 3]> = Vec::with_capacity(ntri);
+    let mut out_verts: Vec<(u64, [u8; 4])> = Vec::with_capacity(n_mvert);
+
+    for t in 0..ntri {
+        let col = tri_col[t];
+        let mut corner = [0u32; 3];
+        for k in 0..3 {
+            let mv = idx[t * 3 + k];
+            let mvi = mv as usize;
+            let uid = match first_col[mvi] {
+                None => {
+                    let uid = out_verts.len() as u32;
+                    out_verts.push((mv, col));
+                    first_col[mvi] = Some(col);
+                    first_uid[mvi] = uid;
+                    uid
+                }
+                Some(existing) if existing == col => first_uid[mvi],
+                Some(_) => *spill.entry((mv, col)).or_insert_with(|| {
+                    let uid = out_verts.len() as u32;
+                    out_verts.push((mv, col));
+                    uid
+                }),
+            };
+            corner[k] = uid;
+        }
+        tri_indices.push(corner);
+    }
+
+    let vcount = out_verts.len();
+    let per_vert = if has_normals { 16 + 12 } else { 16 };
+    let mut out = Vec::with_capacity(vcount * per_vert + ntri * 13 + 256);
+    let normals_hdr = if has_normals {
+        "property float nx\nproperty float ny\nproperty float nz\n"
+    } else {
+        ""
+    };
     let header = format!(
         "ply\n\
          format binary_little_endian 1.0\n\
@@ -1036,30 +1136,31 @@ fn to_ply(mesh: &Manifold) -> Vec<u8> {
          element vertex {vcount}\n\
          property float x\nproperty float y\nproperty float z\n\
          property uchar red\nproperty uchar green\nproperty uchar blue\nproperty uchar alpha\n\
+         {normals_hdr}\
          element face {ntri}\n\
          property list uchar uint vertex_indices\n\
          end_header\n"
     );
     out.extend_from_slice(header.as_bytes());
-    let pos = |vi: u64| {
-        let b = (vi as usize) * np;
-        [vp[b] as f32, vp[b + 1] as f32, vp[b + 2] as f32]
-    };
-    for t in 0..ntri {
-        let col = tri_col[t];
-        for k in 0..3 {
-            let p = pos(idx[t * 3 + k]);
-            out.extend_from_slice(&p[0].to_le_bytes());
-            out.extend_from_slice(&p[1].to_le_bytes());
-            out.extend_from_slice(&p[2].to_le_bytes());
-            out.extend_from_slice(&col);
+    for &(mv, col) in &out_verts {
+        let b = (mv as usize) * np;
+        let (px, py, pz) = (vp[b] as f32, vp[b + 1] as f32, vp[b + 2] as f32);
+        out.extend_from_slice(&px.to_le_bytes());
+        out.extend_from_slice(&py.to_le_bytes());
+        out.extend_from_slice(&pz.to_le_bytes());
+        out.extend_from_slice(&col);
+        if has_normals {
+            let (nx, ny, nz) = (vp[b + 3] as f32, vp[b + 4] as f32, vp[b + 5] as f32);
+            out.extend_from_slice(&nx.to_le_bytes());
+            out.extend_from_slice(&ny.to_le_bytes());
+            out.extend_from_slice(&nz.to_le_bytes());
         }
     }
-    for i in 0..ntri as u32 {
+    for tri in &tri_indices {
         out.push(3u8);
-        out.extend_from_slice(&(i * 3).to_le_bytes());
-        out.extend_from_slice(&(i * 3 + 1).to_le_bytes());
-        out.extend_from_slice(&(i * 3 + 2).to_le_bytes());
+        out.extend_from_slice(&tri[0].to_le_bytes());
+        out.extend_from_slice(&tri[1].to_le_bytes());
+        out.extend_from_slice(&tri[2].to_le_bytes());
     }
     out
 }
@@ -1067,6 +1168,13 @@ fn to_ply(mesh: &Manifold) -> Vec<u8> {
 /// Default facet count ($fn) from the options JSON blob (fallback 32).
 fn opt_seg(opts: &[u8]) -> usize {
     json::parse(opts).ok().and_then(|o| num(&o, "fn")).map(|f| (f as usize).max(3)).unwrap_or(32)
+}
+
+/// Optional sharp-angle threshold for the post-eval `calculate_normals` pass
+/// (degrees). `null` / missing = don't run the pass; the emitted PLY stays
+/// faceted. Any finite number ≥ 0 triggers per-vertex normal emission.
+fn opt_smooth_normals(opts: &[u8]) -> Option<f64> {
+    json::parse(opts).ok().and_then(|o| num(&o, "smooth_normals")).filter(|a| a.is_finite() && *a >= 0.0)
 }
 
 /// Shared tail of both entry points: reset per-compile state, build the tree,
@@ -1085,6 +1193,10 @@ fn finish(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
     if mesh.is_empty() {
         return Err("scad: empty result (no geometry)".into());
     }
+    let mesh = match defaults.smooth_normals {
+        Some(angle) => mesh.calculate_normals(0, angle),
+        None => mesh,
+    };
     Ok(to_ply(&mesh))
 }
 
@@ -1176,38 +1288,16 @@ fn cross_section_to_svg(cs: &CrossSection, color: Rgb) -> String {
 #[wasm_func]
 fn build_ply(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
     let tree = json::parse(dsl)?;
-    finish(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+    finish(&tree, &Defaults::from_opts(opts, bin))
 }
 
-/// Entry point: real OpenSCAD `.scad` source text + options (JSON) -> binary PLY.
-#[wasm_func]
-fn build_scad(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
-    let text = std::str::from_utf8(src).map_err(|_| "scad: source is not valid UTF-8")?;
-    let mut file_map = HashMap::new();
-    if let Ok(Json::Obj(entries)) = json::parse(files) {
-        for (k, v) in entries {
-            if let Some(s) = v.as_str() {
-                file_map.insert(k, s.to_string());
-            }
-        }
-    }
-    compile_scad(text, file_map, opt_seg(opts), parse_bin(bin))
-}
-
-/// Direct 2D SCAD → SVG. Same input shape as `build_ply`, but the tree
-/// must resolve to a 2D CrossSection. No maquette in the loop — the
-/// returned bytes are an SVG document ready to hand to Typst's `image()`
-/// or write to disk.
-#[wasm_func]
-fn build_svg(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
-    let tree = json::parse(dsl)?;
-    finish_svg(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
-}
-
-/// Direct 2D `.scad` source → SVG. Same input shape as `build_scad`,
-/// but the source must produce a 2D result.
-#[wasm_func]
-fn build_scad_svg(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+/// Parse the shared shape of every `.scad`-source wasm entry (`src`, `files`,
+/// `opts`, `bin`) into the DSL tree + `Defaults`. Handles the UTF-8 check on
+/// `src` and the `files` JSON decode. Callers only need to invoke the
+/// matching `finish*` helper.
+fn parse_scad_source(
+    src: &[u8], files: &[u8], opts: &[u8], bin: &[u8],
+) -> Result<(Json, Defaults), String> {
     let text = std::str::from_utf8(src).map_err(|_| "scad: source is not valid UTF-8")?;
     let mut file_map = HashMap::new();
     if let Ok(Json::Obj(entries)) = json::parse(files) {
@@ -1218,7 +1308,32 @@ fn build_scad_svg(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<V
         }
     }
     let tree = scad::scad_to_dsl(text, file_map)?;
-    finish_svg(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+    Ok((tree, Defaults::from_opts(opts, bin)))
+}
+
+/// Entry point: real OpenSCAD `.scad` source text + options (JSON) -> binary PLY.
+#[wasm_func]
+fn build_scad(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let (tree, defaults) = parse_scad_source(src, files, opts, bin)?;
+    finish(&tree, &defaults)
+}
+
+/// Direct 2D SCAD → SVG. Same input shape as `build_ply`, but the tree
+/// must resolve to a 2D CrossSection. No maquette in the loop — the
+/// returned bytes are an SVG document ready to hand to Typst's `image()`
+/// or write to disk.
+#[wasm_func]
+fn build_svg(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let tree = json::parse(dsl)?;
+    finish_svg(&tree, &Defaults::from_opts(opts, bin))
+}
+
+/// Direct 2D `.scad` source → SVG. Same input shape as `build_scad`,
+/// but the source must produce a 2D result.
+#[wasm_func]
+fn build_scad_svg(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let (tree, defaults) = parse_scad_source(src, files, opts, bin)?;
+    finish_svg(&tree, &defaults)
 }
 
 /// Shared body: evaluate the tree, extract Manifold stats, format as a small
@@ -1262,23 +1377,14 @@ fn finish_info(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
 #[wasm_func]
 fn build_ply_info(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
     let tree = json::parse(dsl)?;
-    finish_info(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+    finish_info(&tree, &Defaults::from_opts(opts, bin))
 }
 
 /// Inspection API for `.scad` sources.
 #[wasm_func]
 fn build_scad_info(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
-    let text = std::str::from_utf8(src).map_err(|_| "scad: source is not valid UTF-8")?;
-    let mut file_map = HashMap::new();
-    if let Ok(Json::Obj(entries)) = json::parse(files) {
-        for (k, v) in entries {
-            if let Some(s) = v.as_str() {
-                file_map.insert(k, s.to_string());
-            }
-        }
-    }
-    let tree = scad::scad_to_dsl(text, file_map)?;
-    finish_info(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+    let (tree, defaults) = parse_scad_source(src, files, opts, bin)?;
+    finish_info(&tree, &defaults)
 }
 
 /// Shared body for `-parts`: evaluate the tree, call `Manifold::decompose()`
@@ -1315,36 +1421,96 @@ fn finish_parts(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
 #[wasm_func]
 fn build_ply_parts(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
     let tree = json::parse(dsl)?;
-    finish_parts(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+    finish_parts(&tree, &Defaults::from_opts(opts, bin))
 }
 
 /// `.scad` source variant of `build_ply_parts`.
 #[wasm_func]
 fn build_scad_parts(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
-    let text = std::str::from_utf8(src).map_err(|_| "scad: source is not valid UTF-8")?;
-    let mut file_map = HashMap::new();
-    if let Ok(Json::Obj(entries)) = json::parse(files) {
-        for (k, v) in entries {
-            if let Some(s) = v.as_str() {
-                file_map.insert(k, s.to_string());
-            }
-        }
+    let (tree, defaults) = parse_scad_source(src, files, opts, bin)?;
+    finish_parts(&tree, &defaults)
+}
+
+/// Shared body for `-raycast`: evaluate the tree, shoot a segment from
+/// `origin` to `end` against the final mesh, return a JSON array of hits
+/// (each `{face_id, distance, position:[x,y,z], normal:[x,y,z]}`, sorted by
+/// distance). Two-plate JSON: `ray` is `{"origin":[..], "end":[..]}`.
+fn finish_raycast(tree: &Json, defaults: &Defaults, ray: &[u8]) -> Result<Vec<u8>, String> {
+    let r = json::parse(ray).map_err(|_| "raycast: ray must be JSON")?;
+    let origin = v3(&r, "origin").ok_or("raycast: ray.origin must be [x,y,z]")?;
+    let end = v3(&r, "end").ok_or("raycast: ray.end must be [x,y,z]")?;
+    finite_all(&origin, "raycast")?;
+    finite_all(&end, "raycast")?;
+    PALETTE.with(|p| p.borrow_mut().clear());
+    NODE_HASH.with(|m| {
+        let mut m = m.borrow_mut();
+        m.clear();
+        prehash(tree, &mut m);
+    });
+    MEMO.with(|m| m.borrow_mut().clear());
+    let mesh = build(tree, DEFAULT_RGB, defaults)?.to_manifold_extruding();
+    let hits = mesh.ray_cast(origin, end);
+    let mut out = String::with_capacity(64 + hits.len() * 96);
+    out.push('[');
+    for (i, h) in hits.iter().enumerate() {
+        if i > 0 { out.push(','); }
+        use std::fmt::Write as _;
+        let _ = write!(
+            out,
+            "{{\"face_id\":{},\"distance\":{},\"position\":[{},{},{}],\"normal\":[{},{},{}]}}",
+            h.face_id, h.distance,
+            h.position[0], h.position[1], h.position[2],
+            h.normal[0], h.normal[1], h.normal[2],
+        );
     }
-    let tree = scad::scad_to_dsl(text, file_map)?;
-    finish_parts(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+    out.push(']');
+    Ok(out.into_bytes())
+}
+
+/// Ray-vs-mesh intersection: fire a segment from `origin` to `end` at the
+/// evaluated geometry, return JSON hits (`face_id`, `distance`, `position`,
+/// `normal`) for terrain sampling, picking, or line-of-sight checks. Same
+/// input shape as `build_ply`, plus a `ray` blob.
+#[wasm_func]
+fn build_ply_raycast(dsl: &[u8], opts: &[u8], bin: &[u8], ray: &[u8]) -> Result<Vec<u8>, String> {
+    let tree = json::parse(dsl)?;
+    finish_raycast(&tree, &Defaults::from_opts(opts, bin), ray)
+}
+
+/// `.scad` source variant of `build_ply_raycast`.
+#[wasm_func]
+fn build_scad_raycast(
+    src: &[u8], files: &[u8], opts: &[u8], bin: &[u8], ray: &[u8],
+) -> Result<Vec<u8>, String> {
+    let (tree, defaults) = parse_scad_source(src, files, opts, bin)?;
+    finish_raycast(&tree, &defaults, ray)
 }
 
 /// Compile `.scad` source (with resolved library `files` + binary `bin` assets)
 /// to PLY bytes. Split out from the wasm entry so it can be driven natively
 /// (the repro/probe/dragon harnesses on x86, where a Manifold trap prints a real
-/// backtrace).
+/// backtrace). Faceted output — pass through `compile_scad_opt` if you want
+/// per-vertex normals via `calculate_normals`.
 pub fn compile_scad(
     text: &str,
     files: HashMap<String, String>,
     seg: usize,
     bin: HashMap<String, Vec<u8>>,
 ) -> Result<Vec<u8>, String> {
+    compile_scad_opt(text, files, seg, bin, None)
+}
+
+/// `compile_scad` with a `smooth_normals` opt: when `Some(angle)`, runs
+/// Manifold's `calculate_normals(0, angle)` on the final mesh so the PLY
+/// carries per-vertex normals for smooth shading.
+pub fn compile_scad_opt(
+    text: &str,
+    files: HashMap<String, String>,
+    seg: usize,
+    bin: HashMap<String, Vec<u8>>,
+    smooth_normals: Option<f64>,
+) -> Result<Vec<u8>, String> {
     let tree = scad::scad_to_dsl(text, files)?;
-    finish(&tree, &Defaults { seg, bin })
+    finish(&tree, &Defaults { seg, bin, smooth_normals })
 }
 
