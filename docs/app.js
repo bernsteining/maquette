@@ -687,7 +687,19 @@ function buildTypst() {
       case "views": if (state.views.length) push("views", fmtT(state.views)); break;
       case "palette": if (state[f.k].length) push(f.k, fmtT(state[f.k])); break;
       case "lights": if (state.lights.length) push("lights", fmtT(state.lights)); break;
-      case "map": { const rows = state[f.k].filter(r => r[0]); if (rows.length) push(f.k, `(${rows.map(([n,v]) => `"${n}": ${fmtT(f.rich ? hlCollapse(v) : v)}`).join(", ")})`); break; }
+      case "map": {
+        const rows = state[f.k].filter(r => r[0]);
+        if (!rows.length) break;
+        const entries = rows.map(([n, v]) => `"${n}": ${fmtT(f.rich ? hlCollapse(v) : v)}`);
+        // Wrap the dict across multiple lines once the joined single-line
+        // form would push the containing snippet line past a screen-width
+        // budget (`k: (...),` prefix ~15 chars + 4-space body indent).
+        const oneLine = `(${entries.join(", ")})`;
+        push(f.k, oneLine.length + f.k.length + 4 <= 80
+          ? oneLine
+          : `(\n    ${entries.join(",\n    ")},\n  )`);
+        break;
+      }
       default: if (!eq(state[f.k], f.def)) push(f.k, fmtT(state[f.k]));
     }
   }
