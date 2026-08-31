@@ -174,6 +174,7 @@ const SCHEMA = [
     { k: "specular", label: "Specular", t: "rng", def: 0.2, min: 0, max: 1, step: 0.01 },
     { k: "shininess", label: "Shininess", t: "num", def: 32 },
     { k: "smooth", label: "Smooth shading", t: "bool", def: true },
+    { k: "scad_smooth_normals", label: "SCAD smooth normals", t: "bool", def: false, recompile: true },
     { k: "gamma_correction", label: "Gamma correction", t: "bool", def: true },
     { k: "cull_backface", label: "Back-face culling", t: "bool", def: true },
   ]},
@@ -463,6 +464,7 @@ const HELP = {
   color: "Base model fill color.", opacity: "Whole-model opacity (0 = invisible, 1 = opaque).",
   specular: "Specular highlight intensity.", shininess: "Specular exponent — higher = tighter highlight.",
   smooth: "Gouraud smooth shading (best with PNG).", gamma_correction: "Light in linear sRGB for accurate midtones.",
+  scad_smooth_normals: "OpenSCAD only: attach per-vertex normals via Manifold's calculate_normals(30°) so curved surfaces render smooth-shaded while crease edges stay crisp. Off = faceted (OpenSCAD-native look).",
   cull_backface: "Skip triangles facing away from the camera.",
   shading: "Shading model — Blinn-Phong, Gooch, Cel, Flat, or Normal-map.",
   gooch_warm: "Gooch warm-tone color.", gooch_cool: "Gooch cool-tone color.", cel_bands: "Number of cel-shading bands.",
@@ -838,7 +840,12 @@ function ctl(f, slot, local) {
   if (f.t === "bool") {
     labelEl = document.createElement("label"); labelEl.className = "chk";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!cur;
-    cb.onchange = () => set(cb.checked);
+    cb.onchange = () => {
+      set(cb.checked);
+      // Fields flagged `recompile` gate the SCAD compile output — recompute
+      // the PLY so the change is visible on the next render.
+      if (f.recompile && $("preset").value === "__scad__") compileScad();
+    };
     // The <label> wraps text + input, so the checkbox is properly labelled
     // for screen readers already — no extra aria-label needed.
     labelEl.append(cb, document.createTextNode(f.label)); wrap.append(labelEl);
@@ -1511,7 +1518,7 @@ $("scad-src").addEventListener("scroll", () => {
 
 // Render a freshly-compiled mesh without touching the picker (keeps it on
 // "OpenSCAD"), unlike ingest() which syncs the dropdown to the loaded file name.
-function renderScadResult(ply) {
+async function renderScadResult(ply) {
   // These bytes are the LIVE output of maquette-scad.wasm compiling the editor's
   // .scad source — never a fetched file. `.ply` is the real output format (routes
   // to render-ply); `scad: true` marks the source so the Typst snippet shows the
@@ -1524,12 +1531,16 @@ function renderScadResult(ply) {
   model = makeModel("model.ply", ply, { scad: true });
   // Fresh PLY per compile — bind into maquette plugin's worker cache so
   // the next callWithModel picks these bytes, not a previous model's.
+  // AWAIT the setModel: without it, onChange() below schedules safeRender
+  // before the worker has swapped `activeModel`, so the render can pick up
+  // the previous compile's bytes and paint stale geometry.
   // No key: scad output is transient (recompiled on every edit), caching
   // by name would just churn.
-  maquettePlugin.setModel(ply).catch(e => console.error("setModel failed:", e));
+  try { await maquettePlugin.setModel(ply); }
+  catch (e) { console.error("setModel failed:", e); }
   if (kindChanged) {
     resetState();
-    // Re-apply SCAD's flat-shading look after the wipe.
+    // Re-apply SCAD-mode defaults after the wipe.
     const sd = MODEL_DEFAULTS.__scad__ || {};
     for (const k in sd) state[k] = structuredClone(sd[k]);
     buildForm();
@@ -1546,11 +1557,13 @@ async function compileScad() {
     status.textContent = "compiling…";
     await scadPlugin.ensure();
     const t = performance.now();
+    const opts = { fn: 32 };
+    if (state.scad_smooth_normals) opts.smooth_normals = 30;
     const ply = await scadPlugin.call("build_scad", ENC.encode(src), ENC.encode("{}"),
-      ENC.encode(JSON.stringify({ fn: 32 })), new Uint8Array());
+      ENC.encode(JSON.stringify(opts)), new Uint8Array());
     status.textContent = `compiled in ${Math.round(performance.now() - t)} ms`;
     showErr("");
-    renderScadResult(ply);
+    await renderScadResult(ply);
   } catch (e) {
     status.textContent = "error";
     showErr("OpenSCAD: " + e.message);
@@ -1861,7 +1874,7 @@ const FIELD_CODES = ["model", "camera", "azimuth", "elevation", "distance", "cen
   "vertex_smoothing", "color_map_palette", "outline", "ground_shadow", "shadows", "antialias", "ssao",
   "bloom", "glow", "sharpen", "clip", "explode", "decimate", "views", "grid_labels", "turntable",
   "materials", "highlight", "annotations", "debug", "debug_color", "point_size", "point_neighbors",
-  "point_boundary", "_cam", "_hemi", "_bgNone"];
+  "point_boundary", "_cam", "_hemi", "_bgNone", "scad_smooth_normals"];
 // Letters-only codes so no code is an integer-like key (which JS would reorder).
 const CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const codeFor = (i) => i < 52 ? CODE_ALPHABET[i] : CODE_ALPHABET[((i - 52) / 52) | 0] + CODE_ALPHABET[(i - 52) % 52];

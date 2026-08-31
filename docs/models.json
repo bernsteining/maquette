@@ -13,7 +13,8 @@
     "__scad__": {
       "_cam": "spherical",
       "azimuth": 219, "elevation": 33, "fov": 40, "zoom": 1.2,
-      "color": "#f9d72c", "specular": 0, "cull_backface": false, "shading": "flat"
+      "color": "#f9d72c", "specular": 0, "cull_backface": false,
+      "scad_smooth_normals": true
     },
     "brain_skull.obj": {
       "highlight": [["Skull", "#e8e8e8"], ["Brain", "#ee69b4"]],
