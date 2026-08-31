@@ -21,7 +21,23 @@
       "mode": "x-ray", "xray_opacity": 0.3
     },
     "crankshaft.obj": {
-      "color": "#7d8590", "specular": 0.6, "shininess": 48, "up": [0, -1, 0]
+      "color": "#7d8590", "specular": 0.6, "shininess": 48, "up": [0, -1, 0],
+      "highlight": [
+        ["Model__Crankshaft", "#d4a145"],
+        ["Model__Camshaft",   "#b04040"],
+        ["Model__Piston_A",   "#8b6f3e"],
+        ["Model__Piston_B",   "#8b6f3e"],
+        ["Model__Piston_C",   "#8b6f3e"],
+        ["Model__Piston_D",   "#8b6f3e"],
+        ["Model__Piston_E",   "#8b6f3e"],
+        ["Model__Piston_F",   "#8b6f3e"],
+        ["Model__Head",       "#4a4f56"],
+        ["Model__Head_2",     "#4a4f56"],
+        ["Model__Head_3",     "#4a4f56"],
+        ["Model__Head_4",     "#4a4f56"],
+        ["Model__Head_5",     "#4a4f56"],
+        ["Model__Head_6",     "#4a4f56"]
+      ]
     },
     "rubi_scan.ply": {
       "point_size": 0.024, "point_boundary": 110,
