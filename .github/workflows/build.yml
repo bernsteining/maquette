@@ -59,13 +59,13 @@ jobs:
               cmake clang lld libc++-dev libc++abi-dev python3 xz-utils
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Ensure wasm target
         run: rustup target add wasm32-unknown-unknown
 
       - name: Cache cargo & target
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             /usr/local/cargo/registry
@@ -75,8 +75,13 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.plugin.name }}-
 
       - name: Install binaryen ${{ env.BINARYEN_VERSION }}
+        # `--retry-all-errors` eats transient DNS/connection blips on
+        # release-assets.githubusercontent.com (GH runners occasionally
+        # can't resolve their own CDN).
         run: |
-          curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar -xz
+          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+            "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" \
+            | tar -xz
           echo "$PWD/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
 
       # Emsdk provides LLVM 22+/clang++/wasm-ld for scad's LTO recipe (see
@@ -85,7 +90,7 @@ jobs:
       - name: Cache emsdk (scad LTO)
         if: matrix.plugin.name == 'maquette-scad'
         id: cache-emsdk
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/emsdk
           key: emsdk-${{ env.EMSDK_VERSION }}
@@ -193,7 +198,7 @@ jobs:
           sha1sum ${{ matrix.plugin.wasm_path }} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.plugin.name }}-wasm
           path: ${{ matrix.plugin.wasm_path }}
@@ -210,7 +215,7 @@ jobs:
     permissions:
       contents: write  # needed to create the Release + upload assets
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
