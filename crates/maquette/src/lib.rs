@@ -49,10 +49,23 @@ fn cached_obj(
     data: &[u8],
     config: &RenderConfig,
 ) -> Result<CachedObj, String> {
-    // Reparse when materials or highlights are present (they affect triangle colors).
-    if !config.materials.is_empty() || !config.highlight.is_empty() {
+    // Merge auto-loaded `.mtl` Kd colors under the config's `materials` map
+    // (config wins on conflicts — the user's explicit override always beats
+    // the sidecar). Only builds an owned map when either source is non-empty.
+    let materials_ref: &HashMap<String, String>;
+    let mut merged: HashMap<String, String>;
+    if !config.mtl.is_empty() {
+        merged = obj_parser::parse_mtl(&config.mtl);
+        for (k, v) in &config.materials { merged.insert(k.clone(), v.clone()); }
+        materials_ref = &merged;
+    } else {
+        materials_ref = &config.materials;
+    }
+    // Reparse when materials (from any source) or highlights are present —
+    // they affect triangle colors and can't be shared across configs.
+    if !materials_ref.is_empty() || !config.highlight.is_empty() {
         let (triangles, group_styles) =
-            obj_parser::parse_obj(data, &config.materials, &config.highlight)?;
+            obj_parser::parse_obj(data, materials_ref, &config.highlight)?;
         return Ok(CachedObj::Owned(triangles, group_styles));
     }
     if let Some(r) = cache::get_obj(data) {
@@ -124,7 +137,7 @@ fn render_obj(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let key = cache::hash(obj_data);
     // Preprocessed-mesh cache only when materials/highlight are absent (otherwise
     // the parsed triangles' colors depend on config not captured by the data hash).
-    let prep_key = if config.materials.is_empty() && config.highlight.is_empty() { Some(key) } else { None };
+    let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
     let svg = render::render(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key);
     Ok(svg.into_bytes())
 }
@@ -145,7 +158,7 @@ fn render_obj_png(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
     let config = parse_config(config_json)?;
     let obj = cached_obj(obj_data, &config)?;
     let key = cache::hash(obj_data);
-    let prep_key = if config.materials.is_empty() && config.highlight.is_empty() { Some(key) } else { None };
+    let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
     render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key)
 }
 

@@ -4,6 +4,73 @@ use crate::parser::Triangle;
 use crate::config::{GroupAppearance, GroupStyle};
 use std::collections::HashMap;
 
+/// Parse one or more concatenated Wavefront `.mtl` files. Returns a map of
+/// material name (from `newmtl`) to a `#RRGGBB` hex string derived from `Kd`.
+/// Alphas from `d` / `Tr` are folded into the hex string as `#RRGGBBAA`
+/// when < 1 so the OBJ pipeline can propagate them via `parse_hex_color`.
+///
+/// Everything but `newmtl`/`Kd`/`d`/`Tr` is ignored (Ka/Ks/Ns/map_*/etc.):
+/// maquette has no PBR pipeline for OBJ, and the diffuse colour is what
+/// makes dropped OBJ+MTL bundles "just look right" out of the box.
+pub fn parse_mtl(data: &str) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = HashMap::new();
+    let mut current: Option<String> = None;
+    // Buffer the material until we hit the next `newmtl` (or EOF): Kd may
+    // appear before or after `d`, so we compose the hex string on close.
+    let mut kd: Option<(u8, u8, u8)> = None;
+    let mut alpha: Option<u8> = None;
+    let flush = |name: &Option<String>,
+                 kd: &Option<(u8, u8, u8)>,
+                 alpha: &Option<u8>,
+                 out: &mut HashMap<String, String>| {
+        if let (Some(name), Some((r, g, b))) = (name.as_deref(), kd) {
+            let hex = match alpha {
+                Some(a) if *a < 255 => format!("#{r:02x}{g:02x}{b:02x}{a:02x}"),
+                _ => format!("#{r:02x}{g:02x}{b:02x}"),
+            };
+            out.insert(name.to_string(), hex);
+        }
+    };
+    for line in data.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        let mut parts = line.split_ascii_whitespace();
+        let Some(kw) = parts.next() else { continue };
+        match kw {
+            "newmtl" => {
+                flush(&current, &kd, &alpha, &mut out);
+                current = parts.next().map(String::from);
+                kd = None;
+                alpha = None;
+            }
+            "Kd" => {
+                // Kd R G B — floats 0..1 in the spec.
+                let vals: Vec<f64> = parts.filter_map(|s| s.parse().ok()).collect();
+                if vals.len() >= 3 {
+                    let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    kd = Some((byte(vals[0]), byte(vals[1]), byte(vals[2])));
+                }
+            }
+            "d" => {
+                // d = dissolve. 1.0 = opaque, 0.0 = transparent.
+                if let Some(v) = parts.next().and_then(|s| s.parse::<f64>().ok()) {
+                    alpha = Some((v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                }
+            }
+            "Tr" => {
+                // Tr = transparency. Inverse of d — some tools emit it instead.
+                // If both appear, last-write wins (rare in practice).
+                if let Some(v) = parts.next().and_then(|s| s.parse::<f64>().ok()) {
+                    alpha = Some(((1.0 - v.clamp(0.0, 1.0)) * 255.0).round() as u8);
+                }
+            }
+            _ => {}
+        }
+    }
+    flush(&current, &kd, &alpha, &mut out);
+    out
+}
+
 /// Parse OBJ format data with optional per-face materials and group highlighting.
 /// Materials map material names to hex color strings (e.g. "red" → "#ff0000").
 /// Highlight maps group names (`g`/`o`) to a color or full appearance override.
@@ -23,6 +90,10 @@ pub fn parse_obj(
     let mut current_highlight: Option<(u8, u8, u8)> = None;
     let mut current_group: Option<u32> = None;
     let mut group_counter: u32 = 0;
+    // Active OBJ smoothing group. `None` = `s off` / `s 0` — faces in this
+    // state are treated as their own island so nothing merges them (see
+    // smooth::compute_vertex_normals fallback quantisation by group id).
+    let mut current_smooth: Option<u32> = None;
 
     // Reusable buffer for face indices (avoids per-face allocation)
     let mut face_buf: Vec<(usize, Option<usize>)> = Vec::new();
@@ -52,6 +123,20 @@ pub fn parse_obj(
             b"vn" => {
                 normals.push(parse_vec3_bytes(&mut parts)
                     .ok_or("normal needs 3 valid coordinates")?);
+            }
+            b"s" => {
+                // `s <n>` starts smoothing group n; `s off` / `s 0` disables
+                // it. Faces tagged with a smoothing group share averaged
+                // normals with same-group siblings across shared vertices;
+                // faces with `None` don't merge, leaving crease edges crisp.
+                let tok = parts.next().unwrap_or(b"off");
+                current_smooth = if tok == b"off" || tok == b"0" {
+                    None
+                } else {
+                    std::str::from_utf8(tok).ok()
+                        .and_then(|s| s.parse::<u32>().ok())
+                        .filter(|&n| n != 0)
+                };
             }
             b"usemtl" => {
                 let name = match parts.next() {
@@ -105,6 +190,8 @@ pub fn parse_obj(
                         group_id: current_group,
                         alpha: None,
                         vertex_normals,
+                        smoothing_group: current_smooth,
+                        vertex_scalars: None,
                     });
                 }
             }

@@ -168,6 +168,54 @@ pub fn apply_curvature_map(triangles: &mut [Triangle], palette: &[(u8, u8, u8)],
     }
 }
 
+/// PLY per-vertex scalar color mapping — reads whatever numeric non-standard
+/// vertex property the PLY reader stashed into `Triangle.vertex_scalars`
+/// (`quality`, `confidence`, `intensity`, or any custom float) and maps its
+/// range across the palette. No-op if the mesh doesn't carry per-vertex
+/// scalars (STL/OBJ, or a PLY without extra properties).
+pub fn apply_ply_scalar_map(triangles: &mut [Triangle], palette: &[(u8, u8, u8)]) {
+    let pal = resolve_palette(palette);
+    // Find the value range across every corner of every triangle that
+    // actually has a scalar. Untagged triangles fall through unchanged.
+    let mut vmin = f64::INFINITY;
+    let mut vmax = f64::NEG_INFINITY;
+    for tri in triangles.iter() {
+        if let Some(vs) = tri.vertex_scalars {
+            for &v in &vs {
+                if v.is_finite() {
+                    if v < vmin { vmin = v; }
+                    if v > vmax { vmax = v; }
+                }
+            }
+        }
+    }
+    if !vmin.is_finite() || vmax <= vmin {
+        // Flat mesh or no scalars — colour every carrier tri with the
+        // palette's midpoint so the render still visibly changes.
+        for tri in triangles.iter_mut() {
+            if tri.vertex_scalars.is_some() {
+                let c = sample_palette(pal, 0.5);
+                tri.vertex_colors = Some([c, c, c]);
+            }
+        }
+        return;
+    }
+    let span = vmax - vmin;
+    for tri in triangles.iter_mut() {
+        if let Some(vs) = tri.vertex_scalars {
+            let c0 = sample_palette(pal, (vs[0] - vmin) / span);
+            let c1 = sample_palette(pal, (vs[1] - vmin) / span);
+            let c2 = sample_palette(pal, (vs[2] - vmin) / span);
+            tri.vertex_colors = Some([c0, c1, c2]);
+            // Also set the face colour to the triangle's average scalar so
+            // flat-shading paths (which ignore vertex_colors) render as
+            // heatmap-ish tones instead of the config's base colour.
+            let avg = (vs[0] + vs[1] + vs[2]) / 3.0;
+            tri.color = Some(sample_palette(pal, ((avg - vmin) / span).clamp(0.0, 1.0)));
+        }
+    }
+}
+
 /// Scalar function color mapping. Evaluates f(x,y,z) at each vertex.
 pub fn apply_scalar_map(
     triangles: &mut [Triangle],

@@ -199,6 +199,8 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
             // smooth shading fall back to face-normal averaging on the
             // simplified mesh.
             vertex_normals: None,
+            smoothing_group: None,
+            vertex_scalars: None,
         });
     }
 

@@ -19,6 +19,17 @@ pub struct Triangle {
     /// Smooth shading consumes these directly so crease-preserving normals
     /// (e.g. from Manifold's calculate_normals) survive into the shader.
     pub vertex_normals: Option<[Vec3; 3]>,
+    /// OBJ smoothing group id (`s N`), or `None` for `s off` / `s 0` /
+    /// files without smoothing statements. Two faces sharing a position
+    /// only smooth-merge in the fallback normal path when they belong to
+    /// the SAME smoothing group — different groups keep their own averaged
+    /// normal at that position, so crease edges stay crisp.
+    pub smoothing_group: Option<u32>,
+    /// Per-corner scalar value from an arbitrary PLY vertex property
+    /// (`quality`, `confidence`, `intensity`, or any custom float). Populated
+    /// by the PLY reader when a numeric non-standard vertex property is
+    /// present. `color_map: "ply_scalar"` reads this and maps to the palette.
+    pub vertex_scalars: Option<[f64; 3]>,
 }
 
 /// Parse STL data — auto-detects ASCII vs binary format.
@@ -71,6 +82,8 @@ fn parse_ascii(data: &[u8]) -> Result<Vec<Triangle>, String> {
                 group_id: None,
                 alpha: None,
                 vertex_normals: None,
+                smoothing_group: None,
+            vertex_scalars: None,
             });
         }
     }
@@ -136,6 +149,8 @@ fn parse_binary(data: &[u8]) -> Result<Vec<Triangle>, String> {
             group_id: None,
             alpha: None,
             vertex_normals: None,
+            smoothing_group: None,
+            vertex_scalars: None,
         });
     }
     Ok(triangles)

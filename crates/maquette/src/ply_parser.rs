@@ -114,6 +114,12 @@ struct VertexLayout {
     sr: usize, sg: usize, sb: usize,
     has_alpha: bool,
     sa: usize,
+    /// Index of the first "arbitrary" numeric vertex property — anything
+    /// that isn't x/y/z/nx/ny/nz/rgba. Common cases: `quality` (scan
+    /// confidence), `intensity`, `value`. Values feed into `color_map:
+    /// "ply_scalar"` for heatmap-style rendering.
+    has_scalar: bool,
+    ss: usize,
 }
 
 /// Location of one face color/alpha channel: a byte offset (binary reads),
@@ -207,10 +213,24 @@ fn finalize_element(name: &str, count: usize, props: Vec<(String, Prop)>) -> Res
             } else { (0, 0, 0) };
             let has_alpha = slots[A].is_some();
             let sa = slots[A].unwrap_or(0);
+            // First numeric vertex property that isn't in the standard slots
+            // (x/y/z/nx/ny/nz/rgba): interpreted as a scalar for color_map.
+            // Skips integer-typed props that are almost certainly not colours
+            // themselves — floats (F32/F64) and small ints all pass through
+            // color_byte-style normalization when sampled.
+            let mut scalar = None;
+            for (i, (pname, _)) in props.iter().enumerate() {
+                if prop_slot(pname).is_none() {
+                    scalar = Some(i);
+                    break;
+                }
+            }
+            let has_scalar = scalar.is_some();
+            let ss = scalar.unwrap_or(0);
             Ok(Element::Vertex(VertexLayout {
                 count, props: scalar_types, prop_offsets, stride,
                 sx, sy, sz, has_normals, snx, sny, snz, has_colors, sr, sg, sb,
-                has_alpha, sa,
+                has_alpha, sa, has_scalar, ss,
             }))
         }
         "face" => {
@@ -340,6 +360,7 @@ fn triangulate(
     normals: &[Vec3],
     colors: &[(u8, u8, u8)],
     alphas: &[u8],
+    scalars: &[f64],
     face_color: Option<(u8, u8, u8)>,
     face_alpha: Option<u8>,
     out: &mut Vec<Triangle>,
@@ -348,6 +369,7 @@ fn triangulate(
     let has_n = !normals.is_empty();
     let has_c = !colors.is_empty();
     let has_a = !alphas.is_empty();
+    let has_s = !scalars.is_empty();
     for i in 1..indices.len() - 1 {
         let (i0, i1, i2) = (indices[0], indices[i], indices[i + 1]);
         let (v0, v1, v2) = (positions[i0], positions[i1], positions[i2]);
@@ -382,7 +404,12 @@ fn triangulate(
         } else {
             None
         };
-        out.push(Triangle { vertices: [v0, v1, v2], normal, color, vertex_colors, group_id: None, alpha, vertex_normals });
+        let vertex_scalars = if has_s {
+            Some([scalars[i0], scalars[i1], scalars[i2]])
+        } else {
+            None
+        };
+        out.push(Triangle { vertices: [v0, v1, v2], normal, color, vertex_colors, group_id: None, alpha, vertex_normals, smoothing_group: None, vertex_scalars });
     }
 }
 
@@ -487,6 +514,7 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
     let mut normals: Vec<Vec3> = Vec::new();
     let mut colors: Vec<(u8, u8, u8)> = Vec::new();
     let mut alphas: Vec<u8> = Vec::new();
+    let mut scalars: Vec<f64> = Vec::new();
     let mut triangles: Vec<Triangle> = Vec::new();
 
     for elem in &header.elements {
@@ -500,6 +528,7 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
                 if vl.has_normals { needed[vl.snx] = true; needed[vl.sny] = true; needed[vl.snz] = true; }
                 if vl.has_colors { needed[vl.sr] = true; needed[vl.sg] = true; needed[vl.sb] = true; }
                 if vl.has_alpha { needed[vl.sa] = true; }
+                if vl.has_scalar { needed[vl.ss] = true; }
 
                 for _ in 0..vl.count {
                     let line = lines.next().ok_or("PLY: unexpected end of vertex data")?;
@@ -530,6 +559,9 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
                     }
                     if vl.has_alpha {
                         alphas.push(buf[vl.sa] as u8);
+                    }
+                    if vl.has_scalar {
+                        scalars.push(buf[vl.ss]);
                     }
                 }
             }
@@ -564,7 +596,7 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
                         .or_else(|| pick_ascii_face_color(&post_toks, &fl.post_col));
                     let face_alpha = pick_ascii_face_alpha(&pre_toks, &fl.pre_col)
                         .or_else(|| pick_ascii_face_alpha(&post_toks, &fl.post_col));
-                    triangulate(indices, &positions, &normals, &colors, &alphas, face_color, face_alpha, &mut triangles);
+                    triangulate(indices, &positions, &normals, &colors, &alphas, &scalars, face_color, face_alpha, &mut triangles);
                 }
             }
             Element::Skip(count, _) => {
@@ -596,6 +628,7 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
     let mut normals: Vec<Vec3> = Vec::new();
     let mut colors: Vec<(u8, u8, u8)> = Vec::new();
     let mut alphas: Vec<u8> = Vec::new();
+    let mut scalars: Vec<f64> = Vec::new();
     let mut triangles: Vec<Triangle> = Vec::new();
 
     // Inline reader that uses const generic to eliminate runtime branch
@@ -634,6 +667,12 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
                     (PT::U8, 0)
                 };
 
+                let (pts, os) = if vl.has_scalar {
+                    (vl.props[vl.ss], vl.prop_offsets[vl.ss])
+                } else {
+                    (PT::U8, 0)
+                };
+
                 for _ in 0..vl.count {
                     if off + vl.stride > data.len() {
                         return Err("PLY: truncated vertex data".into());
@@ -659,6 +698,9 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
                     }
                     if vl.has_alpha {
                         alphas.push(read::<BE>(pta, data, off + oa) as u8);
+                    }
+                    if vl.has_scalar {
+                        scalars.push(read::<BE>(pts, data, off + os));
                     }
                     off += vl.stride;
                 }
@@ -712,7 +754,7 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
                     off += fl.post_size;
                     let face_color = face_color_pre.or(face_color_post);
                     let face_alpha = face_alpha_pre.or(face_alpha_post);
-                    triangulate(indices, &positions, &normals, &colors, &alphas, face_color, face_alpha, &mut triangles);
+                    triangulate(indices, &positions, &normals, &colors, &alphas, &scalars, face_color, face_alpha, &mut triangles);
                 }
             }
             Element::Skip(count, props) => {
