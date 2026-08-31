@@ -40,6 +40,8 @@
   ngon: ngon, star: star, rounded-square: rounded-square,
   linear-extrude: linear-extrude, rotate-extrude: rotate-extrude, projection: projection,
   slice: slice, trim: trim, "hull-pts": hull-pts,
+  simplify: simplify, "calculate-normals": calculate-normals,
+  "scadypst-raycast": scadypst-raycast, "compile-scad-raycast": compile-scad-raycast,
   translate: translate, rotate: rotate, scale: scale, mirror: mirror,
   resize: resize, offset: offset, color: color,
   union: union, difference: difference, intersection: intersection,
@@ -265,6 +267,8 @@ All variadic — use `..` spread with a Typst `for` block to feed a computed lis
 
 - *`slice(child, z: 0)`* — horizontal cross-section of a 3D solid at the given Z. Returns a 2D shape; pipe into `scadypst-svg(..)` for a vector contour, or into further 2D ops. Distinct from `projection(..)`, which unions every horizontal slice.
 - *`trim(child, normal, offset: 0)`* — cut with a plane. Keeps the half where `dot(pos, normal) ≥ offset`. Cheaper and exact vs the "difference() with a giant cube" trick.
+- *`simplify(child, epsilon: 0.01)`* — Douglas-Peucker vertex reduction. Works on both 2D and 3D. See its own section for a before/after count.
+- *`calculate-normals(child, sharp_angle: 60)`* — attach per-vertex normals for smooth shading, with a crease-angle threshold that keeps sharp edges crisp. 3D only. Renders show the effect only under `shading: "smooth"`.
 
 ```example
 // cols: 2 1
@@ -432,6 +436,129 @@ Got #parts.len() parts:
 
 `compile-scad-parts(src, files: (:), bin: (:), font: none, fn: 32)` is
 the `.scad`-source variant.
+
+#pagebreak(weak: true)
+
+= Vertex reduction: `simplify(child, epsilon)`
+
+Collapses edges shorter than `epsilon` (in the input's units) — a
+Douglas-Peucker style pass that strips micro-detail from booleans or
+slims a mesh before shipping it through PLY / SVG.
+
+Dimension-agnostic: pass a 2D shape (`CrossSection`) or a 3D solid
+(`Manifold`); the op dispatches on the child.
+
+```example
+// cols: 2 1
+#let ring = union(..range(64).map(i => {
+  let a = i * 360deg / 64
+  translate((calc.cos(a) * 10, calc.sin(a) * 10),
+    circle(1.2, fn: 8))
+}))
+#let ring-info   = scadypst-info(ring)
+#let simple-info = scadypst-info(simplify(ring, epsilon: 0.5))
+#raw(block: true, lang: "yml",
+  "before → num_tri: " + str(ring-info.num_tri) + "\n" +
+  "after  → num_tri: " + str(simple-info.num_tri)
+)
+```
+
+`epsilon` is in model units — tiny for a fine mesh, generous when you
+want to knock a curve down to a coarse polyline.
+
+#pagebreak(weak: true)
+
+= Smooth shading: `calculate-normals(child, sharp_angle)`
+
+Attaches per-vertex normals to a 3D solid so maquette can smooth-shade
+curved surfaces while keeping crisp edges. Adjacent faces whose
+dihedral angle exceeds `sharp_angle` (degrees) stay sharp; the rest
+blend. The op must run AFTER final booleans/hulls — those discard any
+existing normals.
+
+The effect only shows under smooth shading. `openscad-view` is flat by
+design, so switch `shading: "smooth"` (and drop `openscad-view`) for
+the render call.
+
+```example
+// cols: 1 1
+#let part = calculate-normals(
+  difference(sphere(10, fn: 24), cube(12, center: true)),
+  sharp_angle: 30,
+)
+#render-ply(scadypst(part),
+  width: 3.5cm, shading: "smooth",
+  azimuth: 30, elevation: 25)
+```
+
+Lower `sharp_angle` = more edges classed as sharp (crisp box corners).
+Higher = more edges smoothed (softer curves).
+
+== Two ways to add smooth normals
+
+`calculate-normals` (above) is a *tree op* — it smooths whatever
+subtree it wraps. Use it when only one region of a bigger model
+should render smooth (say the sphere but not the cube parts).
+
+The end-call helpers `scadypst(..., smooth-normals: 30)` and
+`compile-scad(..., smooth-normals: 30)` are the *whole-scene*
+shortcut: they run the same `calculate_normals` pass on the final
+mesh right before it's serialized. Same output, less typing when
+you want the entire model smoothed:
+
+```typ
+// tree-op form — smooths just the sphere:
+scadypst(union(
+  calculate-normals(sphere(10, fn: 24), sharp_angle: 30),
+  translate((15, 0, 0), cube(6, center: true)),
+))
+
+// end-call form — smooths everything:
+scadypst(my-model, smooth-normals: 30)
+compile-scad(read("part.scad"), smooth-normals: 30)
+```
+
+Either way, the render call needs a smooth shading mode
+(`shading: "smooth"`) to actually consume the normals.
+
+#pagebreak(weak: true)
+
+= Ray casting: `scadypst-raycast` / `compile-scad-raycast`
+
+Fires a segment from `origin` to `end` at the evaluated geometry and
+returns an array of hits sorted by distance:
+
+```
+(
+  ( face_id: <int>, distance: <float>,
+    position: (x, y, z), normal: (x, y, z) ),
+  ..
+)
+```
+
+Use it to sample a terrain height under an XY coordinate, pick the
+face at a screen click, or check line-of-sight between two points.
+Empty array means the segment missed.
+
+```example
+// cols: 2 1
+#let part = union(
+  cube(10, center: true),
+  translate((0, 0, 12), sphere(5, fn: 32)),
+)
+#let hits = scadypst-raycast(part,
+  (0, 0, 30), (0, 0, -30))
+#raw(block: true, lang: "yml",
+  "hits: " + str(hits.len()) + "\n" +
+  hits.map(h =>
+    "  d=" + str(calc.round(h.distance, digits: 2)) +
+    "  z=" + str(calc.round(h.position.at(2), digits: 2))
+  ).join("\n")
+)
+```
+
+`compile-scad-raycast(src, origin, end, files: (:), bin: (:), font: none, fn: 32)`
+is the `.scad`-source variant.
 
 #pagebreak(weak: true)
 
