@@ -364,6 +364,8 @@ pub(crate) fn pointcloud_to_triangles(
             group_id: None,
             alpha: None,
             vertex_normals,
+            smoothing_group: None,
+            vertex_scalars: None,
         });
     }
 
@@ -1392,6 +1394,12 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
                     // If parsing fails, skip scalar mapping
                     eprintln!("Scalar function error: {}", e);
                 }
+            }
+            "ply_scalar" => {
+                let palette: Vec<(u8, u8, u8)> = config.color_map_palette.iter()
+                    .map(|s| parse_hex_color(s))
+                    .collect();
+                color_map::apply_ply_scalar_map(&mut tris, &palette);
             }
             _ => {}
         }

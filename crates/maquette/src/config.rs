@@ -80,6 +80,58 @@ impl<'a> JsonParser<'a> {
         Ok(self.parse_str()?.to_string())
     }
 
+    /// Parse a JSON string with escape decoding — \n, \r, \t, \", \\, \/,
+    /// \b, \f, \uXXXX. Use this for fields whose payload can contain real
+    /// escaped characters (e.g. .mtl blob text where newlines separate
+    /// lines); `parse_string` above returns the raw byte slice as-is and is
+    /// intended for short unescaped values (color hex, font name, ...).
+    fn parse_string_escaped(&mut self) -> Result<String, String> {
+        self.skip_ws();
+        if self.peek() != b'"' { return Err("expected string".into()); }
+        self.pos += 1;
+        // Buffer as bytes and validate UTF-8 at the end — multi-byte UTF-8
+        // sequences (input is already valid) pass through byte-by-byte.
+        let mut out: Vec<u8> = Vec::new();
+        while self.pos < self.b.len() {
+            let c = self.b[self.pos];
+            if c == b'"' {
+                self.pos += 1;
+                return String::from_utf8(out).map_err(|_| "invalid UTF-8 in string".into());
+            }
+            if c == b'\\' {
+                self.pos += 1;
+                if self.pos >= self.b.len() { return Err("unterminated escape".into()); }
+                match self.b[self.pos] {
+                    b'"'  => out.push(b'"'),
+                    b'\\' => out.push(b'\\'),
+                    b'/'  => out.push(b'/'),
+                    b'n'  => out.push(b'\n'),
+                    b'r'  => out.push(b'\r'),
+                    b't'  => out.push(b'\t'),
+                    b'b'  => out.push(0x08),
+                    b'f'  => out.push(0x0c),
+                    b'u'  => {
+                        if self.pos + 4 >= self.b.len() { return Err("bad \\u escape".into()); }
+                        let hex = &self.b[self.pos + 1..self.pos + 5];
+                        let s = std::str::from_utf8(hex).map_err(|_| "bad \\u escape")?;
+                        let code = u32::from_str_radix(s, 16).map_err(|_| "bad \\u escape")?;
+                        if let Some(ch) = char::from_u32(code) {
+                            let mut buf = [0u8; 4];
+                            out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+                        }
+                        self.pos += 4;
+                    }
+                    _ => return Err("unknown escape".into()),
+                }
+                self.pos += 1;
+                continue;
+            }
+            out.push(c);
+            self.pos += 1;
+        }
+        Err("unterminated string".into())
+    }
+
     fn parse_f64(&mut self) -> Result<f64, String> {
         self.skip_ws();
         let start = self.pos;
@@ -634,6 +686,12 @@ pub struct RenderConfig {
     pub auto_center: bool,
     pub auto_fit: bool,
     pub materials: HashMap<String, String>,
+    /// Raw contents of the OBJ's `.mtl` sidecar file(s), concatenated. The
+    /// OBJ pipeline parses this before triangulating, populates its material
+    /// name -> hex table from each `newmtl <n>` block's `Kd` (and `d`/`Tr`
+    /// for alpha), and merges into `materials` above with `materials`
+    /// winning on conflicts. Empty = no sidecar (default).
+    pub mtl: String,
     pub highlight: HashMap<String, GroupStyle>,
     pub shadow: Option<ShadowConfig>,
     pub views: Option<Vec<String>>,
@@ -704,6 +762,7 @@ impl Default for RenderConfig {
             auto_center: true,
             auto_fit: true,
             materials: HashMap::new(),
+            mtl: String::new(),
             highlight: HashMap::new(),
             shadow: None,
             views: None,
@@ -1026,6 +1085,7 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                 "zoom" => cfg.zoom = p.parse_f64()?,
                 "pan" => cfg.pan = p.parse_f64_2()?,
                 "materials" => cfg.materials = p.parse_string_map()?,
+                "mtl" => cfg.mtl = p.parse_string_escaped()?,
                 "highlight" => cfg.highlight = parse_highlight_map(p)?,
                 "ground_shadow" => cfg.shadow = parse_optional_object!(p, ShadowConfig, {
                     "opacity" => opacity = parse_f64,
