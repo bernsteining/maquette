@@ -81,6 +81,22 @@
 // the 3D hull directly.
 #let hull-pts(points) = (op: "hull_pts", points: points)
 
+// Vertex-reducing simplify: collapses edges shorter than `epsilon` (in the
+// input's units). Dimension-agnostic — works on both 2D shapes and 3D
+// solids. Cheap way to strip micro-detail from booleans or to slim a
+// mesh before shipping it through PLY / SVG.
+#let simplify(child, epsilon: 0.01) = (op: "simplify", child: child, epsilon: epsilon)
+
+// Attach per-vertex normals to a 3D solid so maquette can smooth-shade
+// curved surfaces while keeping crisp edges. Adjacent faces whose dihedral
+// angle exceeds `sharp_angle` (degrees) stay sharp; the rest blend. Pipe
+// AFTER final booleans/hulls — CSG ops discard the normals. Effect only
+// shows under smooth shading (`shading: "smooth"`), not `openscad-view`
+// (which is flat by design).
+#let calculate-normals(child, sharp_angle: 60) = (
+  op: "calculate_normals", child: child, sharp_angle: sharp_angle,
+)
+
 // ---- transforms (2D or 3D) ----
 #let translate(v, child) = (op: "translate", v: v, child: child)
 #let rotate(deg, child) = (op: "rotate", deg: deg, child: child)   // Euler degrees (x, y, z)
@@ -138,12 +154,17 @@
 
 // Compile a DSL tree to PLY bytes. `fn` sets the default facet count ($fn).
 // `bin`/`font` supply bytes for `import-mesh`/`scad-text` (same as compile-scad).
+// `smooth-normals: N` runs Manifold's `calculate_normals(0, N)` on the final
+// mesh so it renders smooth-shaded under maquette's smooth shading modes;
+// crease edges sharper than N degrees stay crisp. `none` = faceted.
 // Feed the result to maquette's `render-ply`.
-#let scadypst(node, bin: (:), font: none, fn: 32) = {
+#let scadypst(node, bin: (:), font: none, fn: 32, smooth-normals: none) = {
   let assets = bin
   if font != none { assets = assets + ("__font__": font) }
+  let opts = (fn: fn)
+  if smooth-normals != none { opts = opts + (smooth_normals: smooth-normals) }
   _scad-plugin.build_ply(
-    bytes(json.encode(node)), bytes(json.encode((fn: fn))), _pack-bin(assets),
+    bytes(json.encode(node)), bytes(json.encode(opts)), _pack-bin(assets),
   )
 }
 
@@ -185,11 +206,12 @@
 //   compile-scad(read("main.scad"),
 //     bin: ("part.stl": read("part.stl", encoding: none)),
 //     font: read("Roboto.ttf", encoding: none))
-#let compile-scad(src, files: (:), bin: (:), font: none, fn: 32, trace: none) = {
+#let compile-scad(src, files: (:), bin: (:), font: none, fn: 32, trace: none, smooth-normals: none) = {
   let assets = bin
   if font != none { assets = assets + ("__font__": font) }
   let opts = (fn: fn)
   if trace != none { opts = opts + (trace: trace) }  // debug: stop before the Nth csgrs op
+  if smooth-normals != none { opts = opts + (smooth_normals: smooth-normals) }
   _scad-plugin.build_scad(
     bytes(src),
     bytes(json.encode(files)),
@@ -276,6 +298,34 @@
     bytes(json.encode(files)),
     bytes(json.encode((fn: fn))),
     _pack-bin(assets),
+  ))
+}
+
+// Ray-vs-mesh intersection: fires a segment from `origin` to `end` at the
+// evaluated geometry and returns an array of hit dicts sorted by distance:
+//   ( (face_id: <int>, distance: <float>,
+//      position: (x, y, z), normal: (x, y, z)), .. )
+// Use it to sample terrain height under an XY coordinate, pick the face at
+// a screen click, or check line-of-sight between two points. Empty array
+// means no intersection along the segment.
+#let scadypst-raycast(node, origin, end, bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  json(_scad-plugin.build_ply_raycast(
+    bytes(json.encode(node)), bytes(json.encode((fn: fn))), _pack-bin(assets),
+    bytes(json.encode((origin: origin, end: end))),
+  ))
+}
+// Same, for `.scad` sources.
+#let compile-scad-raycast(src, origin, end, files: (:), bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  json(_scad-plugin.build_scad_raycast(
+    bytes(src),
+    bytes(json.encode(files)),
+    bytes(json.encode((fn: fn))),
+    _pack-bin(assets),
+    bytes(json.encode((origin: origin, end: end))),
   ))
 }
 
