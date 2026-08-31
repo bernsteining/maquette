@@ -14,6 +14,11 @@ pub struct Triangle {
     /// Per-face opacity (0.0–1.0) from a mesh alpha channel (e.g. PLY `alpha`).
     /// None = fully opaque. Multiplies with config/group opacity at render time.
     pub alpha: Option<f32>,
+    /// Per-corner normals — populated by PLY / OBJ readers when the input
+    /// carries `nx/ny/nz` (or `vn`) per vertex. `None` = use face normal.
+    /// Smooth shading consumes these directly so crease-preserving normals
+    /// (e.g. from Manifold's calculate_normals) survive into the shader.
+    pub vertex_normals: Option<[Vec3; 3]>,
 }
 
 /// Parse STL data — auto-detects ASCII vs binary format.
@@ -65,6 +70,7 @@ fn parse_ascii(data: &[u8]) -> Result<Vec<Triangle>, String> {
                 vertex_colors: None,
                 group_id: None,
                 alpha: None,
+                vertex_normals: None,
             });
         }
     }
@@ -129,6 +135,7 @@ fn parse_binary(data: &[u8]) -> Result<Vec<Triangle>, String> {
             vertex_colors: None,
             group_id: None,
             alpha: None,
+            vertex_normals: None,
         });
     }
     Ok(triangles)

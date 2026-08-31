@@ -194,6 +194,11 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
             vertex_colors,
             group_id: tri.group_id,
             alpha: tri.alpha,
+            // Decimation collapses vertices — the source per-corner normals
+            // no longer correspond to output corners, so drop them and let
+            // smooth shading fall back to face-normal averaging on the
+            // simplified mesh.
+            vertex_normals: None,
         });
     }
 

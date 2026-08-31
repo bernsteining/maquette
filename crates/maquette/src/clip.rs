@@ -99,6 +99,7 @@ fn clip_triangle(
             vertex_colors: Some([c0, c1, c2]),
             group_id: tri.group_id,
             alpha: tri.alpha,
+            vertex_normals: None,
         });
         cap_edges.push(CapEdge { v0: v1, v1: v2, c0: c1, c1: c2 });
     } else {
@@ -126,6 +127,7 @@ fn clip_triangle(
             vertex_colors: Some([c1, c2, c_a]),
             group_id: tri.group_id,
             alpha: tri.alpha,
+            vertex_normals: None,
         });
         out.push(Triangle {
             vertices: [tri.vertices[i2], b, a],
@@ -134,6 +136,7 @@ fn clip_triangle(
             vertex_colors: Some([c2, c_b, c_a]),
             group_id: tri.group_id,
             alpha: tri.alpha,
+            vertex_normals: None,
         });
         cap_edges.push(CapEdge { v0: a, v1: b, c0: c_a, c1: c_b });
     }
@@ -155,6 +158,7 @@ fn push_cap_tri(out: &mut Vec<Triangle>, chain: &[(Vec3, Color3)], a: usize, b: 
         vertex_colors: Some([chain[a].1, chain[b].1, chain[c].1]),
         group_id: Some(CAP_GID),
         alpha: None,
+        vertex_normals: None,
     });
 }
 
