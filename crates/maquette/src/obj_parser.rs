@@ -80,18 +80,23 @@ pub fn parse_obj(
                     continue;
                 }
 
-                // Fan triangulation from first vertex
+                // Fan triangulation from first vertex. Preserve per-corner
+                // `vn` indices — a face contributes vertex_normals only when
+                // ALL its corners cite one, so smooth shading sees a
+                // coherent per-vertex normal set (mixed cases fall back to
+                // face-normal averaging).
                 let v0 = vertices[face_buf[0].0];
-                let face_normal = face_buf[0].1.map(|ni| normals[ni]);
                 let face_color = current_highlight.or(current_color);
                 for i in 1..face_buf.len() - 1 {
                     let v1 = vertices[face_buf[i].0];
                     let v2 = vertices[face_buf[i + 1].0];
-
-                    let normal = face_normal.unwrap_or_else(|| {
-                        Vec3::face_normal(v0, v1, v2).unwrap_or(Vec3::new(0.0, 0.0, 0.0))
-                    });
-
+                    // Face normal from geometry — deterministic and correct
+                    // regardless of per-corner normals.
+                    let normal = Vec3::face_normal(v0, v1, v2).unwrap_or(Vec3::new(0.0, 0.0, 0.0));
+                    let vertex_normals = match (face_buf[0].1, face_buf[i].1, face_buf[i + 1].1) {
+                        (Some(n0), Some(n1), Some(n2)) => Some([normals[n0], normals[n1], normals[n2]]),
+                        _ => None,
+                    };
                     triangles.push(Triangle {
                         vertices: [v0, v1, v2],
                         normal,
@@ -99,6 +104,7 @@ pub fn parse_obj(
                         vertex_colors: None,
                         group_id: current_group,
                         alpha: None,
+                        vertex_normals,
                     });
                 }
             }

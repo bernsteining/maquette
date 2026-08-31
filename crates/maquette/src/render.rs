@@ -349,6 +349,13 @@ pub(crate) fn pointcloud_to_triangles(
         } else {
             None
         };
+        // Propagate scan-provided per-vertex normals into the triangles so
+        // smooth shading uses them directly instead of face-normal averaging.
+        let vertex_normals = if has_normals {
+            Some([cloud.normals[ia], cloud.normals[ib], cloud.normals[ic]])
+        } else {
+            None
+        };
         triangles.push(Triangle {
             vertices: [pa, pb, pc],
             normal,
@@ -356,6 +363,7 @@ pub(crate) fn pointcloud_to_triangles(
             vertex_colors,
             group_id: None,
             alpha: None,
+            vertex_normals,
         });
     }
 
