@@ -68,6 +68,18 @@
 )
 // Flatten a 3D solid to its 2D shadow on the Z=0 plane.
 #let projection(child) = (op: "projection", child: child)
+// Horizontal cross-section of a 3D solid at Z = `z`. Returns a 2D shape;
+// pipe into `scadypst-svg(..)` for a vector contour, or into further 2D
+// ops. Distinct from `projection` (which unions every horizontal slice).
+#let slice(child, z: 0) = (op: "slice", child: child, z: z)
+// Cut a 3D solid with an arbitrary plane; keep the half where
+// dot(pos, normal) >= offset. Cheaper + exact vs the "difference() with
+// a giant cube" trick.
+#let trim(child, normal, offset: 0) = (op: "trim", child: child, normal: normal, offset: offset)
+// Convex hull of a raw 3D point set. Complements `hull()` (which takes
+// geometry children); this takes a list of [x, y, z] points and returns
+// the 3D hull directly.
+#let hull-pts(points) = (op: "hull_pts", points: points)
 
 // ---- transforms (2D or 3D) ----
 #let translate(v, child) = (op: "translate", v: v, child: child)
@@ -201,6 +213,70 @@
     bytes(json.encode((fn: fn))),
     _pack-bin(assets),
   )
+}
+
+// Inspection API: returns a dict with the final geometry's stats without
+// building the PLY. Fields: bbox_min / bbox_max / center / radius /
+// volume / surface_area / num_tri / num_vert / genus. Use it to lay
+// parts out by their real size, annotate a document with computed
+// volumes, or fail early if a compile produced empty geometry.
+//
+//   #let info = scadypst-info(mypart)
+//   Volume: #info.volume mm³, #info.num_tri triangles.
+#let scadypst-info(node, bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  json(_scad-plugin.build_ply_info(
+    bytes(json.encode(node)), bytes(json.encode((fn: fn))), _pack-bin(assets),
+  ))
+}
+// Same, for `.scad` sources.
+#let compile-scad-info(src, files: (:), bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  json(_scad-plugin.build_scad_info(
+    bytes(src),
+    bytes(json.encode(files)),
+    bytes(json.encode((fn: fn))),
+    _pack-bin(assets),
+  ))
+}
+
+// Decompose the final geometry into its connected components and return
+// each as its own PLY. Returns `array<bytes>`; each element is renderable
+// via `render-ply` in isolation. Useful for laser-cut sheet layouts or
+// per-part annotations. Framing on the wasm side: [u32 n][per-part:
+// u32 len, bytes].
+#let _unpack-parts(blob) = {
+  let b = array(blob)
+  let rd32 = i => b.at(i) + b.at(i+1) * 256 + b.at(i+2) * 65536 + b.at(i+3) * 16777216
+  let n = rd32(0)
+  let out = ()
+  let pos = 4
+  for _ in range(n) {
+    let l = rd32(pos)
+    pos += 4
+    out.push(bytes(b.slice(pos, pos + l)))
+    pos += l
+  }
+  out
+}
+#let scadypst-parts(node, bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  _unpack-parts(_scad-plugin.build_ply_parts(
+    bytes(json.encode(node)), bytes(json.encode((fn: fn))), _pack-bin(assets),
+  ))
+}
+#let compile-scad-parts(src, files: (:), bin: (:), font: none, fn: 32) = {
+  let assets = bin
+  if font != none { assets = assets + ("__font__": font) }
+  _unpack-parts(_scad-plugin.build_scad_parts(
+    bytes(src),
+    bytes(json.encode(files)),
+    bytes(json.encode((fn: fn))),
+    _pack-bin(assets),
+  ))
 }
 
 // A render-config preset that approximates OpenSCAD's viewport look: the gold

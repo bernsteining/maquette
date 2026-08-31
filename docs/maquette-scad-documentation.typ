@@ -30,12 +30,16 @@
 // Scope shared with the `example` show rule so eval() sees the SCAD DSL +
 // render helper without re-importing per example.
 #let doc-scope = (
-  render-ply: render-ply, show-part: show-part,
+  render-ply: render-ply, show-part: show-part, image: image,
   scadypst: scadypst, compile-scad: compile-scad,
+  scadypst-svg: scadypst-svg, compile-scad-svg: compile-scad-svg,
+  scadypst-info: scadypst-info, compile-scad-info: compile-scad-info,
+  scadypst-parts: scadypst-parts, compile-scad-parts: compile-scad-parts,
   cube: cube, sphere: sphere, cylinder: cylinder, polyhedron: polyhedron,
   square: square, circle: circle, ellipse: ellipse, polygon: polygon,
   ngon: ngon, star: star, rounded-square: rounded-square,
   linear-extrude: linear-extrude, rotate-extrude: rotate-extrude, projection: projection,
+  slice: slice, trim: trim, "hull-pts": hull-pts,
   translate: translate, rotate: rotate, scale: scale, mirror: mirror,
   resize: resize, offset: offset, color: color,
   union: union, difference: difference, intersection: intersection,
@@ -252,9 +256,22 @@ Every helper takes Typst-native named arguments (`cube(20, center: true)`). Sign
 
 - *`union(..items)`*, *`difference(..items)`* (first minus the rest), *`intersection(..items)`*.
 - *`hull(..items)`* — convex hull of the union (3D).
+- *`hull-pts(points)`* — convex hull from a raw 3D point set (a list of `(x, y, z)` triples). Complements `hull()` when you have coordinates, not geometry, to wrap.
 - *`minkowski(..items)`* — Minkowski sum (3D).
 
 All variadic — use `..` spread with a Typst `for` block to feed a computed list of children.
+
+=== Plane operations
+
+- *`slice(child, z: 0)`* — horizontal cross-section of a 3D solid at the given Z. Returns a 2D shape; pipe into `scadypst-svg(..)` for a vector contour, or into further 2D ops. Distinct from `projection(..)`, which unions every horizontal slice.
+- *`trim(child, normal, offset: 0)`* — cut with a plane. Keeps the half where `dot(pos, normal) ≥ offset`. Cheaper and exact vs the "difference() with a giant cube" trick.
+
+```example
+// cols: 2 1
+#show-part(scadypst(
+  trim(sphere(10, fn: 64), (0, 0, 1))
+))
+```
 
 #pagebreak(weak: true)
 
@@ -359,6 +376,95 @@ Options:
 - *`font`* (bytes) — a TTF or OTF file used by `text()`. One font per compile.
 - *`fn`* (int) — default `$fn` for this compile. Any per-primitive `fn:` overrides it.
 - *`trace`* (string) — dump the evaluator trace to this path. Handy when a nested `for` or `module` isn't producing what you expected.
+
+#pagebreak(weak: true)
+
+= Inspection: `scadypst-info` / `compile-scad-info`
+
+Returns a Typst dict with the final geometry's stats without building
+the PLY. Useful for laying parts out by their real size, annotating a
+document with computed volumes, or failing early if a compile produced
+empty geometry.
+
+Fields: `bbox_min`, `bbox_max`, `center`, `radius`, `volume`,
+`surface_area`, `num_tri`, `num_vert`, `genus`.
+
+```example
+// cols: 2 1
+#let info = scadypst-info(cube(20, center: true))
+#raw(block: true, lang: "yml",
+  "volume:       " + str(info.volume) + " mm³\n" +
+  "surface_area: " + str(info.surface_area) + " mm²\n" +
+  "num_tri:      " + str(info.num_tri) + "\n" +
+  "bbox_min:     " + repr(info.bbox_min) + "\n" +
+  "bbox_max:     " + repr(info.bbox_max)
+)
+```
+
+`compile-scad-info(src, files: (:), bin: (:), font: none, fn: 32)` is
+the `.scad`-source variant with the same return shape.
+
+#pagebreak(weak: true)
+
+= Decomposing: `scadypst-parts` / `compile-scad-parts`
+
+Splits the final geometry into its connected components via
+`Manifold::decompose()` and returns each as its own PLY. The return
+type is `array<bytes>`; each element is renderable via `render-ply` in
+isolation.
+
+Useful for laying out multiple pieces separately (laser-cut sheet
+layouts, exploded-view annotations, per-part BOM tables).
+
+```example
+// cols: 2 1
+#let parts = scadypst-parts(union(
+  translate((0, 0, 0),  cube(4, center: true)),
+  translate((10, 0, 0), cube(4, center: true)),
+  translate((20, 0, 0), cube(4, center: true)),
+))
+Got #parts.len() parts:
+#for p in parts {
+  show-part(p, width: 25%)
+  h(0.3em)
+}
+```
+
+`compile-scad-parts(src, files: (:), bin: (:), font: none, fn: 32)` is
+the `.scad`-source variant.
+
+#pagebreak(weak: true)
+
+= Direct 2D → SVG: `scadypst-svg` / `compile-scad-svg`
+
+For sources that resolve to a 2D shape (`circle`, `square`, `polygon`,
+`text`, hulls of 2D things, `offset`, `slice`, `projection`), the plugin
+can emit an SVG document directly — no maquette in the loop, no
+rasterizer. The result is resolution-independent, Inkscape-editable,
+and laser-cutter-ready.
+
+Errors if the tree resolves to a 3D solid.
+
+```example
+// cols: 2 1
+#image(scadypst-svg(difference(
+  union(
+    circle(10, fn: 64),
+    translate((14, 0), square(20, center: true)),
+  ),
+  circle(4, fn: 48),
+)), width: 65%)
+```
+
+`slice(child, z: 0)` composes cleanly with `-svg`: 3D model → horizontal
+cross-section → vector contour, in one call.
+
+```example
+// cols: 2 1
+#image(scadypst-svg(slice(sphere(10, fn: 64), z: 4)), width: 60%)
+```
+
+`compile-scad-svg(src, ...)` is the `.scad`-source variant.
 
 #pagebreak(weak: true)
 

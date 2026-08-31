@@ -569,6 +569,56 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             let cs = CrossSection::from_polygons_with_fill_rule(&polys, FillRule::NonZero);
             Ok(Geo::D2(cs, color))
         }
+        "slice" => {
+            // 3D → 2D horizontal cross-section at the given Z. Distinct from
+            // `projection`, which unions every horizontal slice; `slice`
+            // takes just one plane. Pairs with build_svg for laser-cutter
+            // stacks (slice → SVG → sheet).
+            let z = num(node, "z").unwrap_or(0.0);
+            if !z.is_finite() { return Err("slice: z must be a finite number".into()); }
+            let mesh = build(child_of(node)?, color.clone(), d)?.into_manifold("slice")?;
+            Ok(Geo::D2(mesh.slice_to_cross_section(z), color))
+        }
+        "trim" => {
+            // Cut a 3D solid with an arbitrary plane, keep the half where
+            // dot(pos, normal) >= offset. First-class alternative to the
+            // OpenSCAD "difference() with a giant cube" trick — Manifold
+            // implements it as a plane intersection, so it's exact and
+            // cheap regardless of the input's size.
+            let normal = v3(node, "normal").ok_or("trim: normal")?;
+            let offset = num(node, "offset").unwrap_or(0.0);
+            finite_all(&normal, "trim")?;
+            if !offset.is_finite() { return Err("trim: offset must be a finite number".into()); }
+            if normal.iter().all(|&x| x == 0.0) {
+                return Err("trim: normal cannot be all zeros".into());
+            }
+            let mesh = build(child_of(node)?, color.clone(), d)?.into_manifold("trim")?;
+            Ok(Geo::D3(mesh.trim_by_plane([normal[0], normal[1], normal[2]], offset)))
+        }
+        "hull_pts" => {
+            // Convex hull of a raw 3D point set. Complements `hull()` (which
+            // takes geometry children) — takes a list of [x, y, z] points
+            // and returns the 3D hull directly.
+            let pts_j = node.get("points").and_then(Json::as_arr)
+                .ok_or("hull_pts: missing points[]")?;
+            let mut pts: Vec<[f64; 3]> = Vec::with_capacity(pts_j.len());
+            for p in pts_j {
+                let a = p.as_arr()
+                    .ok_or("hull_pts: each point must be a 3-array")?;
+                if a.len() != 3 { return Err("hull_pts: each point must be a 3-array".into()); }
+                let x = a[0].as_f64().ok_or("hull_pts: point x not a number")?;
+                let y = a[1].as_f64().ok_or("hull_pts: point y not a number")?;
+                let z = a[2].as_f64().ok_or("hull_pts: point z not a number")?;
+                if ![x, y, z].iter().all(|v| v.is_finite()) {
+                    return Err("hull_pts: point has a non-finite component".into());
+                }
+                pts.push([x, y, z]);
+            }
+            if pts.len() < 4 {
+                return Err(format!("hull_pts: needs >= 4 points (got {})", pts.len()));
+            }
+            Ok(Geo::D3(register(Manifold::hull_pts(&pts), &color)))
+        }
 
         // ---- transforms (dimension-agnostic) ----
         "translate" => {
@@ -1169,6 +1219,119 @@ fn build_scad_svg(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<V
     }
     let tree = scad::scad_to_dsl(text, file_map)?;
     finish_svg(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+}
+
+/// Shared body: evaluate the tree, extract Manifold stats, format as a small
+/// JSON dict the Typst side can parse. Same shape as maquette-gltf's
+/// `get_gltf_info` — bbox_min / bbox_max / center / radius + Manifold-only
+/// numbers (volume, surface_area, num_tri, num_vert, genus).
+fn finish_info(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
+    PALETTE.with(|p| p.borrow_mut().clear());
+    NODE_HASH.with(|m| {
+        let mut m = m.borrow_mut();
+        m.clear();
+        prehash(tree, &mut m);
+    });
+    MEMO.with(|m| m.borrow_mut().clear());
+    let mesh = build(tree, DEFAULT_RGB, defaults)?.to_manifold_extruding();
+    let (mn, mx) = match mesh.bounding_box() {
+        Some(bb) => (bb.min(), bb.max()),
+        None => ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+    };
+    let cx = (mn[0] + mx[0]) * 0.5;
+    let cy = (mn[1] + mx[1]) * 0.5;
+    let cz = (mn[2] + mx[2]) * 0.5;
+    let dx = mx[0] - mn[0];
+    let dy = mx[1] - mn[1];
+    let dz = mx[2] - mn[2];
+    let radius = 0.5 * (dx * dx + dy * dy + dz * dz).sqrt();
+    let json = format!(
+        "{{\"bbox_min\":[{},{},{}],\"bbox_max\":[{},{},{}],\"center\":[{},{},{}],\"radius\":{},\"volume\":{},\"surface_area\":{},\"num_tri\":{},\"num_vert\":{},\"genus\":{}}}",
+        mn[0], mn[1], mn[2],
+        mx[0], mx[1], mx[2],
+        cx, cy, cz, radius,
+        mesh.volume(), mesh.surface_area(),
+        mesh.num_tri(), mesh.num_vert(), mesh.genus()
+    );
+    Ok(json.into_bytes())
+}
+
+/// Inspection API: same input shape as `build_ply`, but returns a JSON dict
+/// with the final geometry's bbox / volume / area / triangle count. Cheap
+/// alternative to building the PLY when you only need dimensions.
+#[wasm_func]
+fn build_ply_info(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let tree = json::parse(dsl)?;
+    finish_info(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+}
+
+/// Inspection API for `.scad` sources.
+#[wasm_func]
+fn build_scad_info(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let text = std::str::from_utf8(src).map_err(|_| "scad: source is not valid UTF-8")?;
+    let mut file_map = HashMap::new();
+    if let Ok(Json::Obj(entries)) = json::parse(files) {
+        for (k, v) in entries {
+            if let Some(s) = v.as_str() {
+                file_map.insert(k, s.to_string());
+            }
+        }
+    }
+    let tree = scad::scad_to_dsl(text, file_map)?;
+    finish_info(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+}
+
+/// Shared body for `-parts`: evaluate the tree, call `Manifold::decompose()`
+/// on the final result, emit each connected component as its own PLY, and
+/// pack them into a length-prefixed blob the Typst side splits into an
+/// array of `bytes`. Framing: [u32 n][per-part: u32 len, bytes].
+fn finish_parts(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
+    PALETTE.with(|p| p.borrow_mut().clear());
+    NODE_HASH.with(|m| {
+        let mut m = m.borrow_mut();
+        m.clear();
+        prehash(tree, &mut m);
+    });
+    MEMO.with(|m| m.borrow_mut().clear());
+    let mesh = build(tree, DEFAULT_RGB, defaults)?.to_manifold_extruding();
+    if mesh.is_empty() {
+        return Err("scad: empty result (no geometry)".into());
+    }
+    let parts = mesh.decompose();
+    let mut out = Vec::new();
+    let n = parts.len() as u32;
+    out.extend_from_slice(&n.to_le_bytes());
+    for p in &parts {
+        let ply = to_ply(p);
+        out.extend_from_slice(&(ply.len() as u32).to_le_bytes());
+        out.extend_from_slice(&ply);
+    }
+    Ok(out)
+}
+
+/// Split the final geometry into connected components and return each as
+/// its own PLY. Useful for laying out multiple pieces (e.g. laser-cut
+/// sheet layouts) or annotating a document with per-part metadata.
+#[wasm_func]
+fn build_ply_parts(dsl: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let tree = json::parse(dsl)?;
+    finish_parts(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
+}
+
+/// `.scad` source variant of `build_ply_parts`.
+#[wasm_func]
+fn build_scad_parts(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<Vec<u8>, String> {
+    let text = std::str::from_utf8(src).map_err(|_| "scad: source is not valid UTF-8")?;
+    let mut file_map = HashMap::new();
+    if let Ok(Json::Obj(entries)) = json::parse(files) {
+        for (k, v) in entries {
+            if let Some(s) = v.as_str() {
+                file_map.insert(k, s.to_string());
+            }
+        }
+    }
+    let tree = scad::scad_to_dsl(text, file_map)?;
+    finish_parts(&tree, &Defaults { seg: opt_seg(opts), bin: parse_bin(bin) })
 }
 
 /// Compile `.scad` source (with resolved library `files` + binary `bin` assets)
