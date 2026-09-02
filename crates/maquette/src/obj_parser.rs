@@ -90,10 +90,13 @@ pub fn parse_obj(
     let mut current_highlight: Option<(u8, u8, u8)> = None;
     let mut current_group: Option<u32> = None;
     let mut group_counter: u32 = 0;
-    // Active OBJ smoothing group. `None` = `s off` / `s 0` — faces in this
-    // state are treated as their own island so nothing merges them (see
-    // smooth::compute_vertex_normals fallback quantisation by group id).
-    let mut current_smooth: Option<u32> = None;
+    // Active OBJ smoothing group. `None` = explicit `s off` / `s 0` — faces
+    // in this state are treated as their own island so nothing merges them
+    // (see smooth::compute_vertex_normals fallback quantisation by group id).
+    // Default is `Some(0)` — files without ANY `s` statement (most exporters
+    // if smoothing wasn't opted out of) should keep the classic "average
+    // face normals at shared positions" behaviour, not become per-face flat.
+    let mut current_smooth: Option<u32> = Some(0);
 
     // Reusable buffer for face indices (avoids per-face allocation)
     let mut face_buf: Vec<(usize, Option<usize>)> = Vec::new();
