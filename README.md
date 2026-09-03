@@ -1,6 +1,8 @@
 # Maquette
 
 [![Live demo](https://img.shields.io/badge/demo-live-4f46e5)](https://bernsteining.github.io/maquette/)
+[![Typst Universe](https://img.shields.io/badge/Typst_Universe-maquette-239dad)](https://typst.app/universe/package/maquette)
+[![Build](https://img.shields.io/github/actions/workflow/status/bernsteining/maquette/build.yml?branch=master&label=build)](https://github.com/bernsteining/maquette/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 **Maquette is a family of Typst plugins for embedding 3D renders directly in your documents.** Change a parameter, recompile the `.typ`, and the render lands in your PDF — no external tools, no manual re-exports, no separate asset pipeline.
