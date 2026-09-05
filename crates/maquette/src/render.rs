@@ -102,6 +102,7 @@ pub(crate) fn pointcloud_to_triangles(
 
     let has_normals = cloud.normals.len() == n;
     let has_colors = cloud.colors.len() == n;
+    let has_scalars = cloud.scalars.len() == n;
 
     let max_neighbors: usize = config.point_neighbors.max(3);
     // Cut fan connections across a normal jump larger than `point_boundary`°
@@ -356,6 +357,14 @@ pub(crate) fn pointcloud_to_triangles(
         } else {
             None
         };
+        // Same for the scan's per-vertex scalar (curvature/quality/…) so
+        // `color_map: "ply_scalar"` renders reconstructed clouds as heatmaps
+        // without a separate mesh export step.
+        let vertex_scalars = if has_scalars {
+            Some([cloud.scalars[ia], cloud.scalars[ib], cloud.scalars[ic]])
+        } else {
+            None
+        };
         triangles.push(Triangle {
             vertices: [pa, pb, pc],
             normal,
@@ -365,7 +374,7 @@ pub(crate) fn pointcloud_to_triangles(
             alpha: None,
             vertex_normals,
             smoothing_group: None,
-            vertex_scalars: None,
+            vertex_scalars,
         });
     }
 

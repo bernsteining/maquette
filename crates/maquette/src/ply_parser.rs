@@ -6,6 +6,12 @@ pub struct PointCloud {
     pub positions: Vec<Vec3>,
     pub normals: Vec<Vec3>,
     pub colors: Vec<(u8, u8, u8)>,
+    /// First non-standard numeric vertex property (`quality`, `confidence`,
+    /// `curvature`, `intensity`, ...). Same source the mesh path uses for
+    /// `Triangle.vertex_scalars` — surface reconstruction propagates these
+    /// to the seeded triangle corners so `color_map: "ply_scalar"` renders
+    /// scanned clouds as heatmaps without any extra config.
+    pub scalars: Vec<f64>,
 }
 
 #[derive(Clone)]
@@ -605,7 +611,7 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
         }
     }
     if triangles.is_empty() && !positions.is_empty() {
-        Ok(PlyData::Points(PointCloud { positions, normals, colors }))
+        Ok(PlyData::Points(PointCloud { positions, normals, colors, scalars }))
     } else {
         Ok(PlyData::Mesh(triangles))
     }
@@ -773,7 +779,7 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
         }
     }
     if triangles.is_empty() && !positions.is_empty() {
-        Ok(PlyData::Points(PointCloud { positions, normals, colors }))
+        Ok(PlyData::Points(PointCloud { positions, normals, colors, scalars }))
     } else {
         Ok(PlyData::Mesh(triangles))
     }

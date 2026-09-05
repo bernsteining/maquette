@@ -4,6 +4,7 @@
     ["__scad__", "OpenSCAD"],
     ["tokyo.glb", "Littlest Tokyo (glTF animated)"],
     ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
+    ["heightmap.ply", "Heightmap (PLY scalar heatmap)"],
     ["teapot.obj", "Teapot (OBJ)"],
     ["crankshaft.obj", "Crankshaft (OBJ)"],
     ["brain_skull.obj", "Brain + skull (OBJ)"]
@@ -42,6 +43,10 @@
     "rubi_scan.ply": {
       "point_size": 0.024, "point_boundary": 110,
       "_cam": "spherical", "azimuth": -119, "elevation": 24.5, "up": [0, 1, 0], "zoom": 2.254
+    },
+    "heightmap.ply": {
+      "_cam": "spherical", "azimuth": 45, "elevation": 40, "up": [0, 0, 1], "zoom": 1.2,
+      "color_map": "ply_scalar", "specular": 0.15
     },
     "tokyo.glb": {
       "camera": [290, 464, 774], "center": [-86, 5, -25], "up": [0, 1, 0], "fov": 40,
