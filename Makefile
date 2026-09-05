@@ -55,7 +55,7 @@ doc: doc-maquette
 # `make demo` (local) and the Pages CI, so neither hard-codes the list.
 # Picker models first, then extras only referenced by documentation deep-links.
 DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj rubi_scan.ply \
-              cube.stl colored_cube.stl cube.obj rubi_blender.ply
+              heightmap.ply cube.stl colored_cube.stl cube.obj rubi_blender.ply
 # glTF demo models — Littlest Tokyo (animated, Draco-compressed) is our sole
 # glTF showcase in the picker. Damaged Helmet (helmet.blg) still lives in
 # examples/data/gltf/ for the PDF documentation build + local dev; add it
