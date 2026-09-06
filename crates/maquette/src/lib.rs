@@ -99,6 +99,17 @@ impl CachedObj {
 }
 
 fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<Vec<parser::Triangle>, String> {
+    // When the user names an explicit scalar property (color_map_property),
+    // we can't share the cached parse — a different name picks a different
+    // vertex-property slot in the header. Fall through to an uncached
+    // reparse; cheap since PLYs typically fit in cache memory-wise.
+    let want = config.color_map_property.as_str();
+    if !want.is_empty() {
+        return match ply_parser::parse_ply_with(data, Some(want))? {
+            ply_parser::PlyData::Mesh(t) => Ok(t),
+            ply_parser::PlyData::Points(cloud) => Ok(render::pointcloud_to_triangles(&cloud, config)),
+        };
+    }
     if let Some(ply) = cache::get_ply(data) {
         return match ply {
             ply_parser::PlyData::Mesh(t) => Ok(t.clone()),

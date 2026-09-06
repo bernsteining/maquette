@@ -718,6 +718,11 @@ pub struct RenderConfig {
     pub glow: Option<GlowConfig>,
     pub sharpen: Option<SharpenConfig>,
     pub scalar_function: String,
+    /// For `color_map: "ply_scalar"` — the named vertex property to sample
+    /// (`"quality"`, `"confidence"`, `"curvature"`, …). Empty = auto-pick
+    /// the first non-standard numeric vertex property in the PLY header.
+    /// Only meaningful with `color_map: "ply_scalar"`.
+    pub color_map_property: String,
     pub vertex_smoothing: usize,
     pub opacity: f64,
     pub xray_opacity: f64,
@@ -789,6 +794,7 @@ impl Default for RenderConfig {
             glow: None,
             sharpen: None,
             scalar_function: String::new(),
+            color_map_property: String::new(),
             vertex_smoothing: 4,
             opacity: 1.0,
             xray_opacity: 0.1,
@@ -1136,6 +1142,7 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                     "strength" => strength = parse_f64,
                 }),
                 "scalar_function" => cfg.scalar_function = p.parse_string()?,
+                "color_map_property" => cfg.color_map_property = p.parse_string()?,
                 "vertex_smoothing" => cfg.vertex_smoothing = p.parse_usize()?,
                 "opacity" => cfg.opacity = p.parse_f64()?,
                 "xray_opacity" => cfg.xray_opacity = p.parse_f64()?,
