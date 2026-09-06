@@ -19,6 +19,7 @@
 
 mod json;
 mod scad;
+mod text;
 
 use json::Json;
 use manifold_csg::{CrossSection, FillRule, JoinType, Manifold};
@@ -535,10 +536,37 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             }
         }
         "text" => {
-            // Manifold has no font engine (csgrs' truetype-text feature is gone).
-            // Emit empty rather than abort; text() is cosmetic. Documented in FIDELITY.md.
-            let _ = node.get("text");
-            Ok(Geo::D2(CrossSection::empty(), color))
+            // OpenSCAD `text(str, size=10, font=..., halign=..., valign=...,
+            // spacing=1, direction="ltr")`. Font source: user bytes fed via
+            // `scadypst(font: ...)` (stored under bin["__font__"]), else the
+            // DejaVu Sans subset shipped in assets/.
+            let s = node.get("text").and_then(Json::as_str).unwrap_or("");
+            if s.is_empty() {
+                return Ok(Geo::D2(CrossSection::empty(), color));
+            }
+            let size = num(node, "size").unwrap_or(10.0);
+            let spacing = num(node, "spacing").unwrap_or(1.0);
+            let halign = match node.get("halign").and_then(Json::as_str) {
+                Some("center") => text::HAlign::Center,
+                Some("right") => text::HAlign::Right,
+                _ => text::HAlign::Left,
+            };
+            let valign = match node.get("valign").and_then(Json::as_str) {
+                Some("top") => text::VAlign::Top,
+                Some("center") => text::VAlign::Center,
+                Some("bottom") => text::VAlign::Bottom,
+                _ => text::VAlign::Baseline,
+            };
+            // `$fn` controls curve smoothness — quarter of the segment count
+            // per Bezier gives visually clean glyphs without over-tessellation.
+            let curve_steps = (seg_of(node, d).max(4) / 4).max(3) as u32;
+            let font_bytes: &[u8] = d.bin.get("__font__").map(Vec::as_slice).unwrap_or(text::DEFAULT_FONT);
+            let params = text::TextParams { text: s, size, spacing, halign, valign, curve_steps };
+            let polys = text::to_polygons(font_bytes, &params);
+            if polys.is_empty() {
+                return Ok(Geo::D2(CrossSection::empty(), color));
+            }
+            Ok(Geo::D2(CrossSection::from_polygons_with_fill_rule(&polys, FillRule::EvenOdd), color))
         }
 
         // ---- 2D -> 3D bridges ----

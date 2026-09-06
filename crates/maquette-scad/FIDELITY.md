@@ -43,7 +43,7 @@ this crate emits is now watertight (verified 0 open edges on the full Cyclone).
 |---|---|---|
 | `circle`, `square`, `polygon` | ✅ | |
 | `polygon` paths / holes | ✅ | first ring outer, rest subtracted |
-| `text` | ❌ | Manifold has no font engine (csgrs' truetype-text is gone); emits empty. Regression from the csgrs backend — would need our own TTF rasterizer to restore |
+| `text` | ✅ | TTF/OTF outlines via `ttf-parser`, tessellated to polygons. Default font: DejaVu Sans (Latin/Latin-Extended-A subset, ~30 KB) shipped in the wasm; override with `scadypst(font: read("MyFont.ttf", encoding: none))`. `halign`, `valign`, `size`, `spacing` respected. Per-call `font=` name in the .scad source is ignored — only the bytes passed via the wrapper are used. |
 | `import` (svg/dxf) | ❌ | not implemented; imports skip gracefully (empty) |
 
 ## 3D primitives
@@ -114,7 +114,6 @@ this crate emits is now watertight (verified 0 open edges on the full Cyclone).
 
 ## Remaining for 100%
 - **`surface`** (heightmap → mesh) — not implemented.
-- **`text`** — empty (no font engine); needs a TTF/OTF rasterizer.
 - **`import` dxf/svg** — not implemented (imports skip gracefully). stl/obj ✅.
 - **`fill`** (2D) — not implemented; experimental **`object()`** — not implemented.
 - **`polyhedron` strictness** — Manifold requires a valid 2-manifold; OpenSCAD renders

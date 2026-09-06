@@ -3,17 +3,9 @@ name = "maquette-core"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Format-agnostic render primitives shared by the maquette plugin family (math, colour, SIMD rasterizer, SSAA/SSAO/FXAA, shadow maps, IBL env, HDR + texture decode)."
+description = "Format-agnostic render primitives shared by the maquette plugin family (math, colour, SIMD rasterizer, SSAA/SSAO/FXAA, shadow maps, IBL env, HDR loader)."
 
 [lib]
-# Regular rlib — consumed by both plugin cdylibs.
+# Regular rlib — consumed by the plugin cdylibs.
 
 [dependencies]
-# Texture decoders needed by ibl.rs (HDR/RGBE done in-house) and texture_decode.rs
-# (JPEG/PNG for glTF textures). Pure Rust, wasm-friendly.
-zune-jpeg = { version = "0.5", default-features = false, features = ["std"] }
-zune-png  = { version = "0.5", default-features = false, features = ["std"] }
-# WebP decoder — `EXT_texture_webp` is emitted by gltfpack + Blender + gltf-
-# transform, and is second only to KTX2/Basis in real-world usage. Pure Rust,
-# minimal deps (byteorder-lite + quick-error).
-image-webp = "0.2"

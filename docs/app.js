@@ -150,7 +150,9 @@ const SCHEMA = [
     { k: "point_boundary", label: "Boundary cut angle ° (0 = off)", t: "num", def: 60, omitIf: v => v === 60 },
   ]},
   { s: "Molecule (molfig)", open: true, when: () => model._mol, fields: [
-    { k: "mol_representation", label: "Representation", t: "sel", def: "ball-and-stick",
+    // Default "cartoon": molfig renders polymers as ribbons and falls back to
+    // ball-and-stick for ligands/small molecules, tagged so `carbon-color` applies.
+    { k: "mol_representation", label: "Representation", t: "sel", def: "cartoon",
       opts: [
         ["default", "default"],
         ["ball-and-stick", "ball-and-stick"],
@@ -161,6 +163,7 @@ const SCHEMA = [
         ["molecular-surface", "molecular-surface"],
         ["gaussian-surface", "gaussian-surface"],
       ], recompile: "mol" },
+    // See MOL_ALWAYS_SEND — this value is always forwarded even when it equals our default.
     { k: "mol_color_theme", label: "Color theme", t: "sel", def: "element-symbol",
       opts: [
         ["element-symbol", "element-symbol"],
@@ -168,6 +171,13 @@ const SCHEMA = [
         ["entity-id", "entity-id"],
         ["plddt-confidence", "pLDDT confidence"],
         ["partial-charges", "partial charges"],
+      ], recompile: "mol" },
+    // Only honored under cartoon representation in molfig 0.1.4 — the ball-and-stick / spacefill code path always falls back to chain-id.
+    { k: "mol_carbon_color", label: "Carbon color", t: "sel", def: "element-symbol",
+      opts: [
+        ["chain-id", "chain-id (per-chain)"],
+        ["element-symbol", "element-symbol (grey)"],
+        ["operator-name", "operator-name"],
       ], recompile: "mol" },
     { k: "mol_quality", label: "Mesh quality", t: "sel", def: "medium",
       opts: [["low","low"],["medium","medium"],["high","high"]], recompile: "mol" },
@@ -1778,7 +1788,11 @@ $("scad-src").addEventListener("input", () => {
 
 // ───────────────────── molfig — molecule → mesh (third-party plugin) ─────
 // Every mol_* field becomes a molfig option: `mol_color_theme` → `color-theme`.
-// Values matching the schema default are omitted (molfig fills them in).
+// Values matching the schema default are omitted (molfig fills them in) — except
+// for the fields in ALWAYS_SEND, where our default disagrees with molfig's and
+// stripping would silently revert (e.g. our carbon-color default is element-
+// symbol for grey CPK carbons; molfig's is chain-id).
+const MOL_ALWAYS_SEND = new Set(["mol_representation", "mol_color_theme", "mol_carbon_color"]);
 function buildMolOpts(s, format) {
   const o = { format: format || "auto", "mesh-format": "obj" };
   const TF = topFields();
@@ -1787,7 +1801,7 @@ function buildMolOpts(s, format) {
     const v = s[k];
     if (v === "" || v == null) continue;
     const f = TF[k];
-    if (f && eq(v, f.def)) continue;
+    if (!MOL_ALWAYS_SEND.has(k) && f && eq(v, f.def)) continue;
     o[k.slice(4).replace(/_/g, "-")] = v;
   }
   return o;
@@ -2176,7 +2190,7 @@ async function inflate(bytes) {
 function shareConfig() {                       // model + config diff vs the preset's baseline
   // Baseline = schema init + the preset's MODEL_DEFAULTS overlay (same shape
   // as applyModelDefaults applies at load). Diffing against this — instead of
-  // raw schema defaults — keeps `?a=caffeine` short: everything the preset
+  // raw schema defaults — keeps `?a=lsd` short: everything the preset
   // sets doesn't need to appear in the URL.
   const base = initState();
   const ov = MODEL_DEFAULTS[model.name];
