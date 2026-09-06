@@ -174,6 +174,27 @@ const SCHEMA = [
     { k: "mol_style", label: "Style", t: "sel", def: "default",
       opts: [["default","default"],["illustrative","illustrative"]], recompile: "mol" },
     { k: "mol_infer_bonds", label: "Infer bonds (small molecules)", t: "bool", def: true, recompile: "mol" },
+    { k: "mol_radius_scale", label: "Radius scale", t: "rng", def: 1.0, min: 0.1, max: 3, step: 0.05, recompile: "mol" },
+    { k: "mol_atom_radius", label: "Atom radius (Å)", t: "num", def: 0.28, recompile: "mol" },
+    { k: "mol_bond_radius", label: "Bond radius (Å)", t: "num", def: 0.12, recompile: "mol" },
+    { k: "mol_assembly", label: "Assembly id (biological unit)", t: "txt", def: "1", allowBlank: true, recompile: "mol" },
+    { k: "mol_center", label: "Center on load", t: "bool", def: true, recompile: "mol" },
+  ]},
+  { s: "Molecule advanced (molfig)", open: false, when: () => model._mol, fields: [
+    { k: "mol_alt_loc", label: "Alt-loc filter", t: "txt", def: "", allowBlank: true, recompile: "mol" },
+    { k: "mol_block_header", label: "CIF block header filter", t: "txt", def: "", allowBlank: true, recompile: "mol" },
+    { k: "mol_block_index", label: "CIF block index (-1 = default)", t: "num", def: -1, omitIf: v => v === -1, recompile: "mol" },
+    { k: "mol_decimate", label: "Decimate (0 = off)", t: "rng", def: 0, min: 0, max: 1, step: 0.05, recompile: "mol" },
+    { k: "mol_sphere_detail", label: "Sphere detail (icosphere subdiv)", t: "num", def: 2, recompile: "mol" },
+    { k: "mol_ribbon_radius", label: "Ribbon radius", t: "num", def: 0.2, recompile: "mol" },
+    { k: "mol_ribbon_width", label: "Ribbon width", t: "num", def: 0.55, recompile: "mol" },
+    { k: "mol_helix_profile", label: "Helix profile", t: "sel", def: "elliptical",
+      opts: [["elliptical","elliptical"],["rounded","rounded"],["square","square"]], recompile: "mol" },
+    { k: "mol_round_cap", label: "Round cap", t: "bool", def: false, recompile: "mol" },
+    { k: "mol_sheet_arrow_factor", label: "Sheet arrow factor", t: "num", def: 1.5, recompile: "mol" },
+    { k: "mol_tubular_helices", label: "Tubular helices", t: "bool", def: false, recompile: "mol" },
+    { k: "mol_linear_segments", label: "Linear segments", t: "num", def: 8, recompile: "mol" },
+    { k: "mol_radial_segments", label: "Radial segments", t: "num", def: 16, recompile: "mol" },
   ]},
   { s: "Camera & viewport", fields: [
     // `init` = starting value (a good view of the default bunny); `def` = maquette's
@@ -771,13 +792,12 @@ function buildTypst() {
     return `#import "@preview/maquette-gltf:0.1.0": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
   }
   if (model._mol) {
-    const molArgs = [];
-    if (model._molFmt && model._molFmt !== "auto") molArgs.push(`  format: "${model._molFmt}"`);
-    if (state.mol_representation) molArgs.push(`  representation: "${state.mol_representation}"`);
-    if (state.mol_color_theme)    molArgs.push(`  color-theme: "${state.mol_color_theme}"`);
-    if (state.mol_quality)        molArgs.push(`  quality: "${state.mol_quality}"`);
-    if (state.mol_style && state.mol_style !== "default") molArgs.push(`  style: "${state.mol_style}"`);
-    if (state.mol_infer_bonds === false) molArgs.push(`  infer-bonds: false`);
+    // Same option surface as buildMolOpts — drop mesh-format (molfig.render
+    // owns it) and format the rest as Typst named args.
+    const opts = buildMolOpts(state, model._molFmt);
+    delete opts["mesh-format"];
+    if (opts.format === "auto") delete opts.format;
+    const molArgs = Object.entries(opts).map(([k, v]) => `  ${k}: ${fmtT(v)}`);
     const cfgLines = P.filter(l => !l.startsWith("materials:"));
     const cfgBlock = cfgLines.length ? `  config: (\n    ${cfgLines.join(",\n    ")},\n  )` : "";
     const allArgs = [...molArgs, ...(cfgBlock ? [cfgBlock] : [])];
@@ -1626,9 +1646,11 @@ function setPlugin(pluginId, { autoLoad = true } = {}) {
       const el = $(id); if (!el) return;
       el.href = url; el.setAttribute("aria-label", `${pl.label} — ${label}`);
     };
-    if (pl.docs)   set("link-docs",   pl.docs,   "documentation");
+    if (pl.docs)   set("btn-docs",    pl.docs,   "documentation");
     if (pl.typst)  set("link-typst",  pl.typst,  "on Typst Universe");
     if (pl.github) set("link-github", pl.github, "on GitHub");
+    const fmts = $("formats");
+    if (fmts) fmts.textContent = pl.formats ? "Supports " + pl.formats.join(", ") : "";
   }
   if (autoLoad) {
     const first = (MODELS_BY_PLUGIN[pluginId] || [])[0];
@@ -1755,13 +1777,19 @@ $("scad-src").addEventListener("input", () => {
 });
 
 // ───────────────────── molfig — molecule → mesh (third-party plugin) ─────
+// Every mol_* field becomes a molfig option: `mol_color_theme` → `color-theme`.
+// Values matching the schema default are omitted (molfig fills them in).
 function buildMolOpts(s, format) {
   const o = { format: format || "auto", "mesh-format": "obj" };
-  if (s.mol_representation)               o.representation = s.mol_representation;
-  if (s.mol_color_theme)                  o["color-theme"] = s.mol_color_theme;
-  if (s.mol_quality)                      o.quality        = s.mol_quality;
-  if (s.mol_style && s.mol_style !== "default") o.style     = s.mol_style;
-  if (typeof s.mol_infer_bonds === "boolean") o["infer-bonds"] = s.mol_infer_bonds;
+  const TF = topFields();
+  for (const k in s) {
+    if (!k.startsWith("mol_")) continue;
+    const v = s[k];
+    if (v === "" || v == null) continue;
+    const f = TF[k];
+    if (f && eq(v, f.def)) continue;
+    o[k.slice(4).replace(/_/g, "-")] = v;
+  }
   return o;
 }
 // Bundle framing: "%08d%08d" (materials_len, info_len) || materials-json || info-json || mesh.
@@ -2145,9 +2173,27 @@ async function inflate(bytes) {
   return DEC.decode(await new Response(ds.readable).arrayBuffer());
 }
 
-function shareConfig() {                       // model + config diff vs defaults
-  const init = initState(), cfg = { model: model.name };
-  for (const k in state) if (!eq(state[k], init[k])) cfg[k] = state[k];
+function shareConfig() {                       // model + config diff vs the preset's baseline
+  // Baseline = schema init + the preset's MODEL_DEFAULTS overlay (same shape
+  // as applyModelDefaults applies at load). Diffing against this — instead of
+  // raw schema defaults — keeps `?a=caffeine` short: everything the preset
+  // sets doesn't need to appear in the URL.
+  const base = initState();
+  const ov = MODEL_DEFAULTS[model.name];
+  if (ov) for (const k in ov) {
+    const v = structuredClone(ov[k]);
+    const cur = base[k];
+    base[k] = (v && typeof v === "object" && !Array.isArray(v)
+             && cur && typeof cur === "object" && !Array.isArray(cur))
+      ? { ...cur, ...v } : v;
+  }
+  const cfg = { model: model.name };
+  for (const k in state) {
+    // molfig regenerates `materials` on every load from the source — no point
+    // shipping the (identical) dict in the URL.
+    if (model._mol && k === "materials") continue;
+    if (!eq(state[k], base[k])) cfg[k] = state[k];
+  }
   return cfg;
 }
 const baseUrl = () => location.origin + location.pathname;
