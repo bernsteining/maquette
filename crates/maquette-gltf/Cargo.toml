@@ -15,6 +15,14 @@ name = "maquette_gltf"
 maquette-core = { path = "../maquette-core" }
 wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
+# Texture decoders — glTF ships base/MR/normal/occlusion/emissive maps as PNG,
+# JPEG or (via EXT_texture_webp) WebP. Pure Rust, wasm-friendly.
+zune-jpeg = { version = "0.5", default-features = false, features = ["std"] }
+zune-png  = { version = "0.5", default-features = false, features = ["std"] }
+# WebP decoder — `EXT_texture_webp` is emitted by gltfpack + Blender + gltf-
+# transform, and is second only to KTX2/Basis in real-world usage. Pure Rust,
+# minimal deps (byteorder-lite + quick-error).
+image-webp = "0.2"
 # EXT_meshopt_compression decoder (pure Rust, wasm-friendly).
 meshopt-rs = { version = "0.1", features = ["experimental"] }
 # KHR_draco_mesh_compression decoder (pure Rust; targets wasm32-unknown-unknown

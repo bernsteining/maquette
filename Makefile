@@ -62,7 +62,7 @@ DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj rubi_scan.ply 
 # back here to reinclude it in the demo's model list. Other assets (fox,
 # boombox, toycar, cesiumman, potofcoals) are dev-only in the same way.
 DEMO_GLTF_MODELS = tokyo.glb
-DEMO_MOL_MODELS = caffeine.pdb aspirin.xyz crambin.bcif 9R1O.pdb
+DEMO_MOL_MODELS = lsd.pdb aspirin.xyz crambin.bcif 9R1O.pdb
 DEMO_SCAD_MODELS = gear.scad
 
 # Copy the demo models into docs/ (gitignored there — regenerated, not committed).

@@ -35,14 +35,14 @@
       "typst": "https://typst.app/universe/package/molfig",
       "github": "https://github.com/rice8y/molfig",
       "models": [
-      ["caffeine",        "Caffeine"],
+      ["lsd",             "LSD"],
       ["aspirin",         "Aspirin"],
       ["crambin",         "Crambin (1CRN)"],
       ["9R1O",            "9R1O"]
     ]}
   ],
   "molecules": {
-    "caffeine": { "src": "molecules/caffeine.pdb", "fmt": "pdb"  },
+    "lsd":      { "src": "molecules/lsd.pdb",      "fmt": "pdb"  },
     "aspirin":  { "src": "molecules/aspirin.xyz",  "fmt": "xyz"  },
     "crambin":  { "src": "molecules/crambin.bcif", "fmt": "bcif" },
     "9R1O":     { "src": "molecules/9R1O.pdb",     "fmt": "pdb"  }
@@ -85,28 +85,26 @@
       "camera": [290, 464, 774], "center": [-86, 5, -25], "up": [0, 1, 0], "fov": 40,
       "background": "#182028"
     },
-    "caffeine": {
+    "lsd": {
       "_cam": "spherical", "azimuth": 30, "elevation": 25, "zoom": 1.3,
       "specular": 0.35, "shininess": 48,
-      "mol_representation": "ball-and-stick", "mol_color_theme": "element-symbol",
       "mol_quality": "high", "mol_infer_bonds": true
     },
     "aspirin": {
       "_cam": "spherical", "azimuth": 30, "elevation": 25, "zoom": 1.3,
       "specular": 0.35, "shininess": 48,
-      "mol_representation": "ball-and-stick", "mol_color_theme": "element-symbol",
       "mol_quality": "high", "mol_infer_bonds": true
     },
     "crambin": {
       "_cam": "spherical", "azimuth": 30, "elevation": 20, "zoom": 1.3,
       "specular": 0.25, "shininess": 32,
-      "mol_representation": "cartoon", "mol_color_theme": "chain-id",
+      "mol_color_theme": "chain-id",
       "mol_quality": "high"
     },
     "9R1O": {
       "_cam": "spherical", "azimuth": 30, "elevation": 15, "zoom": 1.15,
       "specular": 0.2,
-      "mol_representation": "cartoon", "mol_color_theme": "chain-id",
+      "mol_color_theme": "chain-id",
       "mol_quality": "medium"
     }
   }

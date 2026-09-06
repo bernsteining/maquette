@@ -15,6 +15,10 @@ openscad-rs = "0.1.0"
 rpds = "1"
 rustc-hash = "2"   # fast non-cryptographic hasher (FxHashMap) for internal maps
 archery = "1"       # name RcK to give rpds's HashTrieMap the Fx hasher
+# Parses TTF/OTF outlines for OpenSCAD `text()`. Pure-Rust, wasm-clean,
+# no_std-friendly. We ship a subset DejaVu Sans (assets/) as the default
+# font; users can pass their own via `scadypst(font: read("...", none))`.
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
 
 # CSG kernel = Manifold (elalish/manifold) via safe Rust bindings over its C API.
 # Manifold GUARANTEES watertight, correctly-triangulated boolean output — unlike

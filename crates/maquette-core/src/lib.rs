@@ -15,10 +15,10 @@
 //!     diffuse pre-convolution and seam-aware octahedral sampling.
 //!   * [`rgbe`] — Radiance HDR (.hdr) parser.
 //!   * [`texture`] — 2D texture with wrap/filter/mipmaps.
-//!   * [`texture_decode`] — JPEG/PNG glue over zune-jpeg/zune-png.
 //!
 //! Nothing in this crate references glTF, STL, PLY, or OBJ — pure geometry
-//! + shading primitives.
+//! + shading primitives. JPEG/PNG/WebP decoding lives with the only consumer
+//! that needs it (`maquette-gltf::texture_decode`).
 
 pub mod color;
 pub mod fxaa;
@@ -30,4 +30,3 @@ pub mod rgbe;
 pub mod shadow;
 pub mod ssao;
 pub mod texture;
-pub mod texture_decode;
