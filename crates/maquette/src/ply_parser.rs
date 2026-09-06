@@ -185,7 +185,7 @@ fn find_header_end(data: &[u8]) -> Result<usize, String> {
     Err("PLY: missing end_header".into())
 }
 
-fn finalize_element(name: &str, count: usize, props: Vec<(String, Prop)>) -> Result<Element, String> {
+fn finalize_element(name: &str, count: usize, props: Vec<(String, Prop)>, wanted_scalar: Option<&str>) -> Result<Element, String> {
     match name {
         "vertex" => {
             let mut scalar_types = Vec::new();
@@ -219,16 +219,25 @@ fn finalize_element(name: &str, count: usize, props: Vec<(String, Prop)>) -> Res
             } else { (0, 0, 0) };
             let has_alpha = slots[A].is_some();
             let sa = slots[A].unwrap_or(0);
-            // First numeric vertex property that isn't in the standard slots
-            // (x/y/z/nx/ny/nz/rgba): interpreted as a scalar for color_map.
-            // Skips integer-typed props that are almost certainly not colours
-            // themselves — floats (F32/F64) and small ints all pass through
-            // color_byte-style normalization when sampled.
+            // Pick the vertex property used for `color_map: "ply_scalar"`:
+            //   - If `wanted_scalar` is set (from `config.color_map_property`)
+            //     and matches a property name, use that — lets the user pick
+            //     between `quality` / `confidence` / `curvature` etc. when
+            //     a scan carries multiple.
+            //   - Else fall back to the first non-standard numeric property
+            //     (backward-compatible behaviour).
             let mut scalar = None;
-            for (i, (pname, _)) in props.iter().enumerate() {
-                if prop_slot(pname).is_none() {
-                    scalar = Some(i);
-                    break;
+            if let Some(wanted) = wanted_scalar.filter(|w| !w.is_empty()) {
+                for (i, (pname, _)) in props.iter().enumerate() {
+                    if pname == wanted { scalar = Some(i); break; }
+                }
+            }
+            if scalar.is_none() {
+                for (i, (pname, _)) in props.iter().enumerate() {
+                    if prop_slot(pname).is_none() {
+                        scalar = Some(i);
+                        break;
+                    }
                 }
             }
             let has_scalar = scalar.is_some();
@@ -297,7 +306,7 @@ fn finalize_element(name: &str, count: usize, props: Vec<(String, Prop)>) -> Res
     }
 }
 
-fn parse_header(data: &[u8]) -> Result<(Header, usize), String> {
+fn parse_header(data: &[u8], wanted_scalar: Option<&str>) -> Result<(Header, usize), String> {
     let end = find_header_end(data)?;
     let text = std::str::from_utf8(&data[..end])
         .map_err(|_| "PLY header: invalid UTF-8")?;
@@ -327,7 +336,7 @@ fn parse_header(data: &[u8]) -> Result<(Header, usize), String> {
             }
             "element" => {
                 if let Some((name, count, props)) = cur.take() {
-                    elements.push(finalize_element(&name, count, props)?);
+                    elements.push(finalize_element(&name, count, props, wanted_scalar)?);
                 }
                 let name = parts.next().ok_or("PLY: missing element name")?.to_string();
                 let count: usize = parts.next().ok_or("PLY: missing element count")?
@@ -352,7 +361,7 @@ fn parse_header(data: &[u8]) -> Result<(Header, usize), String> {
         }
     }
     if let Some((name, count, props)) = cur {
-        elements.push(finalize_element(&name, count, props)?);
+        elements.push(finalize_element(&name, count, props, wanted_scalar)?);
     }
 
     Ok((Header { format: format.ok_or("PLY: missing format line")?, elements }, end))
@@ -787,8 +796,19 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
 
 // -- Public API --
 
+/// Parse a PLY file.
+///
+/// `wanted_scalar`: when set, `color_map: "ply_scalar"` picks the named
+/// vertex property (e.g. `"confidence"`) as the heatmap source. When
+/// `None` or empty, falls back to the first non-standard numeric vertex
+/// property in the header — the same behaviour as before this parameter
+/// existed. Standard PLY files with a single named scalar work either way.
 pub fn parse_ply(data: &[u8]) -> Result<PlyData, String> {
-    let (header, body_start) = parse_header(data)?;
+    parse_ply_with(data, None)
+}
+
+pub fn parse_ply_with(data: &[u8], wanted_scalar: Option<&str>) -> Result<PlyData, String> {
+    let (header, body_start) = parse_header(data, wanted_scalar)?;
     let body = &data[body_start..];
     match header.format {
         Format::Ascii => parse_ascii(&header, body),
