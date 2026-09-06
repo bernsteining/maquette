@@ -95,6 +95,7 @@ const plugins = {
   maquette:        makePlugin("maquette.wasm"),
   "maquette-scad": makePlugin("maquette-scad.wasm"),
   "maquette-gltf": makePlugin("maquette-gltf.wasm"),
+  molfig:          makePlugin("molfig.wasm"),   // @preview/molfig, same wasm-minimal-protocol
 };
 
 // ─────────────────────────── IndexedDB module cache ─────────────────────────
