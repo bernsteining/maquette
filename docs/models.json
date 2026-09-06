@@ -1,6 +1,7 @@
 {
   "plugins": [
-    { "id": "maquette", "label": "maquette", "hint": "Formats: .obj .stl .ply",
+    { "id": "maquette", "label": "maquette", "hint": "Accepts .obj .stl .ply",
+      "formats": [".obj", ".stl", ".ply"],
       "docs": "maquette-documentation.pdf",
       "typst": "https://typst.app/universe/package/maquette",
       "github": "https://github.com/bernsteining/maquette",
@@ -11,7 +12,8 @@
       ["crankshaft.obj",  "Crankshaft (OBJ)"],
       ["brain_skull.obj", "Brain + skull (OBJ)"]
     ]},
-    { "id": "scad", "label": "SCAD", "hint": "In-browser OpenSCAD editor · compiles to a mesh live",
+    { "id": "scad", "label": "SCAD", "hint": "Accepts .scad · or edit inline in the browser",
+      "formats": [".scad"],
       "docs": "maquette-scad-documentation.pdf",
       "typst": "https://typst.app/universe/package/maquette-scad",
       "github": "https://github.com/bernsteining/maquette",
@@ -19,14 +21,16 @@
       ["__scad__",        "OpenSCAD editor"],
       ["scad/gear.scad",  "Parametric gear"]
     ]},
-    { "id": "gltf", "label": "glTF", "hint": "Formats: .glb .gltf",
+    { "id": "gltf", "label": "glTF", "hint": "Accepts .glb .gltf",
+      "formats": [".glb", ".gltf"],
       "docs": "maquette-gltf-documentation.pdf",
       "typst": "https://typst.app/universe/package/maquette-gltf",
       "github": "https://github.com/bernsteining/maquette",
       "models": [
       ["tokyo.glb",       "Littlest Tokyo (animated)"]
     ]},
-    { "id": "molfig", "label": "molfig", "hint": "Formats: .pdb .cif .mmcif .bcif .xyz",
+    { "id": "molfig", "label": "molfig", "hint": "Accepts .pdb .cif .mmcif .bcif .xyz",
+      "formats": [".pdb", ".cif", ".mmcif", ".bcif", ".xyz"],
       "docs": "https://github.com/rice8y/molfig/blob/v0.1.4/package/docs/documentation.pdf",
       "typst": "https://typst.app/universe/package/molfig",
       "github": "https://github.com/rice8y/molfig",

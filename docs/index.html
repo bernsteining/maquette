@@ -42,6 +42,8 @@
     padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
   }
   header h1 { font-size: 14.5px; font-weight: 700; margin: 0; letter-spacing: -.2px; }
+  header h1 a { color: inherit; text-decoration: none; transition: color .12s; }
+  header h1 a:hover { color: var(--accent); }
   header .badge { font-size: 9.5px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase;
     color: var(--accent); background: var(--accent-soft); padding: 2px 6px; border-radius: 5px; }
   header .tag { color: var(--muted); font-size: 12px; }
@@ -218,9 +220,10 @@
     font-size: 15px; font-weight: 500; background: color-mix(in srgb, var(--accent) 8%, transparent); backdrop-filter: blur(1px); }
   #out, #outc { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: var(--shadow); user-select: none; -webkit-user-drag: none; }
   #tools { position: absolute; top: 14px; right: 14px; display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
-  #tools button { font: inherit; font-size: 11.5px; font-weight: 500; border: 1px solid var(--line);
-    background: var(--panel); color: var(--ink-soft); padding: 4px 10px; border-radius: 7px; cursor: pointer; box-shadow: var(--shadow); transition: .12s; }
-  #tools button:hover { color: var(--accent); border-color: var(--accent); }
+  #tools button, #tools #btn-docs { font: inherit; font-size: 11.5px; font-weight: 500; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink-soft); padding: 4px 10px; border-radius: 7px; cursor: pointer; box-shadow: var(--shadow); transition: .12s;
+    text-align: center; text-decoration: none; }
+  #tools button:hover, #tools #btn-docs:hover { color: var(--accent); border-color: var(--accent); }
   #tools button:focus-visible, .file-row button:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   #tools .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; box-shadow: var(--shadow); }
   #tools .seg button { flex: 1; border: none; border-radius: 0; box-shadow: none; padding: 4px 11px; }
@@ -230,7 +233,10 @@
   #rtime { position: absolute; bottom: 14px; right: 16px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
     background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; opacity: 0; transition: opacity .2s; }
   #rtime.show { opacity: 1; }
-  #hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); color: var(--muted); font-size: 12px; }
+  #hint { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    color: var(--muted); font-size: 12px; text-align: center; line-height: 1.5; }
+  #hint #formats { display: block; font-size: 11px; opacity: 0.85; }
+  #hint #formats:empty { display: none; }
   #err { position: absolute; top: 54px; left: 50%; transform: translateX(-50%);
     color: var(--err); font-size: 12.5px; background: var(--panel);
     border: 1px solid var(--err); border-radius: 9px; padding: 7px 13px; max-width: 82%; box-shadow: var(--shadow); display: none; }
@@ -258,10 +264,9 @@
 </head>
 <body>
   <header>
-    <h1>maquette</h1>
+    <h1><a href="https://bernsteining.github.io/maquette/">maquette</a></h1>
     <span class="badge" id="build" data-commit="__BUILD_COMMIT__">demo</span>
     <nav class="links">
-      <a id="link-docs" target="_blank" rel="noopener">Docs</a>
       <a id="link-typst" class="icon" target="_blank" rel="noopener" title="Typst Universe">
         <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
           <rect width="24" height="24" rx="6" fill="#239dad"></rect>
@@ -286,7 +291,7 @@
         <div class="file-row">
           <label for="preset">example:</label>
           <select id="preset" title="Load a built-in model" aria-label="Model preset"></select>
-          <button id="browse" title="Supported: .obj .stl .ply · .scad · .glb .gltf · .pdb .cif .mmcif .bcif .xyz" aria-label="Load a .obj/.stl/.ply/.scad/.glb/.pdb/.cif/.mmcif/.bcif/.xyz file from disk">Load file…</button>
+          <button id="browse" aria-label="Load a model file from disk">Load file…</button>
           <input id="file" type="file" accept=".obj,.stl,.ply,.scad,.glb,.gltf,.pdb,.cif,.mmcif,.bcif,.xyz" aria-hidden="true" tabindex="-1" hidden>
         </div>
         <div class="search-row"><input id="search" type="search" placeholder="Search settings…" autocomplete="off"></div>
@@ -333,6 +338,7 @@
         <button id="btn-reset" title="Reset all settings to defaults">Reset</button>
         <button id="btn-download" title="Download the current render">Download</button>
         <button id="btn-share" title="Copy a shareable link with this configuration">Share</button>
+        <a id="btn-docs" target="_blank" rel="noopener" title="Open the plugin's documentation">Documentation</a>
         <a id="get-models" href="#" target="_blank" rel="noopener" title="Browse external asset libraries"></a>
       </div>
       <img id="out" alt="render" draggable="false">
@@ -343,11 +349,11 @@
       <div id="busy" aria-hidden="true"><span class="spinner"></span><span id="busy-cap">rendering…</span></div>
       <div id="rtime" aria-live="polite" aria-atomic="true"></div>
       <div id="err" role="alert" aria-live="assertive" aria-atomic="true"></div>
-      <div id="hint">drag to orbit · scroll to zoom · drop a model file to load</div>
+      <div id="hint">drag to orbit · scroll to zoom · drop a model file to load<span id="formats"></span></div>
     </section>
   </main>
 
   <div id="tip" role="tooltip"></div>
-  <script src="app.js?v=48"></script>
+  <script src="app.js?v=54"></script>
 </body>
 </html>
