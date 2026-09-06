@@ -74,6 +74,21 @@
     white-space: nowrap; flex: none;    /* long picker labels (Damaged Helmet...) squeezed this to 2 lines */
   }
   .file-row select { min-width: 0; flex: 0 1 auto; }   /* let the picker shrink instead of stealing space from the button */
+  .plugin-row #plugin {
+    flex: 1; display: flex; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 7px; background: var(--bg);
+  }
+  .plugin-row #plugin button {
+    flex: 1; font: inherit; font-size: 11.5px; font-weight: 500;
+    border: 0; border-left: 1px solid var(--line);
+    background: transparent; color: var(--ink-soft);
+    padding: 4px 6px; cursor: pointer; transition: .12s;
+  }
+  .plugin-row #plugin button:first-child { border-left: 0; }
+  .plugin-row #plugin button:hover { color: var(--accent); background: var(--accent-soft); }
+  .plugin-row #plugin button.on { background: var(--accent); color: #fff; }
+  .plugin-row #plugin button.on:hover { background: var(--accent); color: #fff; }
+  .plugin-row #plugin button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
   .file-row button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
   /* "get more models" link — sits inside #tools, stacked under Download so it
      reads as an extension of that button rather than picker-adjacent. Empty
@@ -169,6 +184,7 @@
   #scad-foot { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
     border-top: 1px solid var(--line); background: color-mix(in srgb, var(--code-bg) 60%, var(--panel));
     color: var(--muted); font-size: 11px; }
+  #scad-foot[hidden] { display: none; }
   #scad-foot #scad-status { margin-left: auto; font-variant-numeric: tabular-nums; }
   .cline { display: flex; }
   .gutter { flex: 0 0 auto; width: 2.4em; text-align: right; padding: 0 11px 0 4px; color: var(--muted); opacity: .5; user-select: none; position: sticky; left: 0; background: var(--code-bg); }
@@ -244,21 +260,15 @@
   <header>
     <h1>maquette</h1>
     <span class="badge" id="build" data-commit="__BUILD_COMMIT__">demo</span>
-    <!-- First-run orientation line: what is this page for? Kept subtle
-         (--muted, small) and hidden below the intro breakpoint so mobile
-         header stays compact. -->
-    <span id="tagline">tweak a model, watch the Typst source update live</span>
     <nav class="links">
-      <a href="maquette-documentation.pdf" target="_blank" rel="noopener">Docs</a>
-      <a href="maquette-gltf-documentation.pdf" target="_blank" rel="noopener">glTF</a>
-      <a href="maquette-scad-documentation.pdf" target="_blank" rel="noopener">SCAD</a>
-      <a class="icon" href="https://typst.app/universe/package/maquette" target="_blank" rel="noopener" aria-label="maquette on Typst Universe" title="Typst Universe">
+      <a id="link-docs" target="_blank" rel="noopener">Docs</a>
+      <a id="link-typst" class="icon" target="_blank" rel="noopener" title="Typst Universe">
         <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
           <rect width="24" height="24" rx="6" fill="#239dad"></rect>
           <text x="12" y="12.5" font-size="15" font-weight="700" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-family="Georgia, 'Times New Roman', serif">t</text>
         </svg>
       </a>
-      <a class="icon" href="https://github.com/bernsteining/maquette" target="_blank" rel="noopener" aria-label="maquette on GitHub" title="View on GitHub">
+      <a id="link-github" class="icon" target="_blank" rel="noopener" title="View on GitHub">
         <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor" aria-hidden="true">
           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.02-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"></path>
         </svg>
@@ -269,11 +279,15 @@
   <main>
     <section id="panel">
       <div class="panel-head">
+        <div class="file-row plugin-row">
+          <label for="plugin">plugin:</label>
+          <div class="seg" id="plugin" role="group" aria-label="Plugin"></div>
+        </div>
         <div class="file-row">
-          <label for="preset">model:</label>
+          <label for="preset">example:</label>
           <select id="preset" title="Load a built-in model" aria-label="Model preset"></select>
-          <button id="browse" aria-label="Load a .obj/.stl/.ply/.scad/.glb file from disk">Load file…</button>
-          <input id="file" type="file" accept=".obj,.stl,.ply,.scad,.glb" aria-hidden="true" tabindex="-1" hidden>
+          <button id="browse" title="Supported: .obj .stl .ply · .scad · .glb .gltf · .pdb .cif .mmcif .bcif .xyz" aria-label="Load a .obj/.stl/.ply/.scad/.glb/.pdb/.cif/.mmcif/.bcif/.xyz file from disk">Load file…</button>
+          <input id="file" type="file" accept=".obj,.stl,.ply,.scad,.glb,.gltf,.pdb,.cif,.mmcif,.bcif,.xyz" aria-hidden="true" tabindex="-1" hidden>
         </div>
         <div class="search-row"><input id="search" type="search" placeholder="Search settings…" autocomplete="off"></div>
       </div>
@@ -334,6 +348,6 @@
   </main>
 
   <div id="tip" role="tooltip"></div>
-  <script src="app.js?v=31"></script>
+  <script src="app.js?v=48"></script>
 </body>
 </html>

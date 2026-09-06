@@ -72,6 +72,7 @@ function makeWorkerPlugin(plugin) {
 const maquettePlugin = makeWorkerPlugin("maquette");
 const scadPlugin     = makeWorkerPlugin("maquette-scad");
 const gltfPlugin     = makeWorkerPlugin("maquette-gltf");
+const molfigPlugin   = makeWorkerPlugin("molfig");
 
 // Bind a model into the worker. Fire-and-forget: worker's FIFO message queue
 // guarantees any subsequent render/info sees the bound bytes. Uses useKey()
@@ -111,7 +112,8 @@ function preloadDemoModels(skipName) {
   const idle = window.requestIdleCallback || (cb => setTimeout(cb, 300));
   idle(async () => {
     for (const [presetName] of MODELS) {
-      if (presetName === "__scad__" || presetName === skipName) continue;
+      if (presetName === skipName) continue;
+      if (kindOf(presetName) !== "maquette") continue;   // scad / gltf / molfig fetch lazily
       try {
         const head = await fetch(presetName, { method: "HEAD" });
         if (!head.ok) continue;
@@ -120,9 +122,8 @@ function preloadDemoModels(skipName) {
         const r = await fetch(presetName);
         if (!r.ok) continue;
         const bytes = new Uint8Array(await r.arrayBuffer());
-        const plugin = isGltf(presetName) ? gltfPlugin : maquettePlugin;
-        await plugin.ensure();
-        await plugin.cache(presetName, bytes);
+        await maquettePlugin.ensure();
+        await maquettePlugin.cache(presetName, bytes);
       } catch { /* one preload failure isn't fatal; try the next */ }
     }
   });
@@ -132,6 +133,8 @@ function preloadDemoModels(skipName) {
 // convention for a GLB renamed with a friendly extension (Damaged Helmet).
 const GLTF_EXTS = new Set(["glb", "gltf", "blg"]);
 const isGltf = (name) => GLTF_EXTS.has(ext(name || ""));
+const MOL_FMTS = { pdb: "pdb", cif: "cif", mmcif: "mmcif", bcif: "bcif", xyz: "xyz" };
+const isMolExt = (name) => ext(name || "") in MOL_FMTS;
 
 // ──────────────────────────────── SCHEMA ──────────────────────────────────
 // Field: {k, label, t, def, ...}. t ∈ sel|num|rng|col|bool|txt|vec.
@@ -141,10 +144,36 @@ const PROJ = ["perspective","orthographic","isometric","dimetric","trimetric","m
   "cabinet","cavalier","fisheye","stereographic","curvilinear","cylindrical","pannini","tiny-planet"];
 
 const SCHEMA = [
-  { s: "Point cloud (PLY)", open: true, when: () => model._ext === "ply", fields: [
+  { s: "Point cloud (PLY)", open: true, when: () => model._ext === "ply" && !model._mol && !model.scad, fields: [
     { k: "point_size", label: "Point size / radius (0 = auto)", t: "num", def: 0, omitIf: v => v === 0 },
     { k: "point_neighbors", label: "Neighbors k (higher = fewer holes)", t: "num", def: 12, omitIf: v => v === 12 },
     { k: "point_boundary", label: "Boundary cut angle ° (0 = off)", t: "num", def: 60, omitIf: v => v === 60 },
+  ]},
+  { s: "Molecule (molfig)", open: true, when: () => model._mol, fields: [
+    { k: "mol_representation", label: "Representation", t: "sel", def: "ball-and-stick",
+      opts: [
+        ["default", "default"],
+        ["ball-and-stick", "ball-and-stick"],
+        ["spacefill", "spacefill"],
+        ["cartoon", "cartoon"],
+        ["ribbon", "ribbon"],
+        ["backbone", "backbone"],
+        ["molecular-surface", "molecular-surface"],
+        ["gaussian-surface", "gaussian-surface"],
+      ], recompile: "mol" },
+    { k: "mol_color_theme", label: "Color theme", t: "sel", def: "element-symbol",
+      opts: [
+        ["element-symbol", "element-symbol"],
+        ["chain-id", "chain-id"],
+        ["entity-id", "entity-id"],
+        ["plddt-confidence", "pLDDT confidence"],
+        ["partial-charges", "partial charges"],
+      ], recompile: "mol" },
+    { k: "mol_quality", label: "Mesh quality", t: "sel", def: "medium",
+      opts: [["low","low"],["medium","medium"],["high","high"]], recompile: "mol" },
+    { k: "mol_style", label: "Style", t: "sel", def: "default",
+      opts: [["default","default"],["illustrative","illustrative"]], recompile: "mol" },
+    { k: "mol_infer_bonds", label: "Infer bonds (small molecules)", t: "bool", def: true, recompile: "mol" },
   ]},
   { s: "Camera & viewport", fields: [
     // `init` = starting value (a good view of the default bunny); `def` = maquette's
@@ -174,7 +203,7 @@ const SCHEMA = [
     { k: "specular", label: "Specular", t: "rng", def: 0.2, min: 0, max: 1, step: 0.01 },
     { k: "shininess", label: "Shininess", t: "num", def: 32 },
     { k: "smooth", label: "Smooth shading", t: "bool", def: true },
-    { k: "scad_smooth_normals", label: "SCAD smooth normals", t: "bool", def: false, recompile: true },
+    { k: "scad_smooth_normals", label: "SCAD smooth normals", t: "bool", def: false, recompile: "scad" },
     { k: "gamma_correction", label: "Gamma correction", t: "bool", def: true },
     { k: "cull_backface", label: "Back-face culling", t: "bool", def: true },
   ]},
@@ -443,6 +472,11 @@ const GLTF_SCHEMA = [
 // renderConfig, buildTypst, refreshVisibility, and applyModelDefaults.
 function getSchema() { return model._gltf ? GLTF_SCHEMA : SCHEMA; }
 
+function triggerRecompile(kind) {
+  if (kind === "scad" && $("preset") && $("preset").value === "__scad__") compileScad();
+  else if (kind === "mol" && model._mol) compileMol();
+}
+
 // Tooltips (hover a label) — keyed by field key. Covers top-level fields and
 // group headers, whose keys are unique. Shown via the native title attribute.
 const HELP = {
@@ -508,14 +542,25 @@ let rafPending = false;
 // from initState) reads `model._gltf` — an uninitialised model would hit
 // a TDZ ReferenceError and the form would never build.
 const ext = (name) => name.split(".").pop().toLowerCase();
+// Populated by the models.json loader below — hoisted so makeModel (declared
+// next) doesn't hit a TDZ on the initial `model = makeModel("bunny.obj")`.
+let PLUGINS = [], MODELS = [], MODELS_BY_PLUGIN = {}, MOLECULES = {};
+let PLUGIN_OF_MODEL = {}, MODEL_DEFAULTS = {}, DEFAULTS_KEYS = [];
+let currentPluginId = null;
 // Every ingest/boot goes through this so `model._ext` and `model._gltf`
 // stay in sync with `model.name` without recomputing on every render or
 // drag. Hot paths read the cached props instead of re-running `ext(...)`
 // or `isGltf(...)` on the string each time.
 const makeModel = (name, bytes, extra = null) => {
+  const mol = MOLECULES[name];
+  if (mol) {
+    return { name, bytes, _ext: "obj", _gltf: false, _mol: true,
+             _molSrc: null, _molSrcPath: mol.src, _molFmt: mol.fmt,
+             _molMaterials: null, ...(extra || {}) };
+  }
   const e = ext(name);
-  return extra ? { name, bytes, _ext: e, _gltf: GLTF_EXTS.has(e), ...extra }
-               : { name, bytes, _ext: e, _gltf: GLTF_EXTS.has(e) };
+  return extra ? { name, bytes, _ext: e, _gltf: GLTF_EXTS.has(e), _mol: false, ...extra }
+               : { name, bytes, _ext: e, _gltf: GLTF_EXTS.has(e), _mol: false };
 };
 let model = makeModel("bunny.obj", null);
 function initState() {
@@ -583,6 +628,7 @@ function group(f, mode) {
   const o = {};
   for (const sub of f.fields) {
     const v = s[sub.k];
+    if (v === undefined) continue;                   // subfield missing after a preset overlay
     if (sub.allowBlank && v === "") continue;        // blank optional color → omit
     if (mode === "diff" && eq(v, sub.def)) continue; // export: only changed subfields
     o[sub.k] = v;
@@ -628,9 +674,12 @@ function buildConfig() {
   // the SCHEMA walk directly, no polymorphic hemispheric-ambient / transparent-
   // background handling needed. For maquette they're polymorphic and set below.
   const gltf = model._gltf;
-  for (const sec of getSchema()) for (const f of sec.fields) {
+  for (const sec of getSchema()) {
+    if (sec.when && !sec.when(state, state)) continue;   // Molfig / point-cloud sections gate here
+    for (const f of sec.fields) {
     if (f.when && !f.when(state, state)) continue;
     if (f.k[0] === "_") continue;                     // UI-only fields
+    if (f.k.startsWith("mol_") || f.k.startsWith("scad_")) continue;  // source-plugin state — not maquette config
     if (!gltf && (f.k === "ambient" || f.k === "background")) continue; // polymorphic — set below
     if (f.omitIf && f.omitIf(state[f.k])) continue;
     switch (f.t) {
@@ -644,6 +693,7 @@ function buildConfig() {
       case "map": if (state[f.k].length) c[f.k] = Object.fromEntries(state[f.k].filter(r => r[0]).map(([n, v]) => [n, f.rich ? hlCollapse(v) : v])); break;
       default: c[f.k] = state[f.k];
     }
+  }
   }
   if (!gltf) {
     c.ambient = ambientCfg();          // number, or hemisphere {intensity,sky,ground}
@@ -660,9 +710,12 @@ function buildTypst() {
     : ({ obj: "render-obj", stl: "render-stl", ply: "render-ply" }[model._ext] || "render-obj");
   const P = [];
   const push = (k, v) => P.push(`${k}: ${v}`);
-  for (const sec of getSchema()) for (const f of sec.fields) {
+  for (const sec of getSchema()) {
+    if (sec.when && !sec.when(state, state)) continue;
+    for (const f of sec.fields) {
     if (f.when && !f.when(state, state)) continue;
     if (f.noExport || f.k === "_cam" || f.k === "width" || f.k === "height") continue;
+    if (f.k.startsWith("mol_") || f.k.startsWith("scad_")) continue;   // handled by the source-plugin's own snippet block
     if (f.omitIf && f.omitIf(state[f.k])) continue;
     // The polymorphic ambient / background handling is maquette-only. For
     // glTF, ambient/background are plain scalars and go through the default
@@ -703,6 +756,7 @@ function buildTypst() {
       default: if (!eq(state[f.k], f.def)) push(f.k, fmtT(state[f.k]));
     }
   }
+  }
   if (outputFormat === "svg") P.push('format: "svg"');
   const body = P.length ? `#${fn}(model,\n  ${P.join(",\n  ")},\n)` : `#${fn}(model)`;
   // OpenSCAD models aren't a file on disk — they're compiled in-browser by the
@@ -715,6 +769,21 @@ function buildTypst() {
   }
   if (gltf) {
     return `#import "@preview/maquette-gltf:0.1.0": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
+  }
+  if (model._mol) {
+    const molArgs = [];
+    if (model._molFmt && model._molFmt !== "auto") molArgs.push(`  format: "${model._molFmt}"`);
+    if (state.mol_representation) molArgs.push(`  representation: "${state.mol_representation}"`);
+    if (state.mol_color_theme)    molArgs.push(`  color-theme: "${state.mol_color_theme}"`);
+    if (state.mol_quality)        molArgs.push(`  quality: "${state.mol_quality}"`);
+    if (state.mol_style && state.mol_style !== "default") molArgs.push(`  style: "${state.mol_style}"`);
+    if (state.mol_infer_bonds === false) molArgs.push(`  infer-bonds: false`);
+    const cfgLines = P.filter(l => !l.startsWith("materials:"));
+    const cfgBlock = cfgLines.length ? `  config: (\n    ${cfgLines.join(",\n    ")},\n  )` : "";
+    const allArgs = [...molArgs, ...(cfgBlock ? [cfgBlock] : [])];
+    return `#import "@preview/molfig:0.1.4"\n\n`
+      + `#let data = read("${model._molSrcPath}", encoding: none)\n\n`
+      + `#molfig.render(\n  data,\n${allArgs.join(",\n")},\n)`;
   }
   return `#import "@preview/maquette:0.1.3": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
 }
@@ -845,19 +914,17 @@ const VEC_AXES = ["X", "Y", "Z", "W"];
 function ctl(f, slot, local) {
   const wrap = document.createElement("div");
   wrap.className = "ctl";
-  const set = (v) => { slot[f.k] = v; onChange(); };
+  // Fields flagged `recompile: "scad" | "mol"` re-run the source-plugin
+  // (maquette-scad or molfig) to regenerate the mesh before the maquette
+  // render call — otherwise the change wouldn't be visible in the output.
+  const set = (v) => { slot[f.k] = v; onChange(); if (f.recompile) triggerRecompile(f.recompile); };
   const cur = slot[f.k];
   let labelEl, sync = null;
 
   if (f.t === "bool") {
     labelEl = document.createElement("label"); labelEl.className = "chk";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!cur;
-    cb.onchange = () => {
-      set(cb.checked);
-      // Fields flagged `recompile` gate the SCAD compile output — recompute
-      // the PLY so the change is visible on the next render.
-      if (f.recompile && $("preset").value === "__scad__") compileScad();
-    };
+    cb.onchange = () => { set(cb.checked); };
     // The <label> wraps text + input, so the checkbox is properly labelled
     // for screen readers already — no extra aria-label needed.
     labelEl.append(cb, document.createTextNode(f.label)); wrap.append(labelEl);
@@ -1295,18 +1362,23 @@ async function copyText(text) {
 }
 
 // ─────────────────────────────── model I/O ────────────────────────────────
-// Built-in models — fetched lazily (only when picked), same origin as bunny.obj.
-// The picker order + per-model showcase overrides live in docs/models.json,
-// loaded once at module init and shared with initPresets() + boot(). Splitting
-// them out keeps app.js focused on logic; the JSON is safe to hand-edit and
-// even preview-diff without touching code.
-let MODELS = [];
-let MODEL_DEFAULTS = {};
-let DEFAULTS_KEYS = [];
+// Two-tier picker: plugin (segmented control) → example (dropdown). models.json
+// is the source of truth for both tiers; the loader flattens plugin→models
+// into MODELS/PLUGIN_OF_MODEL for downstream single-name lookups.
 const modelsReady = fetch("models.json").then(r => r.json()).then(j => {
-  MODELS = j.models;
-  MODEL_DEFAULTS = j.defaults;
-  // Union of every override key ever used — reset target on preset load.
+  PLUGINS = j.plugins || [];
+  MOLECULES = j.molecules || {};
+  MODEL_DEFAULTS = j.defaults || {};
+  MODELS = [];
+  MODELS_BY_PLUGIN = {};
+  PLUGIN_OF_MODEL = {};
+  for (const pl of PLUGINS) {
+    MODELS_BY_PLUGIN[pl.id] = pl.models || [];
+    for (const [name, label] of MODELS_BY_PLUGIN[pl.id]) {
+      MODELS.push([name, label || name]);
+      PLUGIN_OF_MODEL[name] = pl.id;
+    }
+  }
   DEFAULTS_KEYS = [...new Set(Object.values(MODEL_DEFAULTS).flatMap(Object.keys))];
 });
 // Default source for the editor — the OpenSCAD project's own logo.scad,
@@ -1347,9 +1419,13 @@ function resetState() {
   for (const k in state) delete state[k];
   Object.assign(state, initState());
 }
-// True when the two names route to different renderer schemas (glTF vs
-// maquette). Callers pair with `resetState()` to swap `state` in place.
-const kindDiffers = (a, b) => isGltf(a || "") !== isGltf(b || "");
+const kindOf = (name) => {
+  if (!name) return "maquette";
+  if (MOLECULES[name] || isMolExt(name)) return "molfig";
+  if (name === "__scad__" || ext(name) === "scad") return "scad";
+  return isGltf(name) ? "gltf" : "maquette";
+};
+const kindDiffers = (a, b) => kindOf(a) !== kindOf(b);
 
 // The PNG/SVG toggle is meaningless for glTF assets (PBR is raster-only).
 // Hide the control + force PNG when in glTF mode; show + leave alone
@@ -1373,10 +1449,21 @@ function applyModelDefaults(name) {
   const TF = topFields();
   for (const k of DEFAULTS_KEYS) {   // reset to the field's starting value (init, else def)
     const f = TF[k];
-    state[k] = structuredClone(f && f.init !== undefined ? f.init : f && f.def);
+    if (!f) continue;
+    state[k] = structuredClone(f.init !== undefined ? f.init : f.def);
   }
   const ov = MODEL_DEFAULTS[name];
-  if (ov) for (const k in ov) state[k] = structuredClone(ov[k]);
+  if (!ov) return;
+  for (const k in ov) {
+    const v = structuredClone(ov[k]);
+    const cur = state[k];
+    // Merge object values on top of existing subfields so a partial preset
+    // override (e.g. ground: { color: … } with no `y`) keeps the defaults
+    // the field's own definition seeded via initState().
+    state[k] = (v && typeof v === "object" && !Array.isArray(v)
+              && cur && typeof cur === "object" && !Array.isArray(cur))
+      ? { ...cur, ...v } : v;
+  }
 }
 
 // Curated "get more models" targets, picked by file kind. Each is the
@@ -1385,17 +1472,16 @@ function applyModelDefaults(name) {
 // second (Sketchfab, Thingiverse) via the docs' own "Where to find
 // sample models" sections.
 const GET_MODELS_LINKS = {
-  gltf: { label: "More glTF on Sketchfab →",   url: "https://sketchfab.com/3d-models?features=downloadable" },
-  obj:  { label: "More OBJ on Sketchfab →",    url: "https://sketchfab.com/3d-models?features=downloadable" },
-  ply:  { label: "More PLY on Sketchfab →",    url: "https://sketchfab.com/3d-models?features=downloadable" },
-  stl:  { label: "More STL on Thingiverse →",  url: "https://www.thingiverse.com/" },
-  scad: { label: "More SCAD on Thingiverse →", url: "https://www.thingiverse.com/tag:openscad" },
+  maquette: { label: "More models on Sketchfab →",       url: "https://sketchfab.com/3d-models?features=downloadable" },
+  scad:     { label: "More SCAD on Thingiverse →",       url: "https://www.thingiverse.com/tag:openscad" },
+  gltf:     { label: "More glTF on Sketchfab →",         url: "https://sketchfab.com/3d-models?features=downloadable" },
+  molfig:   { label: "More structures on RCSB PDB →",    url: "https://www.rcsb.org/search/advanced" },
 };
 function refreshGetModelsLink() {
   const el = $("get-models"); if (!el) return;
-  const kind = $("preset").value === "__scad__" ? "scad"
-             : model._gltf ? "gltf" : model._ext;
-  const spec = GET_MODELS_LINKS[kind];
+  // Key off the picker's current value rather than model.name — SCAD compiles
+  // to "model.ply" internally, but the picker still shows the SCAD preset.
+  const spec = GET_MODELS_LINKS[kindOf($("preset").value)];
   if (!spec) { el.textContent = ""; el.removeAttribute("href"); return; }
   el.textContent = spec.label;
   el.href = spec.url;
@@ -1460,8 +1546,16 @@ async function syncGltfInfo() {
     onChange();
   } catch { /* info fetch failure isn't fatal — the number input stays */ }
 }
+const KNOWN_EXTS = new Set([
+  "obj","stl","ply", "scad", "glb","gltf","blg", "pdb","cif","mmcif","bcif","xyz",
+]);
 async function loadFile(file) {
-  if (ext(file.name) === "scad") return enterScadMode(await file.text());
+  const e = ext(file.name);
+  if (e === "scad") return enterScadMode(await file.text());
+  if (isMolExt(file.name)) return enterMolModeFromFile(file.name, new Uint8Array(await file.arrayBuffer()));
+  if (!KNOWN_EXTS.has(e)) {
+    return showErr(`${file.name}: unsupported format (.${e}). Supported: .obj .stl .ply · .scad · .glb .gltf · .pdb .cif .mmcif .bcif .xyz`);
+  }
   $("tab-scad").hidden = true; setTab("typst");
   ingest(file.name, new Uint8Array(await file.arrayBuffer()));
 }
@@ -1481,23 +1575,81 @@ async function loadPreset(name) {
     onChange();
   } catch (e) { showErr("failed to load " + name + ": " + e.message); }
 }
-// Reflect the active model in the dropdown; a dropped file gets a transient entry.
+// Reflect the active model in the dropdown; also flip the plugin picker to
+// whichever plugin owns this model. A dropped file gets a transient entry
+// under the plugin whose file kind matches (maquette or gltf — scad and mol
+// only ship built-in presets, no drag-drop path).
 function syncPreset(name) {
+  const pluginId = PLUGIN_OF_MODEL[name] || kindOf(name);
+  if (pluginId !== currentPluginId) setPlugin(pluginId, { autoLoad: false });
   const sel = $("preset");
-  if (MODELS.some(([v]) => v === name)) { sel.value = name; return; }
+  if (MODELS_BY_PLUGIN[pluginId] && MODELS_BY_PLUGIN[pluginId].some(([v]) => v === name)) {
+    sel.value = name; return;
+  }
   let custom = sel.querySelector("option[data-custom]");
   if (!custom) { custom = document.createElement("option"); custom.dataset.custom = "1"; sel.append(custom); }
   custom.value = name; custom.textContent = name + " (loaded)"; sel.value = name;
 }
+function fillPresetDropdown(pluginId) {
+  const sel = $("preset");
+  sel.innerHTML = "";
+  const models = MODELS_BY_PLUGIN[pluginId] || [];
+  for (const [v, t] of models) {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = t;
+    sel.append(o);
+  }
+}
+async function loadScadPreset(name) {
+  try { const src = await (await fetch(name)).text(); await enterScadMode(src, name); }
+  catch (e) { showErr("failed to load " + name + ": " + e.message); }
+}
+function loadPresetByName(name, opts = {}) {
+  if (!name) return;
+  if (name === "__scad__") return enterScadMode();
+  if (ext(name) === "scad") return loadScadPreset(name);
+  if (MOLECULES[name]) return enterMolMode(name, opts);
+  $("tab-scad").hidden = true; setTab("typst");
+  loadPreset(name);
+}
+function setPlugin(pluginId, { autoLoad = true } = {}) {
+  currentPluginId = pluginId;
+  document.querySelectorAll("#plugin button").forEach(b => {
+    const on = b.dataset.plugin === pluginId;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  fillPresetDropdown(pluginId);
+  const pl = PLUGINS.find(p => p.id === pluginId);
+  if (pl) {
+    const set = (id, url, label) => {
+      const el = $(id); if (!el) return;
+      el.href = url; el.setAttribute("aria-label", `${pl.label} — ${label}`);
+    };
+    if (pl.docs)   set("link-docs",   pl.docs,   "documentation");
+    if (pl.typst)  set("link-typst",  pl.typst,  "on Typst Universe");
+    if (pl.github) set("link-github", pl.github, "on GitHub");
+  }
+  if (autoLoad) {
+    const first = (MODELS_BY_PLUGIN[pluginId] || [])[0];
+    if (first) loadPresetByName(first[0]);
+  }
+}
 (async function initPresets() {
   await modelsReady;
-  const sel = $("preset");
-  for (const [v, t] of MODELS) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.append(o); }
-  sel.onchange = () => {
-    if (sel.value === "__scad__") return enterScadMode();
-    $("tab-scad").hidden = true; setTab("typst");
-    if (sel.value) loadPreset(sel.value);
-  };
+  const seg = $("plugin");
+  seg.innerHTML = "";
+  for (const pl of PLUGINS) {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.plugin = pl.id;
+    b.textContent = pl.label;
+    b.setAttribute("aria-pressed", "false");
+    if (pl.hint) b.title = pl.hint;
+    b.onclick = () => setPlugin(pl.id);
+    seg.append(b);
+  }
+  if (PLUGINS.length) setPlugin(PLUGINS[0].id, { autoLoad: false });
+  $("preset").onchange = () => loadPresetByName($("preset").value);
 })();
 $("browse").onclick = () => $("file").click();
 $("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
@@ -1581,17 +1733,17 @@ async function compileScad() {
     showErr("OpenSCAD: " + e.message);
   }
 }
-// Enter the editor (from the picker, or with `initial` text from a dropped .scad).
-async function enterScadMode(initial) {
-  $("preset").value = "__scad__";
-  $("tab-scad").hidden = false;      // reveal the OpenSCAD tab
+async function enterScadMode(initial, presetName = "__scad__") {
+  setPlugin("scad", { autoLoad: false });
+  $("preset").value = presetName;
+  $("tab-scad").hidden = false;
   $("snippet-sec").open = true;
   const ta = $("scad-src");
   if (initial !== undefined) ta.value = initial;
   else if (!ta.value.trim()) ta.value = await loadScadDefault();
   updateScadHighlight();
   setTab("scad");
-  const sd = MODEL_DEFAULTS.__scad__ || {};
+  const sd = MODEL_DEFAULTS[presetName] || MODEL_DEFAULTS.__scad__ || {};
   for (const k in sd) state[k] = structuredClone(sd[k]);
   buildForm(); refreshVisibility();
   refreshGetModelsLink();
@@ -1601,6 +1753,89 @@ $("scad-src").addEventListener("input", () => {
   updateScadHighlight();
   clearTimeout(scadTimer); scadTimer = setTimeout(compileScad, 350);
 });
+
+// ───────────────────── molfig — molecule → mesh (third-party plugin) ─────
+function buildMolOpts(s, format) {
+  const o = { format: format || "auto", "mesh-format": "obj" };
+  if (s.mol_representation)               o.representation = s.mol_representation;
+  if (s.mol_color_theme)                  o["color-theme"] = s.mol_color_theme;
+  if (s.mol_quality)                      o.quality        = s.mol_quality;
+  if (s.mol_style && s.mol_style !== "default") o.style     = s.mol_style;
+  if (typeof s.mol_infer_bonds === "boolean") o["infer-bonds"] = s.mol_infer_bonds;
+  return o;
+}
+// Bundle framing: "%08d%08d" (materials_len, info_len) || materials-json || info-json || mesh.
+function unpackMolBundle(buf) {
+  const dec = new TextDecoder();
+  const materialsLen = +dec.decode(buf.slice(0, 8));
+  const infoLen      = +dec.decode(buf.slice(8, 16));
+  const materialsEnd = 16 + materialsLen;
+  const infoEnd      = materialsEnd + infoLen;
+  const materials    = JSON.parse(dec.decode(buf.slice(16, materialsEnd)));
+  const info         = JSON.parse(dec.decode(buf.slice(materialsEnd, infoEnd)));
+  const mesh         = buf.slice(infoEnd);
+  return { materials, info, mesh };
+}
+async function compileMol() {
+  if (!model._mol || !model._molSrc) return;
+  try {
+    await molfigPlugin.ensure();
+    const opts = buildMolOpts(state, model._molFmt);
+    const t = performance.now();
+    const bundle = await molfigPlugin.call("render_object_bundle",
+      model._molSrc, ENC.encode(JSON.stringify(opts)));
+    const { materials, mesh } = unpackMolBundle(bundle);
+    model.bytes = mesh;
+    model._molMaterials = materials || {};
+    state.materials = Object.entries(model._molMaterials);
+    await maquettePlugin.setModel(mesh);
+    showErr("");
+    refreshVisibility(); measure(); onChange();
+  } catch (e) {
+    showErr("molfig: " + e.message);
+  }
+}
+async function enterMolModeFromFile(name, bytes) {
+  try {
+    const fmt = MOL_FMTS[ext(name)] || "auto";
+    setPlugin("molfig", { autoLoad: false });
+    $("tab-scad").hidden = true; setTab("typst");
+    const kindChanged = kindDiffers(model && model.name, name);
+    model = {
+      name, bytes: null, _ext: "obj", _gltf: false, _mol: true,
+      _molSrc: bytes, _molSrcPath: name, _molFmt: fmt, _molMaterials: null,
+    };
+    if (kindChanged) resetState();
+    buildForm(); refreshVisibility();
+    syncPreset(name);
+    syncFmtToggleForKind(name);
+    refreshGetModelsLink();
+    if (location.search || location.hash) history.replaceState(null, "", location.pathname);
+    await compileMol();
+  } catch (e) { showErr("failed to load molecule " + name + ": " + e.message); }
+}
+
+async function enterMolMode(name, { applyDefaults = true } = {}) {
+  try {
+    setPlugin("molfig", { autoLoad: false });
+    $("preset").value = name;
+    $("tab-scad").hidden = true; setTab("typst");
+    const mol = MOLECULES[name];
+    if (!mol) return showErr("unknown molecule: " + name);
+    const kindChanged = kindDiffers(model && model.name, name);
+    const srcBytes = new Uint8Array(await (await fetch(mol.src)).arrayBuffer());
+    model = makeModel(name, null, { _molSrc: srcBytes });
+    if (kindChanged) resetState();
+    if (applyDefaults) applyModelDefaults(name);
+    buildForm(); refreshVisibility();
+    syncFmtToggleForKind(name);
+    refreshGetModelsLink();
+    if (applyDefaults && (location.search || location.hash)) {
+      history.replaceState(null, "", location.pathname);
+    }
+    await compileMol();
+  } catch (e) { showErr("failed to load molecule " + name + ": " + e.message); }
+}
 
 // ─────────────────────── hover descriptions (tooltips) ─────────────────────
 // Tag an element with its help text; a single delegated listener shows an
@@ -2101,6 +2336,13 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
     // Load the model named in the URL (any file present in the demo dir — not
     // just picker built-ins, so documentation deep-links resolve), else bunny.
     const wanted = urlModel || "bunny.obj";
+    if (MOLECULES[wanted] || ext(wanted) === "scad") {
+      setStageBusy(false);
+      await loadPresetByName(wanted, { applyDefaults: !hadConfig });
+      if (hadConfig) bestUrl({ model: wanted, ...raw }).then(u => history.replaceState(null, "", u));
+      preloadDemoModels(wanted);
+      return;
+    }
     // Bare ?model=… link (no config): show that model's showcase defaults.
     if (urlModel && !hadConfig) { applyModelDefaults(wanted); buildForm(); }
     let name = wanted, bytes;

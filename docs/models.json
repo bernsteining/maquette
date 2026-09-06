@@ -1,17 +1,57 @@
 {
-  "models": [
-    ["bunny.obj", "Bunny (OBJ)"],
-    ["__scad__", "OpenSCAD"],
-    ["tokyo.glb", "Littlest Tokyo (glTF animated)"],
-    ["rubi_scan.ply", "Rubik scan (PLY point cloud)"],
-    ["heightmap.ply", "Heightmap (PLY scalar heatmap)"],
-    ["teapot.obj", "Teapot (OBJ)"],
-    ["crankshaft.obj", "Crankshaft (OBJ)"],
-    ["brain_skull.obj", "Brain + skull (OBJ)"]
+  "plugins": [
+    { "id": "maquette", "label": "maquette", "hint": "Formats: .obj .stl .ply",
+      "docs": "maquette-documentation.pdf",
+      "typst": "https://typst.app/universe/package/maquette",
+      "github": "https://github.com/bernsteining/maquette",
+      "models": [
+      ["bunny.obj",       "Bunny (OBJ)"],
+      ["rubi_scan.ply",   "Rubik scan (PLY point cloud)"],
+      ["teapot.obj",      "Teapot (OBJ)"],
+      ["crankshaft.obj",  "Crankshaft (OBJ)"],
+      ["brain_skull.obj", "Brain + skull (OBJ)"]
+    ]},
+    { "id": "scad", "label": "SCAD", "hint": "In-browser OpenSCAD editor · compiles to a mesh live",
+      "docs": "maquette-scad-documentation.pdf",
+      "typst": "https://typst.app/universe/package/maquette-scad",
+      "github": "https://github.com/bernsteining/maquette",
+      "models": [
+      ["__scad__",        "OpenSCAD editor"],
+      ["scad/gear.scad",  "Parametric gear"]
+    ]},
+    { "id": "gltf", "label": "glTF", "hint": "Formats: .glb .gltf",
+      "docs": "maquette-gltf-documentation.pdf",
+      "typst": "https://typst.app/universe/package/maquette-gltf",
+      "github": "https://github.com/bernsteining/maquette",
+      "models": [
+      ["tokyo.glb",       "Littlest Tokyo (animated)"]
+    ]},
+    { "id": "molfig", "label": "molfig", "hint": "Formats: .pdb .cif .mmcif .bcif .xyz",
+      "docs": "https://github.com/rice8y/molfig/blob/v0.1.4/package/docs/documentation.pdf",
+      "typst": "https://typst.app/universe/package/molfig",
+      "github": "https://github.com/rice8y/molfig",
+      "models": [
+      ["caffeine",        "Caffeine"],
+      ["aspirin",         "Aspirin"],
+      ["crambin",         "Crambin (1CRN)"],
+      ["9R1O",            "9R1O"]
+    ]}
   ],
+  "molecules": {
+    "caffeine": { "src": "molecules/caffeine.pdb", "fmt": "pdb"  },
+    "aspirin":  { "src": "molecules/aspirin.xyz",  "fmt": "xyz"  },
+    "crambin":  { "src": "molecules/crambin.bcif", "fmt": "bcif" },
+    "9R1O":     { "src": "molecules/9R1O.pdb",     "fmt": "pdb"  }
+  },
   "defaults": {
     "bunny.obj": { "color": "#4488cc" },
     "__scad__": {
+      "_cam": "spherical",
+      "azimuth": 219, "elevation": 33, "fov": 40, "zoom": 1.2,
+      "color": "#f9d72c", "specular": 0, "cull_backface": false,
+      "scad_smooth_normals": true
+    },
+    "scad/gear.scad": {
       "_cam": "spherical",
       "azimuth": 219, "elevation": 33, "fov": 40, "zoom": 1.2,
       "color": "#f9d72c", "specular": 0, "cull_backface": false,
@@ -22,65 +62,48 @@
       "mode": "x-ray", "xray_opacity": 0.3
     },
     "crankshaft.obj": {
-      "color": "#7d8590", "specular": 0.6, "shininess": 48, "up": [0, -1, 0],
+      "_cam": "cartesian",
+      "camera": [-100, -100, 500], "up": [0, -1, 0],
+      "zoom": 1.25, "pan": [0, 0.08],
+      "color": "#7d8590", "antialias": 4,
       "highlight": [
-        ["Model__Crankshaft", "#d4a145"],
-        ["Model__Camshaft",   "#b04040"],
-        ["Model__Piston_A",   "#8b6f3e"],
-        ["Model__Piston_B",   "#8b6f3e"],
-        ["Model__Piston_C",   "#8b6f3e"],
-        ["Model__Piston_D",   "#8b6f3e"],
-        ["Model__Piston_E",   "#8b6f3e"],
-        ["Model__Piston_F",   "#8b6f3e"],
-        ["Model__Head",       "#4a4f56"],
-        ["Model__Head_2",     "#4a4f56"],
-        ["Model__Head_3",     "#4a4f56"],
-        ["Model__Head_4",     "#4a4f56"],
-        ["Model__Head_5",     "#4a4f56"],
-        ["Model__Head_6",     "#4a4f56"]
+        ["Model__Crankshaft", { "color": "#cc0000", "stroke": "#ffffff", "stroke_width": 0.5 }],
+        ["Model__Piston_A",   { "color": "#88ccff", "opacity": 0.3 }],
+        ["Model__Piston_C",   { "color": "#88ccff", "opacity": 0.3 }],
+        ["Model__Piston_D",   { "color": "#88ccff", "opacity": 0.3 }]
       ]
     },
     "rubi_scan.ply": {
       "point_size": 0.024, "point_boundary": 110,
       "_cam": "spherical", "azimuth": -119, "elevation": 24.5, "up": [0, 1, 0], "zoom": 2.254
     },
-    "heightmap.ply": {
-      "_cam": "spherical", "azimuth": 45, "elevation": 40, "up": [0, 0, 1], "zoom": 1.2,
-      "color_map": "ply_scalar", "specular": 0.15
-    },
     "tokyo.glb": {
       "camera": [290, 464, 774], "center": [-86, 5, -25], "up": [0, 1, 0], "fov": 40,
       "background": "#182028"
     },
-    "fox.glb": {
-      "camera": [120, 90, 180], "center": [0, 40, 0], "up": [0, 1, 0], "fov": 40,
-      "background": "#1a1a22",
-      "ibl":     { "__on": true, "sky": "#c0d0f0", "ground": "#503020", "intensity": 1.3, "rotation": 0 },
-      "shadows": { "__on": true, "resolution": 1024, "softness": 1, "bias": 0.001, "normal_bias": 1.5, "slope_bias": 2, "pcss_light_size": 0 },
-      "ground":  { "__on": true, "color": "#3a2a20", "size_scale": 3, "roughness": 0.85 }
+    "caffeine": {
+      "_cam": "spherical", "azimuth": 30, "elevation": 25, "zoom": 1.3,
+      "specular": 0.35, "shininess": 48,
+      "mol_representation": "ball-and-stick", "mol_color_theme": "element-symbol",
+      "mol_quality": "high", "mol_infer_bonds": true
     },
-    "boombox.glb": {
-      "camera": [0.011, 0.008, 0.017], "center": [0, 0, 0], "up": [0, 1, 0], "fov": 30,
-      "background": "#181820",
-      "ibl":     { "__on": true, "sky": "#dae4ff", "ground": "#403020", "intensity": 1.5, "rotation": 0 },
-      "shadows": { "__on": true, "resolution": 1024, "softness": 1, "bias": 0.0005, "normal_bias": 1.5, "slope_bias": 1.5, "pcss_light_size": 0 },
-      "ground":  { "__on": true, "color": "#2a2a34", "size_scale": 3, "roughness": 0.9 },
-      "exposure": 1.3
+    "aspirin": {
+      "_cam": "spherical", "azimuth": 30, "elevation": 25, "zoom": 1.3,
+      "specular": 0.35, "shininess": 48,
+      "mol_representation": "ball-and-stick", "mol_color_theme": "element-symbol",
+      "mol_quality": "high", "mol_infer_bonds": true
     },
-    "toycar.glb": {
-      "camera": [0.4, 0.3, 0.55], "center": [0, 0.05, 0], "up": [0, 1, 0], "fov": 30,
-      "background": "#181820",
-      "ibl":     { "__on": true, "sky": "#dae4ff", "ground": "#403020", "intensity": 1.4, "rotation": 0 },
-      "shadows": { "__on": true, "resolution": 1024, "softness": 1, "bias": 0.001, "normal_bias": 1.5, "slope_bias": 2, "pcss_light_size": 0 },
-      "ground":  { "__on": true, "color": "#282838", "size_scale": 3, "roughness": 0.9 },
-      "exposure": 1.2
+    "crambin": {
+      "_cam": "spherical", "azimuth": 30, "elevation": 20, "zoom": 1.3,
+      "specular": 0.25, "shininess": 32,
+      "mol_representation": "cartoon", "mol_color_theme": "chain-id",
+      "mol_quality": "high"
     },
-    "cesiumman.glb": {
-      "camera": [2.5, 1, 2.5], "center": [0, 0.9, 0], "up": [0, 1, 0], "fov": 30,
-      "background": "#1a1a22",
-      "ibl":     { "__on": true, "sky": "#c0d0f0", "ground": "#503020", "intensity": 1.3, "rotation": 0 },
-      "shadows": { "__on": true, "resolution": 1024, "softness": 1, "bias": 0.001, "normal_bias": 1.5, "slope_bias": 2.5, "pcss_light_size": 0 },
-      "ground":  { "__on": true, "color": "#2a2a34", "size_scale": 3, "roughness": 0.9 }
+    "9R1O": {
+      "_cam": "spherical", "azimuth": 30, "elevation": 15, "zoom": 1.15,
+      "specular": 0.2,
+      "mol_representation": "cartoon", "mol_color_theme": "chain-id",
+      "mol_quality": "medium"
     }
   }
 }

@@ -1,0 +1,17 @@
+COMPND    CAFFEINE (1,3,7-trimethylxanthine)
+AUTHOR    PubChem CID 2519 — coordinates truncated to 2D idealised.
+HETATM    1  N1  CFF A   1      -3.394   0.706   0.000  1.00  0.00           N
+HETATM    2  C2  CFF A   1      -2.113   0.313   0.000  1.00  0.00           C
+HETATM    3  N3  CFF A   1      -1.767  -1.028   0.000  1.00  0.00           N
+HETATM    4  C4  CFF A   1      -2.686  -2.049   0.000  1.00  0.00           C
+HETATM    5  C5  CFF A   1      -4.028  -1.694   0.000  1.00  0.00           C
+HETATM    6  C6  CFF A   1      -4.410  -0.328   0.000  1.00  0.00           C
+HETATM    7  O11 CFF A   1      -5.630   0.026   0.000  1.00  0.00           O
+HETATM    8  O12 CFF A   1      -1.303   1.259   0.000  1.00  0.00           O
+HETATM    9  N7  CFF A   1      -4.720  -2.917   0.000  1.00  0.00           N
+HETATM   10  C8  CFF A   1      -3.780  -3.912   0.000  1.00  0.00           C
+HETATM   11  N9  CFF A   1      -2.539  -3.401   0.000  1.00  0.00           N
+HETATM   12  C13 CFF A   1      -0.417  -1.451   0.000  1.00  0.00           C
+HETATM   13  C14 CFF A   1      -3.784   2.135   0.000  1.00  0.00           C
+HETATM   14  C15 CFF A   1      -6.124  -3.111   0.000  1.00  0.00           C
+END

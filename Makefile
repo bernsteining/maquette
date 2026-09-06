@@ -55,18 +55,23 @@ doc: doc-maquette
 # `make demo` (local) and the Pages CI, so neither hard-codes the list.
 # Picker models first, then extras only referenced by documentation deep-links.
 DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj rubi_scan.ply \
-              heightmap.ply cube.stl colored_cube.stl cube.obj rubi_blender.ply
+              cube.stl colored_cube.stl cube.obj rubi_blender.ply
 # glTF demo models — Littlest Tokyo (animated, Draco-compressed) is our sole
 # glTF showcase in the picker. Damaged Helmet (helmet.blg) still lives in
 # examples/data/gltf/ for the PDF documentation build + local dev; add it
 # back here to reinclude it in the demo's model list. Other assets (fox,
 # boombox, toycar, cesiumman, potofcoals) are dev-only in the same way.
 DEMO_GLTF_MODELS = tokyo.glb
+DEMO_MOL_MODELS = caffeine.pdb aspirin.xyz crambin.bcif 9R1O.pdb
+DEMO_SCAD_MODELS = gear.scad
 
 # Copy the demo models into docs/ (gitignored there — regenerated, not committed).
 demo-assets:
 	cp $(addprefix examples/data/,$(DEMO_MODELS)) docs/
 	cp $(addprefix examples/data/gltf/,$(DEMO_GLTF_MODELS)) docs/
+	mkdir -p docs/molecules docs/scad
+	cp $(addprefix examples/data/molecules/,$(DEMO_MOL_MODELS)) docs/molecules/
+	cp $(addprefix examples/data/scad/,$(DEMO_SCAD_MODELS)) docs/scad/
 
 # Assemble the demo dir locally: fresh wasm + models, ready to serve.
 demo: wasm demo-assets scad-wasm gltf-wasm
