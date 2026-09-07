@@ -595,18 +595,40 @@ cross-section → vector contour, in one call.
 
 #pagebreak(weak: true)
 
-= Escape hatch: precompiled `.ply`
+= Multi-file projects: `compile-scad-tree`
 
-The wasm plugin has a memory budget of about 1 GB. Very large assemblies can outgrow it. When that happens, compile once natively (e.g. `cargo run --release --example repro -p maquette-scad`) and pass the resulting `.ply` bytes straight to `render-ply`:
+A project split across many files with `use <..>` / `include <..>` compiles in one call — `compile-scad-tree` reads the entry file and follows its include graph for you, so there's no file list to maintain:
+
+```typ
+#import "@preview/maquette-scad:0.1.0": compile-scad-tree, openscad-view
+#import "@preview/maquette:0.1.3": render-ply
+
+#let machine = compile-scad-tree("Cyclone.scad",
+  root: "/examples/scad/cyclone-src/", fn: 8)
+#render-ply(machine, ..openscad-view, azimuth: 35, elevation: 20, up: (0, 0, 1))
+```
+
+`root` is the source folder as a project-root path (leading `/`); `entry` is the top file inside it. The whole Cyclone-PCB-Factory below — 69 files — comes from that single call:
+
+#figure(
+  image("cyclone-example.png", width: 88%),
+  caption: [The full Cyclone-PCB-Factory from one `compile-scad-tree` call.],
+)
+
+Need the files as a dict instead (to edit one before compiling)? `scad-collect(entry, root:)` returns `path → source` for `compile-scad(main, files: …)`.
+
+#pagebreak(weak: true)
+
+= Very large assemblies
+
+If a model is too big to build in the plugin, compile it once natively and render the resulting `.ply`:
 
 ```typ
 #import "@preview/maquette:0.1.3": render-ply
 
-#let full = read("cyclone-full.ply", encoding: none)
-#render-ply(full, camera: (400, 400, 200), up: (0, 0, 1), fov: 40)
+#let full = read("model.ply", encoding: none)
+#render-ply(full, ..openscad-view, azimuth: 35, elevation: 20)
 ```
-
-`examples/scad/cyclone.typ` in the repo shows the full pattern with parameterised camera shots.
 
 #pagebreak(weak: true)
 

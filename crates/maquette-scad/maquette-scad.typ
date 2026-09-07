@@ -185,6 +185,51 @@
   )
 }
 
+// ---- include/use graph resolution (pure Typst) ----
+// Typst can't list a directory, but it CAN follow an OpenSCAD project's own
+// `use`/`include` graph: read the entry file, find its `use <..>` / `include <..>`
+// references, resolve each RELATIVE TO THE FILE that names it (OpenSCAD's rule),
+// read those, and repeat. This yields the `files` dict compile-scad wants with no
+// manual path list and no JSON bundle.
+#let _scad-dir(p) = {
+  let segs = p.split("/")
+  if segs.len() <= 1 { "" } else { segs.slice(0, segs.len() - 1).join("/") + "/" }
+}
+#let _scad-normalize(path) = {
+  let out = ()
+  for seg in path.split("/") {
+    if seg == "" or seg == "." { }
+    else if seg == ".." { if out.len() > 0 { let _ = out.pop() } }
+    else { out.push(seg) }
+  }
+  if out.len() == 0 { "" } else { out.join("/") }
+}
+#let _scad-deps(src) = {
+  src.matches(regex("(?m)^[ \t]*(?:use|include)[ \t]*<([^>]+)>")).map(m => m.captures.at(0))
+}
+
+// Walk the include/use graph from `entry` (a path relative to `root`), reading
+// every referenced file with read() under `root`. Returns a (path -> source)
+// dict ready to pass as compile-scad(..., files: …). Every referenced file must
+// exist (Typst's read() has no soft-fail); missing optional libs will error.
+#let scad-collect(entry, root: "") = {
+  let files = (:)
+  let queue = (entry,)
+  while queue.len() > 0 {
+    let path = queue.remove(0)
+    if path in files { continue }
+    let src = read(root + path)
+    files.insert(path, src)
+    let dir = _scad-dir(path)
+    for rel in _scad-deps(src) {
+      let np = _scad-normalize(dir + rel)
+      let ok = np != "" and (np.ends-with(".scad") or np.ends-with(".h"))
+      if ok and np not in files and np not in queue { queue.push(np) }
+    }
+  }
+  files
+}
+
 // Compile REAL OpenSCAD source text (a string, or bytes from `read("x.scad")`)
 // to PLY bytes. Supports a substantial subset: primitives, transforms, booleans,
 // hull/minkowski, extrudes (incl. twist/scale), `for`/`if`, list comprehensions,
@@ -219,6 +264,19 @@
     _pack-bin(assets),
   )
 }
+
+// Compile a whole multi-file OpenSCAD project by its ENTRY file, resolving the
+// `use`/`include` graph automatically (see scad-collect). No file list, no JSON:
+//   #let part = compile-scad-tree("Cyclone.scad", root: "/examples/scad/cyclone-src/")
+// `root` is the source directory and `entry` the top file within it. Because the
+// read() happens inside THIS module (not your file), give `root` as a path from
+// the Typst project root — a leading "/" (resolved against `typst … --root`) —
+// so it resolves the same no matter which file calls. Other args match compile-scad.
+#let compile-scad-tree(entry, root: "", bin: (:), font: none, fn: 32, trace: none) = compile-scad(
+  "include <" + entry + ">\n",
+  files: scad-collect(entry, root: root),
+  bin: bin, font: font, fn: fn, trace: trace,
+)
 
 // Direct 2D `.scad` → SVG variant of `compile-scad`. Errors if the source
 // resolves to a 3D solid — SVG output only covers 2D geometry. Same
