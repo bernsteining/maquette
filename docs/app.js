@@ -1984,15 +1984,42 @@ function ensureSpherical() {
   const twoDist = () => { const [a, b] = two(); return Math.hypot(a.x - b.x, a.y - b.y); };
   const twoCent = () => { const [a, b] = two(); return [(a.x + b.x) / 2, (a.y + b.y) / 2]; };
   const seedPinch = () => { pd = twoDist(); [pcx, pcy] = twoCent(); };
-  // Vertical orbit is CONTINUOUS: elevation is allowed to pass over the poles
-  // instead of stopping at ±89°. Wrap into (-180,180] and nudge off the exact
-  // ±90° pole, where the view direction is parallel to `up` and the camera
-  // basis degenerates (one bad frame). Going "over the top" shows the model
-  // upside down, exactly as a real turntable would.
-  const wrapEl = (el, dir = 0) => {
-    el = ((el + 180) % 360 + 360) % 360 - 180;
-    if (Math.abs(Math.abs(el) - 90) < 0.1) el += (dir >= 0 ? 0.1 : -0.1);
-    return Math.round(el * 10) / 10;
+  // Trackball orbit. Azimuth/elevation cameras have a pole singularity: with a
+  // fixed `up`, the screen orientation snaps 180° as the view crosses straight
+  // up/down. To make VERTICAL orbit continuous *without* that snap, we carry the
+  // camera's own up-vector and rotate it together with the view direction — so
+  // `up` is always perpendicular to the view and the basis never degenerates.
+  // Vertical drag rolls smoothly over the top (model goes gradually upside down,
+  // like a rotisserie); horizontal drag spins about that up.
+  const _sub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+  const _add = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+  const _scl = (a, s) => [a[0]*s, a[1]*s, a[2]*s];
+  const _dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+  const _crs = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+  const _nrm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
+  // Rodrigues rotation of v about unit axis k by angle a.
+  const _rot = (v, k, a) => {
+    const c = Math.cos(a), s = Math.sin(a), d = _dot(k, v), x = _crs(k, v);
+    return [v[0]*c + x[0]*s + k[0]*d*(1-c),
+            v[1]*c + x[1]*s + k[1]*d*(1-c),
+            v[2]*c + x[2]*s + k[2]*d*(1-c)];
+  };
+  // Orthonormal basis the plugin builds from `up` (must match projection.rs).
+  const _basis = (up) => {
+    const arb = Math.abs(up[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const r = _nrm(_crs(up, arb));
+    return { r, f: _nrm(_crs(r, up)) };
+  };
+  // Apply a trackball drag to a view direction + up (both unit, perpendicular),
+  // returning the new pair. Horizontal spins about `up`, vertical about the
+  // screen-right axis.
+  const _trackball = (dir, up, dx, dy) => {
+    // Signs chosen to match the previous feel: drag right → same horizontal
+    // spin as before; drag down → camera rises (see more of the top).
+    const kH = -dx * 0.5 * Math.PI / 180, kV = dy * 0.5 * Math.PI / 180;
+    dir = _rot(dir, up, kH);                    // up is invariant under its own rotation
+    const rt = _nrm(_crs(dir, up));             // screen-right
+    return { dir: _nrm(_rot(dir, rt, kV)), up: _nrm(_rot(up, rt, kV)) };
   };
   // glTF path — the glTF plugin's camera is a Cartesian (x,y,z) triple; the
   // maquette-side spherical (az/el/dist/zoom) model doesn't exist there. Rotate
@@ -2002,40 +2029,20 @@ function ensureSpherical() {
     // override keeps pushing the original camera into every render and the
     // drag has no visible effect.
     renderOverride = null;
-    const c = state.center || [0, 0, 0], u = state.up || [0, 1, 0];
-    const off = [state.camera[0] - c[0], state.camera[1] - c[1], state.camera[2] - c[2]];
+    // glTF drives an explicit camera + up, so the trackball runs directly on the
+    // offset and up-vector: continuous vertical roll, no pole snap.
+    const c = state.center || [0, 0, 0];
+    const off = _sub(state.camera, c);
     const dist = Math.hypot(off[0], off[1], off[2]) || 1;
-    const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
-    const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0]/l, a[1]/l, a[2]/l]; };
-    const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
-    const v = norm(off), up = norm(u);
-    // Build a local frame (right/forward/up) from the current view direction.
-    const arb = Math.abs(up[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
-    const right = norm(cross(up, arb));
-    const forward = norm(cross(right, up));
-    let el = Math.asin(Math.max(-1, Math.min(1, dot(v, up))));
-    let az = Math.atan2(dot(v, forward), dot(v, right));
-    // Touch on gltf: Y stays inverted from mouse (confirmed good), X
-    // matches mouse (drag right → grabbed side of the model comes toward
-    // you). The touch-X sign has been flipped repeatedly; if the phone
-    // still feels wrong here after a hard reload, my mental model of the
-    // trig direction is off and we need to trace it visually rather than
-    // guess signs.
-    // Unified with the maquette orbitBy path below: no ptype split on
-    // either axis. Touch and mouse produce the same rotation for the same
-    // drag delta. Y stays as originally emitted (dy > 0 → el increases →
-    // camera pans up so top of model tilts down in view).
-    const xdir = 1;
-    az += xdir * dx * 0.5 * Math.PI / 180;
-    el = wrapEl(el * 180 / Math.PI + dy * 0.5, dy) * Math.PI / 180;
-    // Reconstitute the offset from (az, el, dist) in the same basis.
-    const cosEl = Math.cos(el);
-    const nx = right[0]*cosEl*Math.cos(az) + forward[0]*cosEl*Math.sin(az) + up[0]*Math.sin(el);
-    const ny = right[1]*cosEl*Math.cos(az) + forward[1]*cosEl*Math.sin(az) + up[1]*Math.sin(el);
-    const nz = right[2]*cosEl*Math.cos(az) + forward[2]*cosEl*Math.sin(az) + up[2]*Math.sin(el);
-    state.camera = [c[0] + nx * dist, c[1] + ny * dist, c[2] + nz * dist];
-    state.camera = state.camera.map(round3);
-    controlRefs.camera?.(state.camera);
+    let dir = _nrm(off);
+    let up = _nrm(state.up || [0, 1, 0]);
+    let sUp = _sub(up, _scl(dir, _dot(up, dir)));                    // keep up ⊥ view
+    if (Math.hypot(sUp[0], sUp[1], sUp[2]) < 1e-4) sUp = _basis(dir).r;
+    sUp = _nrm(sUp);
+    const t = _trackball(dir, sUp, dx, dy);
+    state.up = t.up.map(round3);
+    state.camera = _add(c, _scl(t.dir, dist)).map(round3);
+    controlRefs.camera?.(state.camera); controlRefs.up?.(state.up);
   };
   const zoomGltfBy = (f) => {
     renderOverride = null;
@@ -2055,12 +2062,25 @@ function ensureSpherical() {
   };
   const orbitBy = (dx, dy, ptype) => {
     if (model._gltf) { orbitGltfBy(dx, dy, ptype); return; }
-    // Same convention for mouse and touch: no ptype split. Prior version
-    // inverted X on touch under a "grab-and-drag" reading, which had the
-    // model rotate the wrong way for the finger direction on phone.
-    state.azimuth = Math.round((state.azimuth + dx * 0.5) * 10) / 10;
-    state.elevation = wrapEl(state.elevation + dy * 0.5, dy);
-    controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation);
+    // Reconstruct the current view direction from spherical az/el/up.
+    const upW = _nrm(state.up || [0, 0, 1]);
+    const { r, f } = _basis(upW);
+    const az = state.azimuth * Math.PI / 180, el = state.elevation * Math.PI / 180;
+    let dir = _nrm(_add(_add(_scl(r, Math.cos(el) * Math.cos(az)),
+                             _scl(f, Math.cos(el) * Math.sin(az))),
+                        _scl(upW, Math.sin(el))));
+    // Screen-up = world-up projected perpendicular to the view (Gram-Schmidt).
+    let sUp = _sub(upW, _scl(dir, _dot(upW, dir)));
+    if (Math.hypot(sUp[0], sUp[1], sUp[2]) < 1e-4) sUp = _basis(dir).r;  // view ∥ up
+    sUp = _nrm(sUp);
+    const t = _trackball(dir, sUp, dx, dy);
+    // Re-encode: `up` carries the orientation, elevation stays 0 (dir ⊥ up),
+    // azimuth is dir's angle in the new up-basis. No pole singularity, no snap.
+    const b2 = _basis(t.up);
+    state.up = t.up.map(round3);
+    state.elevation = 0;
+    state.azimuth = Math.round(Math.atan2(_dot(t.dir, b2.f), _dot(t.dir, b2.r)) * 180 / Math.PI * 10) / 10;
+    controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation); controlRefs.up?.(state.up);
   };
 
   stage.addEventListener("pointerdown", (e) => {
