@@ -1984,6 +1984,16 @@ function ensureSpherical() {
   const twoDist = () => { const [a, b] = two(); return Math.hypot(a.x - b.x, a.y - b.y); };
   const twoCent = () => { const [a, b] = two(); return [(a.x + b.x) / 2, (a.y + b.y) / 2]; };
   const seedPinch = () => { pd = twoDist(); [pcx, pcy] = twoCent(); };
+  // Vertical orbit is CONTINUOUS: elevation is allowed to pass over the poles
+  // instead of stopping at ±89°. Wrap into (-180,180] and nudge off the exact
+  // ±90° pole, where the view direction is parallel to `up` and the camera
+  // basis degenerates (one bad frame). Going "over the top" shows the model
+  // upside down, exactly as a real turntable would.
+  const wrapEl = (el, dir = 0) => {
+    el = ((el + 180) % 360 + 360) % 360 - 180;
+    if (Math.abs(Math.abs(el) - 90) < 0.1) el += (dir >= 0 ? 0.1 : -0.1);
+    return Math.round(el * 10) / 10;
+  };
   // glTF path — the glTF plugin's camera is a Cartesian (x,y,z) triple; the
   // maquette-side spherical (az/el/dist/zoom) model doesn't exist there. Rotate
   // and scale `state.camera` directly around `state.center` for the same feel.
@@ -2017,7 +2027,7 @@ function ensureSpherical() {
     // camera pans up so top of model tilts down in view).
     const xdir = 1;
     az += xdir * dx * 0.5 * Math.PI / 180;
-    el = Math.max(-89, Math.min(89, el * 180 / Math.PI + dy * 0.5)) * Math.PI / 180;
+    el = wrapEl(el * 180 / Math.PI + dy * 0.5, dy) * Math.PI / 180;
     // Reconstitute the offset from (az, el, dist) in the same basis.
     const cosEl = Math.cos(el);
     const nx = right[0]*cosEl*Math.cos(az) + forward[0]*cosEl*Math.sin(az) + up[0]*Math.sin(el);
@@ -2049,7 +2059,7 @@ function ensureSpherical() {
     // inverted X on touch under a "grab-and-drag" reading, which had the
     // model rotate the wrong way for the finger direction on phone.
     state.azimuth = Math.round((state.azimuth + dx * 0.5) * 10) / 10;
-    state.elevation = Math.max(-89, Math.min(89, Math.round((state.elevation + dy * 0.5) * 10) / 10));
+    state.elevation = wrapEl(state.elevation + dy * 0.5, dy);
     controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation);
   };
 
