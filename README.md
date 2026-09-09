@@ -14,8 +14,8 @@
 | Package | What it renders |
 |---|---|
 | **[maquette](maquette/README.md)** | [STL](https://en.wikipedia.org/wiki/STL_(file_format)) / [OBJ](https://en.wikipedia.org/wiki/Wavefront_.obj_file) / [PLY](https://en.wikipedia.org/wiki/PLY_(file_format))|
-| **[maquette-gltf](crates/maquette-gltf/README.md)** | [glTF](https://www.khronos.org/gltf/) 2.0 (`.glb` / `.gltf`) with PBR, IBL, KHR_materials_* extensions, Draco, quantization |
-| **[maquette-scad](crates/maquette-scad/README.md)** | [OpenSCAD](https://openscad.org/) sources → maquette rendering |
+| **[maquette-gltf](crates/maquette-gltf/README.md)** | [glTF](https://www.khronos.org/gltf/) 2.0 (`.glb` / `.gltf`) |
+| **[maquette-scad](crates/maquette-scad/README.md)** | [.scad](https://openscad.org/) |
 
 # Usage
 
