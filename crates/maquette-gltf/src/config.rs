@@ -274,6 +274,28 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
 
     let mut cfg = RenderConfig::default();
     for (key, v) in map.iter() {
+        // Accept `none` (JSON null) and the string "none" for any setting: they
+        // mean "unset" — clear optionals, disable features, transparent
+        // background. Scalar fields with a fixed default are left untouched.
+        if v.is_null() || v.as_str() == Some("none") {
+            match key.as_str() {
+                "background"       => cfg.background = String::new(),   // "" = transparent
+                "tone_mapping"     => cfg.tone_mapping = String::new(),
+                "camera"           => cfg.camera = None,
+                "distance"         => cfg.distance = None,
+                "camera_name"      => cfg.camera_name = None,
+                "camera_index"     => cfg.camera_index = None,
+                "scene_index"      => cfg.scene_index = None,
+                "animation_index"  => cfg.animation_index = None,
+                "ibl"              => cfg.ibl = None,
+                "shadows"          => cfg.shadows = None,
+                "ground"           => cfg.ground = None,
+                "ssao"             => cfg.ssao = None,
+                "texture_max_size" => cfg.texture_max_size = None,
+                _ => {}
+            }
+            continue;
+        }
         match key.as_str() {
             "width"         => if let Some(n) = as_usize(v) { cfg.width = n.max(1); }
             "height"        => if let Some(n) = as_usize(v) { cfg.height = n.max(1); }
