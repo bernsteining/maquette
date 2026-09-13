@@ -487,6 +487,7 @@ dependencies = [
 name = "maquette"
 version = "0.1.3"
 dependencies = [
+ "maquette-core",
  "wasm-minimal-protocol",
 ]
 

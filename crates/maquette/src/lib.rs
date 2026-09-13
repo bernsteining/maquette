@@ -5,13 +5,11 @@ initiate_protocol!();
 mod annotations;
 mod cache;
 mod clip;
-mod color;
 mod color_map;
 mod config;
 mod decimate;
 mod explode;
 mod expr;
-mod fxaa;
 mod math;
 mod obj_parser;
 mod outline;
@@ -26,6 +24,10 @@ mod smooth;
 mod ssao;
 mod svg;
 
+// Shared render primitives now live in maquette-core (deduplicated from this
+// crate's former copies). Re-export under the old paths so `crate::color::…`
+// and `crate::fxaa::…` call sites are unchanged.
+use maquette_core::{color, fxaa};
 use config::RenderConfig;
 use std::collections::HashMap;
 
