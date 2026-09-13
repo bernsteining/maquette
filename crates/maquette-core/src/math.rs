@@ -95,6 +95,27 @@ impl Vec3 {
         let len = n.length();
         if len < 1e-12 { None } else { Some(n.scale(1.0 / len)) }
     }
+
+    pub fn centroid(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
+        Vec3::new(
+            (a.x + b.x + c.x) / 3.0,
+            (a.y + b.y + c.y) / 3.0,
+            (a.z + b.z + c.z) / 3.0,
+        )
+    }
+
+    pub fn tangent_basis(self) -> (Vec3, Vec3) {
+        let seed = if self.x.abs() <= self.y.abs() && self.x.abs() <= self.z.abs() {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else if self.y.abs() <= self.z.abs() {
+            Vec3::new(0.0, 1.0, 0.0)
+        } else {
+            Vec3::new(0.0, 0.0, 1.0)
+        };
+        let t1 = self.cross(seed).normalized();
+        let t2 = self.cross(t1);
+        (t1, t2)
+    }
 }
 
 impl From<[f64; 3]> for Vec3 {

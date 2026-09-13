@@ -1,39 +1,14 @@
 /// Minimal 3D vector math and utilities — no external dependency needed.
 
 use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, Hasher};
+
+// Vec3 / Mat4 / FxHasher are shared render primitives — they live in
+// maquette-core (byte-identical) and are re-exported so `crate::math::…`
+// call sites are unchanged. Mesh-only utilities (parsers, adjacency, the
+// SIMD view transform) stay below.
+pub use maquette_core::math::{FxBuildHasher, FxHashMap, Mat4, Vec3};
 
 
-/// FxHash — fast, non-cryptographic hash for integer-like keys.
-pub struct FxHasher(u64);
-
-const SEED: u64 = 0x517cc1b727220a95;
-
-impl Default for FxHasher {
-    fn default() -> Self { Self(0) }
-}
-
-impl Hasher for FxHasher {
-    #[inline]
-    fn finish(&self) -> u64 { self.0 }
-    #[inline]
-    fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
-            self.0 = (self.0 ^ b as u64).wrapping_mul(SEED);
-        }
-    }
-    #[inline]
-    fn write_u64(&mut self, i: u64) { self.0 = (self.0 ^ i).wrapping_mul(SEED); }
-    #[inline]
-    fn write_i64(&mut self, i: i64) { self.write_u64(i as u64); }
-    #[inline]
-    fn write_u32(&mut self, i: u32) { self.write_u64(i as u64); }
-    #[inline]
-    fn write_usize(&mut self, i: usize) { self.write_u64(i as u64); }
-}
-
-pub type FxBuildHasher = BuildHasherDefault<FxHasher>;
-pub type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
 #[inline]
 pub fn fx_hashmap<K, V>() -> FxHashMap<K, V> { HashMap::with_hasher(FxBuildHasher::default()) }
 
@@ -42,137 +17,6 @@ pub fn fx_hashmap_cap<K, V>(cap: usize) -> FxHashMap<K, V> {
     HashMap::with_capacity_and_hasher(cap, FxBuildHasher::default())
 }
 
-#[derive(Clone, Copy)]
-pub struct Vec3 {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
-}
-
-impl Vec3 {
-    #[inline(always)]
-    pub const fn new(x: f64, y: f64, z: f64) -> Self {
-        Self { x, y, z }
-    }
-
-    #[inline(always)]
-    pub fn dot(self, other: Self) -> f64 {
-        self.x * other.x + self.y * other.y + self.z * other.z
-    }
-
-    #[inline(always)]
-    pub fn cross(self, other: Self) -> Self {
-        Self {
-            x: self.y * other.z - self.z * other.y,
-            y: self.z * other.x - self.x * other.z,
-            z: self.x * other.y - self.y * other.x,
-        }
-    }
-
-    #[inline(always)]
-    pub fn sub(self, other: Self) -> Self {
-        Self {
-            x: self.x - other.x,
-            y: self.y - other.y,
-            z: self.z - other.z,
-        }
-    }
-
-    #[inline(always)]
-    pub fn add(self, other: Self) -> Self {
-        Self {
-            x: self.x + other.x,
-            y: self.y + other.y,
-            z: self.z + other.z,
-        }
-    }
-
-    #[inline(always)]
-    pub fn scale(self, s: f64) -> Self {
-        Self {
-            x: self.x * s,
-            y: self.y * s,
-            z: self.z * s,
-        }
-    }
-
-    #[inline(always)]
-    pub fn length(self) -> f64 {
-        self.dot(self).sqrt()
-    }
-
-    #[inline(always)]
-    pub fn normalized(self) -> Self {
-        let len = self.length();
-        if len < 1e-12 {
-            Self::new(0.0, 0.0, 0.0)
-        } else {
-            self.scale(1.0 / len)
-        }
-    }
-
-    #[inline(always)]
-    pub fn centroid(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
-        Vec3::new(
-            (a.x + b.x + c.x) / 3.0,
-            (a.y + b.y + c.y) / 3.0,
-            (a.z + b.z + c.z) / 3.0,
-        )
-    }
-
-    /// Unit face normal of triangle `(a, b, c)`, or `None` if the triangle is
-    /// degenerate (near-zero area). Centralizes the `(b-a)×(c-a)` normal shared
-    /// by the OBJ/PLY parsers, decimation, and point-cloud reconstruction.
-    #[inline]
-    pub fn face_normal(a: Vec3, b: Vec3, c: Vec3) -> Option<Vec3> {
-        let n = (b - a).cross(c - a);
-        let len = n.length();
-        if len < 1e-12 { None } else { Some(n.scale(1.0 / len)) }
-    }
-
-    /// Two orthonormal tangents spanning the plane perpendicular to `self`
-    /// (which must be unit length), with `(t1, t2, self)` right-handed. Seeds
-    /// from the smallest-magnitude axis so it stays well-conditioned for any
-    /// orientation.
-    #[inline]
-    pub fn tangent_basis(self) -> (Vec3, Vec3) {
-        let seed = if self.x.abs() <= self.y.abs() && self.x.abs() <= self.z.abs() {
-            Vec3::new(1.0, 0.0, 0.0)
-        } else if self.y.abs() <= self.z.abs() {
-            Vec3::new(0.0, 1.0, 0.0)
-        } else {
-            Vec3::new(0.0, 0.0, 1.0)
-        };
-        let t1 = self.cross(seed).normalized();
-        let t2 = self.cross(t1);
-        (t1, t2)
-    }
-
-}
-
-impl From<[f64; 3]> for Vec3 {
-    /// Build a `Vec3` from a `[f64; 3]` config array (center, up, light dir, …).
-    #[inline]
-    fn from(a: [f64; 3]) -> Self {
-        Vec3::new(a[0], a[1], a[2])
-    }
-}
-
-impl std::ops::Sub for Vec3 {
-    type Output = Vec3;
-    #[inline(always)]
-    fn sub(self, rhs: Vec3) -> Vec3 {
-        Vec3::sub(self, rhs)
-    }
-}
-
-impl std::ops::Add for Vec3 {
-    type Output = Vec3;
-    #[inline(always)]
-    fn add(self, rhs: Vec3) -> Vec3 {
-        Vec3::add(self, rhs)
-    }
-}
 
 /// Quantize a vertex position to integer keys for hashing (~1e-6 resolution).
 #[inline]
@@ -356,39 +200,6 @@ pub fn parse_i64_bytes(b: &[u8]) -> Option<i64> {
     Some(if neg { -val } else { val })
 }
 
-/// 4x4 matrix stored as [row][col], used for view transforms.
-#[derive(Clone, Copy)]
-pub struct Mat4(pub(crate) [[f64; 4]; 4]);
-
-impl Mat4 {
-    /// Build a look-at view matrix (world → camera space).
-    /// Camera at `camera`, looking toward `center`, with `up` hint.
-    #[inline]
-    pub fn look_at(camera: Vec3, center: Vec3, up: Vec3) -> Self {
-        let f = (center - camera).normalized(); // forward
-        let r = f.cross(up).normalized(); // right
-        let u = r.cross(f); // true up
-
-        // Camera axes: right = +x, up = +y, forward = -z (OpenGL convention)
-        Mat4([
-            [r.x, r.y, r.z, -r.dot(camera)],
-            [u.x, u.y, u.z, -u.dot(camera)],
-            [-f.x, -f.y, -f.z, f.dot(camera)],
-            [0.0, 0.0, 0.0, 1.0],
-        ])
-    }
-
-    #[inline(always)]
-    pub fn transform_point(self, p: Vec3) -> Vec3 {
-        let m = self.0;
-        Vec3 {
-            x: m[0][0] * p.x + m[0][1] * p.y + m[0][2] * p.z + m[0][3],
-            y: m[1][0] * p.x + m[1][1] * p.y + m[1][2] * p.z + m[1][3],
-            z: m[2][0] * p.x + m[2][1] * p.y + m[2][2] * p.z + m[2][3],
-        }
-    }
-
-}
 
 // ---------------------------------------------------------------------------
 // SIMD f32 view matrix — pre-splatted coefficients for batch vertex transforms
