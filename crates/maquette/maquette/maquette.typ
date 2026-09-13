@@ -2,7 +2,7 @@
 
 #let maquette-plugin = plugin("maquette.wasm")
 
-#let _parse-args(args) = {
+#let _parse-args(args, extra: (:)) = {
   // Extract display args (not part of render config)
   let named = args.named()
   let width = named.at("width", default: auto)
@@ -21,6 +21,11 @@
     if k not in ("width", "height", "format") {
       config.insert(k, v)
     }
+  }
+  // Wrapper-supplied config (e.g. auto-discovered `.mtl` text). An explicit
+  // user value in `args` always wins over the auto-discovered one.
+  for (k, v) in extra {
+    if k not in config { config.insert(k, v) }
   }
   (
     cfg: bytes(json.encode(config)),
@@ -46,12 +51,9 @@
   else { dim.ratio * base + dim.length } // relative = ratio + length
 }
 
-#let _render(data, png-fn, svg-fn, args) = {
-  let a = _parse-args(args)
-  if a.format != "png" {
-    image(svg-fn(data, a.cfg), format: "svg", width: a.width, height: a.height)
-  } else {
-    let result = png-fn(data, a.cfg)
+// Turn a raster-entry result (0x00 raw RGBA / 0x02 raster+overlay / 0x3C SVG)
+// into displayable content at the requested size. Shared by every PNG path.
+#let _present(result, a) = {
     let marker = result.at(0)
     if marker == 0x00 {
       // Raw RGBA: [0x00][w u32 LE][h u32 LE][rgba8…]. Embedding the pixels
@@ -93,7 +95,97 @@
       // 0x3C — a pure SVG (defensive; raster mode returns 0x00 or 0x02).
       image(result, format: "svg", width: a.width, height: a.height)
     }
+}
+
+#let _render(data, png-fn, svg-fn, args) = {
+  let a = _parse-args(args)
+  if a.format != "png" {
+    image(svg-fn(data, a.cfg), format: "svg", width: a.width, height: a.height)
+  } else {
+    _present(png-fn(data, a.cfg), a)
   }
+}
+
+// ── OBJ material / texture sidecar discovery ───────────────────────────────
+//
+// Little-endian encoders + bundle packer, shared wire format with
+// `maquette_core::bundle` (identical to the glTF wrapper's packer).
+#let _u16-bytes(n) = bytes((calc.rem(n, 256), calc.rem(calc.quo(n, 256), 256)))
+#let _u32-bytes(n) = bytes((
+  calc.rem(n, 256),
+  calc.rem(calc.quo(n, 256), 256),
+  calc.rem(calc.quo(n, 65536), 256),
+  calc.rem(calc.quo(n, 16777216), 256),
+))
+
+// Pack `filename -> bytes` into the sidecar bundle the plugin unpacks. Empty
+// input → empty bytes (plugin treats this as "no textures").
+#let _pack-bundle(files) = {
+  let names = files.keys()
+  let n = names.len()
+  if n == 0 { return bytes(()) }
+  let header-size = 4
+  for name in names { header-size += 2 + bytes(name).len() + 4 + 4 }
+  let entries = ()
+  let cursor = header-size
+  for name in names {
+    let data = files.at(name)
+    entries.push((name: name, offset: cursor, length: data.len()))
+    cursor += data.len()
+  }
+  let out = _u32-bytes(n)
+  for e in entries {
+    let name-bytes = bytes(e.name)
+    out += _u16-bytes(name-bytes.len())
+    out += name-bytes
+    out += _u32-bytes(e.offset)
+    out += _u32-bytes(e.length)
+  }
+  for e in entries { out += files.at(e.name) }
+  out
+}
+
+// Directory prefix of a path (keeps the trailing slash; "" for a bare name).
+#let _dir-of(path) = {
+  let i = path.len()
+  while i > 0 {
+    let c = path.at(i - 1)
+    if c == "/" or c == "\\" { break }
+    i -= 1
+  }
+  path.slice(0, i)
+}
+
+// Every `mtllib` filename referenced by an OBJ (one line may list several).
+#let _obj-mtllibs(text) = {
+  let out = ()
+  for line in text.split("\n") {
+    let l = line.trim()
+    if l.starts-with("mtllib ") or l.starts-with("mtllib\t") {
+      for tok in l.slice(6).split(regex("\\s+")) {
+        let t = tok.trim().replace("\\", "/")
+        if t != "" and t not in out { out.push(t) }
+      }
+    }
+  }
+  out
+}
+
+// Every `map_Kd` texture filename referenced by concatenated MTL text. The
+// filename is the last whitespace token (after any `-o`/`-s`/… options).
+#let _mtl-map-kd(text) = {
+  let out = ()
+  for line in text.split("\n") {
+    let l = line.trim()
+    if l.starts-with("map_Kd ") or l.starts-with("map_Kd\t") {
+      let toks = l.split(regex("\\s+")).filter(t => t.trim() != "")
+      if toks.len() >= 2 {
+        let f = toks.at(toks.len() - 1).replace("\\", "/")
+        if f not in out { out.push(f) }
+      }
+    }
+  }
+  out
 }
 
 /// Render an STL model to an image (PNG raster by default, `format: "svg"` for vector).
@@ -114,13 +206,40 @@
 /// 🔗 *Dial in the camera, lighting and materials visually in the live web demo, then
 /// copy the generated code:* https://bernsteining.github.io/maquette/
 ///
-/// - obj-data (bytes, str): OBJ file contents (reading with `encoding: none` is recommended).
+/// - obj-data (bytes, str): OBJ file contents (reading with `encoding: none` is
+///   recommended), or — when `read:` is given — a *path* to the `.obj`.
+/// - read (function, none): an inline reader, `p => read(p, encoding: none)`.
+///   When present, `obj-data` is treated as a path: the wrapper reads it, then
+///   auto-discovers its `mtllib` material libraries and every `map_Kd` diffuse
+///   texture (resolved relative to the `.obj`), decodes them, and renders the
+///   model *textured* (PNG only). Without it, behaviour is unchanged — pass
+///   OBJ bytes and, optionally, `mtl:`/`materials:` in the config yourself.
 /// - ..args (arguments): render config, as named arguments or a single dictionary
 ///   (camera, lights, material, shading, post-processing, …).
 /// -> content
-#let render-obj(obj-data, ..args) = {
-  let data = bytes(obj-data)
-  _render(data, maquette-plugin.render_obj_png, maquette-plugin.render_obj, args)
+#let render-obj(obj-data, read: none, ..args) = {
+  if read == none {
+    // Classic path: bytes in, colours via `mtl:`/`materials:` config if any.
+    let data = bytes(obj-data)
+    return _render(data, maquette-plugin.render_obj_png, maquette-plugin.render_obj, args)
+  }
+  // Path + reader: discover material libraries and diffuse textures.
+  let obj-bytes = bytes(read(obj-data))
+  let base = _dir-of(obj-data)
+  let obj-text = str(obj-bytes)
+  let mtl-text = ""
+  for f in _obj-mtllibs(obj-text) { mtl-text += str(read(base + f)) + "\n" }
+  let tex-files = (:)
+  for f in _mtl-map-kd(mtl-text) {
+    if f not in tex-files { tex-files.insert(f, bytes(read(base + f))) }
+  }
+  let a = _parse-args(args, extra: (mtl: mtl-text))
+  if a.format != "png" {
+    // SVG output can't carry raster textures; still applies `.mtl` Kd colours.
+    image(maquette-plugin.render_obj(obj-bytes, a.cfg), format: "svg", width: a.width, height: a.height)
+  } else {
+    _present(maquette-plugin.render_obj_png_tex(obj-bytes, a.cfg, _pack-bundle(tex-files)), a)
+  }
 }
 
 /// Render a PLY model or point cloud to an image (PNG raster by default, `format: "svg"` for vector).

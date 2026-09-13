@@ -201,6 +201,10 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
             vertex_normals: None,
             smoothing_group: None,
             vertex_scalars: None,
+            // Decimation produces new corner positions; drop UVs/texture
+            // binding and fall back to the untextured shading path.
+            uvs: None,
+            tex: None,
         });
     }
 

@@ -28,6 +28,7 @@ mod svg;
 // crate's former copies). Re-export under the old paths so `crate::color::…`
 // and `crate::fxaa::…` call sites are unchanged.
 use maquette_core::{color, fxaa};
+use maquette_core::texture::{build_mips, Filter, MipLevel, Texture, Wrap};
 use config::RenderConfig;
 use std::collections::HashMap;
 
@@ -65,9 +66,10 @@ fn cached_obj(
     }
     // Reparse when materials (from any source) or highlights are present —
     // they affect triangle colors and can't be shared across configs.
+    let empty_tex: HashMap<String, u16> = HashMap::new();
     if !materials_ref.is_empty() || !config.highlight.is_empty() {
         let (triangles, group_styles) =
-            obj_parser::parse_obj(data, materials_ref, &config.highlight)?;
+            obj_parser::parse_obj(data, materials_ref, &config.highlight, &empty_tex)?;
         return Ok(CachedObj::Owned(triangles, group_styles));
     }
     if let Some(r) = cache::get_obj(data) {
@@ -75,7 +77,7 @@ fn cached_obj(
     }
     let empty_mat = HashMap::new();
     let empty_hl = HashMap::new();
-    let result = obj_parser::parse_obj(data, &empty_mat, &empty_hl)?;
+    let result = obj_parser::parse_obj(data, &empty_mat, &empty_hl, &empty_tex)?;
     cache::put_obj(data, result);
     Ok(CachedObj::Ref(cache::get_obj(data).unwrap()))
 }
@@ -98,6 +100,60 @@ impl CachedObj {
             CachedObj::Owned(_, g) => g,
         }
     }
+}
+
+/// Build the OBJ texture table from the material library and a sidecar bundle
+/// of image files. Returns the decoded textures plus a `material name → table
+/// index` map that `parse_obj` uses to bind `usemtl` to a texture.
+///
+/// The MTL text (`config.mtl`) is scanned for `map_Kd <file>`; each referenced
+/// file is looked up in the bundle (keyed by the same path, backslashes
+/// normalised) and decoded. Images shared by several materials decode once and
+/// share a table slot. Materials whose `map_Kd` file is missing from the bundle
+/// are simply left untextured (they fall back to their `Kd` colour).
+fn build_obj_textures(
+    config: &RenderConfig,
+    tex_bundle: &[u8],
+) -> Result<(Vec<Texture>, HashMap<String, u16>), String> {
+    let mut textures: Vec<Texture> = Vec::new();
+    let mut tex_index: HashMap<String, u16> = HashMap::new();
+    if config.mtl.is_empty() || tex_bundle.is_empty() {
+        return Ok((textures, tex_index));
+    }
+    let map_kd = obj_parser::parse_mtl_textures(&config.mtl);
+    if map_kd.is_empty() {
+        return Ok((textures, tex_index));
+    }
+    let files = maquette_core::bundle::parse_sidecar_bundle(tex_bundle)?;
+    // Dedup decoded images by filename so one bitmap shared by N materials
+    // occupies a single texture slot.
+    let mut by_file: HashMap<String, u16> = HashMap::new();
+    for (material, file) in &map_kd {
+        let slot = match by_file.get(file) {
+            Some(&i) => i,
+            None => {
+                let Some(bytes) = files.get(file) else { continue };
+                let decoded = maquette_core::texture_decode::decode(bytes, None)
+                    .map_err(|e| format!("texture '{}': {}", file, e))?;
+                let base = MipLevel { width: decoded.width, height: decoded.height, rgba: decoded.rgba };
+                let (bw, bh) = (base.width, base.height);
+                let tex = Texture {
+                    mips: build_mips(base),
+                    wrap_s: Wrap::Repeat,
+                    wrap_t: Wrap::Repeat,
+                    mag_filter: Filter::Linear,
+                    min_filter: Filter::Linear,
+                    lod_bias: 0.5 * ((bw * bh) as f32).log2(),
+                };
+                let i = textures.len() as u16;
+                textures.push(tex);
+                by_file.insert(file.clone(), i);
+                i
+            }
+        };
+        tex_index.insert(material.clone(), slot);
+    }
+    Ok((textures, tex_index))
 }
 
 fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<Vec<parser::Triangle>, String> {
@@ -162,7 +218,7 @@ fn render_stl_png(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
     let triangles = cached_stl(stl_data)?;
     let empty = HashMap::new();
     let key = cache::hash(stl_data);
-    render::render_raster(triangles, &config, &empty, Some(key), Some(key))
+    render::render_raster(triangles, &config, &empty, Some(key), Some(key), &[])
 }
 
 /// Entry point: receives OBJ text + JSON config, returns PNG bytes.
@@ -172,7 +228,39 @@ fn render_obj_png(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
     let obj = cached_obj(obj_data, &config)?;
     let key = cache::hash(obj_data);
     let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
-    render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key)
+    render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[])
+}
+
+/// Textured OBJ → PNG. Third arg is a packed sidecar bundle (see
+/// `maquette_core::bundle`) of the image files the `.mtl`'s `map_Kd` entries
+/// reference, keyed by filename. The Typst wrapper walks the OBJ+MTL and reads
+/// each texture so the user still calls the plugin with a single `read(...)`.
+///
+/// Behaves exactly like `render_obj_png` when the bundle is empty or the MTL
+/// declares no usable `map_Kd`, so an OBJ that merely ships colours through
+/// this entry renders identically to the plain path.
+#[wasm_func]
+fn render_obj_png_tex(obj_data: &[u8], config_json: &[u8], tex_bundle: &[u8]) -> Result<Vec<u8>, String> {
+    let config = parse_config(config_json)?;
+    let (textures, tex_index) = build_obj_textures(&config, tex_bundle)?;
+    // No usable textures → identical to the plain OBJ PNG path (keeps the mesh
+    // cache and preprocessed-mesh cache in play).
+    if textures.is_empty() {
+        let obj = cached_obj(obj_data, &config)?;
+        let key = cache::hash(obj_data);
+        let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
+        return render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[]);
+    }
+    // Merge MTL Kd colours under config materials (config wins), same as
+    // `cached_obj`, then parse with the texture-index map so `usemtl` binds UVs.
+    let mut merged = obj_parser::parse_mtl(&config.mtl);
+    for (k, v) in &config.materials { merged.insert(k.clone(), v.clone()); }
+    let (triangles, group_styles) =
+        obj_parser::parse_obj(obj_data, &merged, &config.highlight, &tex_index)?;
+    let key = cache::hash(obj_data);
+    // Geometry is unaffected by textures, so the smooth-normal cache (data_key)
+    // is safe to keep; the preprocessed-mesh cache is not (colours/materials).
+    render::render_raster(&triangles, &config, &group_styles, Some(key), None, &textures)
 }
 
 /// Returns JSON with model info (triangle count, bbox, etc.) for STL.
@@ -206,7 +294,7 @@ fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
     let config = parse_config(config_json)?;
     let triangles = cached_ply(ply_data, &config)?;
     let empty = HashMap::new();
-    render::render_raster(&triangles, &config, &empty, None, None)
+    render::render_raster(&triangles, &config, &empty, None, None, &[])
 }
 
 /// Returns JSON with model info (triangle count, bbox, etc.) for PLY.

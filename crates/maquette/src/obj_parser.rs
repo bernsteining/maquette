@@ -71,6 +71,39 @@ pub fn parse_mtl(data: &str) -> HashMap<String, String> {
     out
 }
 
+/// Parse one or more concatenated `.mtl` files for diffuse texture maps.
+/// Returns a map of material name (`newmtl`) → `map_Kd` filename, verbatim as
+/// written in the MTL (the Typst wrapper resolves it to bytes and the plugin's
+/// texture-index map keys off the same material name).
+///
+/// `map_Kd` may carry leading options (`-o`, `-s`, `-bm`, …) before the
+/// filename; we take the last whitespace-separated token as the path, which is
+/// correct for the overwhelmingly common `map_Kd texture.png` form and for
+/// option-prefixed forms whose filename has no spaces. Backslashes are
+/// normalised to `/` so Windows-authored paths match sidecar keys.
+pub fn parse_mtl_textures(data: &str) -> HashMap<String, String> {
+    let mut out: HashMap<String, String> = HashMap::new();
+    let mut current: Option<String> = None;
+    for line in data.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        let mut parts = line.split_ascii_whitespace();
+        let Some(kw) = parts.next() else { continue };
+        match kw {
+            "newmtl" => current = parts.next().map(String::from),
+            "map_Kd" => {
+                if let Some(name) = &current {
+                    if let Some(file) = parts.last() {
+                        out.insert(name.clone(), file.replace('\\', "/"));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Parse OBJ format data with optional per-face materials and group highlighting.
 /// Materials map material names to hex color strings (e.g. "red" → "#ff0000").
 /// Highlight maps group names (`g`/`o`) to a color or full appearance override.
@@ -81,13 +114,18 @@ pub fn parse_obj(
     data: &[u8],
     materials: &HashMap<String, String>,
     highlight: &HashMap<String, GroupStyle>,
+    tex_index: &HashMap<String, u16>,
 ) -> Result<(Vec<Triangle>, HashMap<u32, GroupAppearance>), String> {
     let mut vertices: Vec<Vec3> = Vec::new();
     let mut normals: Vec<Vec3> = Vec::new();
+    let mut texcoords: Vec<[f32; 2]> = Vec::new();
     let mut triangles: Vec<Triangle> = Vec::new();
     let mut group_styles: HashMap<u32, GroupAppearance> = HashMap::new();
     let mut current_color: Option<(u8, u8, u8)> = None;
     let mut current_highlight: Option<(u8, u8, u8)> = None;
+    // Active texture-table index from the last `usemtl` whose material has a
+    // `map_Kd`. `None` = untextured faces (fall back to color / vertex_colors).
+    let mut current_tex: Option<u16> = None;
     let mut current_group: Option<u32> = None;
     let mut group_counter: u32 = 0;
     // Active OBJ smoothing group. `None` = explicit `s off` / `s 0` — faces
@@ -99,7 +137,7 @@ pub fn parse_obj(
     let mut current_smooth: Option<u32> = Some(0);
 
     // Reusable buffer for face indices (avoids per-face allocation)
-    let mut face_buf: Vec<(usize, Option<usize>)> = Vec::new();
+    let mut face_buf: Vec<(usize, Option<usize>, Option<usize>)> = Vec::new();
 
     // Parse OBJ bytes directly (ASCII) — no whole-buffer UTF-8 validation, no
     // Unicode-aware `.lines()`/`.trim()`/`split_whitespace`.
@@ -127,6 +165,14 @@ pub fn parse_obj(
                 normals.push(parse_vec3_bytes(&mut parts)
                     .ok_or("normal needs 3 valid coordinates")?);
             }
+            b"vt" => {
+                // `vt u [v] [w]` — we keep u,v (w is unused). Default v=0 for
+                // 1-D textures. OBJ's V origin is bottom-left; the sampler
+                // expects top-left, so flip V here (once) to match image rows.
+                let u = parts.next().and_then(crate::math::parse_f64_bytes).unwrap_or(0.0) as f32;
+                let v = parts.next().and_then(crate::math::parse_f64_bytes).unwrap_or(0.0) as f32;
+                texcoords.push([u, 1.0 - v]);
+            }
             b"s" => {
                 // `s <n>` starts smoothing group n; `s off` / `s 0` disables
                 // it. Faces tagged with a smoothing group share averaged
@@ -146,20 +192,25 @@ pub fn parse_obj(
                     Some(n) => n,
                     None => continue,
                 };
+                let name_str = std::str::from_utf8(name).ok();
                 current_color = if name.first() == Some(&b'#') && name.len() >= 7 {
-                    std::str::from_utf8(name).ok().map(parse_hex_color)
-                } else if let Ok(s) = std::str::from_utf8(name) {
+                    name_str.map(parse_hex_color)
+                } else if let Some(s) = name_str {
                     materials.get(s).map(|hex| parse_hex_color(hex))
                 } else {
                     None
                 };
+                // Bind a diffuse texture when this material has a `map_Kd` that
+                // resolved to a decoded image (see `parse_mtl_textures`).
+                current_tex = name_str.and_then(|s| tex_index.get(s).copied());
             }
             b"f" => {
                 face_buf.clear();
                 let nv = vertices.len();
+                let nt = texcoords.len();
                 let nn = normals.len();
                 for p in parts {
-                    if let Some(idx) = parse_face_index(p, nv, nn) {
+                    if let Some(idx) = parse_face_index(p, nv, nt, nn) {
                         face_buf.push(idx);
                     }
                 }
@@ -181,10 +232,18 @@ pub fn parse_obj(
                     // Face normal from geometry — deterministic and correct
                     // regardless of per-corner normals.
                     let normal = Vec3::face_normal(v0, v1, v2).unwrap_or(Vec3::new(0.0, 0.0, 0.0));
-                    let vertex_normals = match (face_buf[0].1, face_buf[i].1, face_buf[i + 1].1) {
+                    let vertex_normals = match (face_buf[0].2, face_buf[i].2, face_buf[i + 1].2) {
                         (Some(n0), Some(n1), Some(n2)) => Some([normals[n0], normals[n1], normals[n2]]),
                         _ => None,
                     };
+                    // UVs only when the material bound a texture AND all three
+                    // fan corners cite a `vt`. Missing either → untextured.
+                    let uvs = match (current_tex, face_buf[0].1, face_buf[i].1, face_buf[i + 1].1) {
+                        (Some(_), Some(t0), Some(t1), Some(t2)) =>
+                            Some([texcoords[t0], texcoords[t1], texcoords[t2]]),
+                        _ => None,
+                    };
+                    let tex = if uvs.is_some() { current_tex } else { None };
                     triangles.push(Triangle {
                         vertices: [v0, v1, v2],
                         normal,
@@ -195,6 +254,8 @@ pub fn parse_obj(
                         vertex_normals,
                         smoothing_group: current_smooth,
                         vertex_scalars: None,
+                        uvs,
+                        tex,
                     });
                 }
             }
@@ -230,7 +291,7 @@ pub fn parse_obj(
                     }
                 }
             }
-            _ => {} // skip mtllib, s, vt, comments, etc.
+            _ => {} // skip mtllib, comments, etc.
         }
     }
 
@@ -238,10 +299,10 @@ pub fn parse_obj(
 }
 
 /// Parse a face vertex index like "1", "1/2", "1/2/3", or "1//3".
-/// Returns (vertex_index, Option<normal_index>), 0-based.
+/// Returns (vertex_index, Option<texcoord_index>, Option<normal_index>), 0-based.
 /// Uses manual parsing to avoid split('/').collect() allocation.
 #[inline]
-fn parse_face_index(b: &[u8], nv: usize, nn: usize) -> Option<(usize, Option<usize>)> {
+fn parse_face_index(b: &[u8], nv: usize, nt: usize, nn: usize) -> Option<(usize, Option<usize>, Option<usize>)> {
     // Find first '/'
     let slash1 = b.iter().position(|&c| c == b'/');
     let vi_b = match slash1 {
@@ -250,18 +311,24 @@ fn parse_face_index(b: &[u8], nv: usize, nn: usize) -> Option<(usize, Option<usi
     };
     let vi = resolve_index(vi_b, nv)?;
 
-    let ni = if let Some(pos1) = slash1 {
+    // `v/vt/vn`, `v/vt`, `v//vn` or `v`. `ti` is the middle field, `ni` the last.
+    let (ti, ni) = if let Some(pos1) = slash1 {
         let rest = &b[pos1 + 1..];
         if let Some(pos2) = rest.iter().position(|&c| c == b'/') {
-            let ni_b = &b[pos1 + 1 + pos2 + 1..];
-            if !ni_b.is_empty() { resolve_index(ni_b, nn) } else { None }
+            let ti_b = &rest[..pos2];
+            let ni_b = &rest[pos2 + 1..];
+            let ti = if !ti_b.is_empty() { resolve_index(ti_b, nt) } else { None };
+            let ni = if !ni_b.is_empty() { resolve_index(ni_b, nn) } else { None };
+            (ti, ni)
         } else {
-            None
+            // `v/vt` — no normal field.
+            let ti = if !rest.is_empty() { resolve_index(rest, nt) } else { None };
+            (ti, None)
         }
     } else {
-        None
+        (None, None)
     };
-    Some((vi, ni))
+    Some((vi, ti, ni))
 }
 
 /// Convert 1-based (or negative) OBJ index to 0-based. Uses fast integer parser.

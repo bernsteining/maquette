@@ -21,6 +21,7 @@
 //! + shading primitives. JPEG/PNG/WebP decoding lives with the only consumer
 //! that needs it (`maquette-gltf::texture_decode`).
 
+pub mod bundle;
 pub mod color;
 pub mod fxaa;
 pub mod ibl;

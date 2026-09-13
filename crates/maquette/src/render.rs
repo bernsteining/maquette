@@ -37,6 +37,12 @@ struct ProjectedTri {
     /// Per-pixel shadow data (world vertex positions + face normal). Set only
     /// when per-pixel shadows are active; the raster pass samples the maps here.
     pp: Option<([Vec3; 3], Vec3)>,
+    /// Per-corner UVs for the textured raster path (OBJ `map_Kd`). Present only
+    /// alongside `tex`; the PNG pass samples the bound texture per pixel and
+    /// modulates it by the (white-albedo) lit `vertex_colors`. Ignored by SVG.
+    uvs: Option<[[f32; 2]; 3]>,
+    /// Index into the render's texture table. `None` = untextured.
+    tex: Option<u16>,
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +381,8 @@ pub(crate) fn pointcloud_to_triangles(
             vertex_normals,
             smoothing_group: None,
             vertex_scalars,
+            uvs: None,
+            tex: None,
         });
     }
 
@@ -673,7 +681,7 @@ fn project_triangles(
         let groups_uniform = group_styles.values().all(|a|
             a.specular.is_none() && a.shininess.is_none() && a.ambient.is_none());
         let can_memoize = !is_wireframe && !is_xray && groups_uniform
-            && triangles.iter().all(|t| t.color.is_none() && t.vertex_colors.is_none());
+            && triangles.iter().all(|t| t.color.is_none() && t.vertex_colors.is_none() && t.tex.is_none());
         if can_memoize {
             let spec_lut = lut_ref(&spec_luts, cfg_shininess);
             let one_minus_ambient = 1.0 - cfg_ambient_intensity;
@@ -867,7 +875,15 @@ fn project_triangles(
             // Per-face mesh alpha (e.g. PLY `alpha`) multiplies the resolved opacity.
             opacity *= tri.alpha.unwrap_or(1.0) as f64;
 
-            let (fr, fg, fb) = tri.color.unwrap_or((base_r, base_g, base_b));
+            // Textured faces shade with a white albedo so the resulting vertex
+            // colors are pure lighting; the raster pass multiplies them by the
+            // per-pixel texture sample (albedo × light). Untextured faces use
+            // the per-face / base color as before.
+            let (fr, fg, fb) = if tri.tex.is_some() {
+                (255, 255, 255)
+            } else {
+                tri.color.unwrap_or((base_r, base_g, base_b))
+            };
 
             if let Some(sd) = smooth {
                 // Smooth shading: per-vertex lighting (slow path with per-tri overrides)
@@ -980,7 +996,7 @@ fn project_triangles(
         } else {
             None
         };
-        projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity, pp });
+        projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity, pp, uvs: tri.uvs, tex: tri.tex });
     }
 
     projected
@@ -1127,7 +1143,7 @@ fn project_shadow(
         let pts = apply_projection(&proj_setup, &cam);
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
-        projected.push(ProjectedTri { pts, depths, depth, r: sr, g: sg, b: sb, vertex_colors: None, group_id: None, opacity: 1.0, pp: None });
+        projected.push(ProjectedTri { pts, depths, depth, r: sr, g: sg, b: sb, vertex_colors: None, group_id: None, opacity: 1.0, pp: None, uvs: None, tex: None });
     }
 
     projected
@@ -1885,6 +1901,8 @@ fn make_debug_light_tris(
                     group_id: Some(DEBUG_DISK_GID),
                     opacity: 0.85,
                     pp: None,
+                    uvs: None,
+                    tex: None,
                 });
             }
             continue;
@@ -1918,6 +1936,8 @@ fn make_debug_light_tris(
                 group_id: Some(u32::MAX),
                 opacity: 0.85,
                 pp: None,
+                uvs: None,
+                tex: None,
             });
         }
     }
@@ -2307,7 +2327,23 @@ fn svg_overlay_open(w: f64, h: f64) -> String {
 /// [`finish_raster`]); the annotation/debug/labelled-grid variants return a
 /// raster+overlay blob (see [`pack_raster_overlay`]) so the host layers vector
 /// text over raw pixels — the plugin never encodes an image format.
-pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>) -> Result<Vec<u8>, String> {
+/// Per-triangle mip LOD from the screen-area / UV-area ratio. Constant over the
+/// triangle (no per-pixel derivatives) — cheap and good enough for the mesh
+/// path. Uses supersampled screen coords, so SSAA naturally sharpens then
+/// filters. `lod` 0 = mip 0; `Texture::sample_lod` clamps to the chain.
+#[inline]
+fn triangle_texture_lod(pts: &[(f64, f64); 3], uvs: &[[f32; 2]; 3], tex: &maquette_core::texture::Texture) -> f32 {
+    let sx1 = pts[1].0 - pts[0].0; let sy1 = pts[1].1 - pts[0].1;
+    let sx2 = pts[2].0 - pts[0].0; let sy2 = pts[2].1 - pts[0].1;
+    let screen_area = (sx1 * sy2 - sx2 * sy1).abs() as f32;
+    let du1 = uvs[1][0] - uvs[0][0]; let dv1 = uvs[1][1] - uvs[0][1];
+    let du2 = uvs[2][0] - uvs[0][0]; let dv2 = uvs[2][1] - uvs[0][1];
+    let uv_area = (du1 * dv2 - du2 * dv1).abs();
+    if screen_area <= 1e-9 || uv_area <= 1e-12 { return 0.0; }
+    tex.lod_bias + 0.5 * (uv_area / screen_area).log2()
+}
+
+pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>, textures: &[maquette_core::texture::Texture]) -> Result<Vec<u8>, String> {
     let aa = config.antialias.max(1).next_power_of_two();
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
@@ -2425,6 +2461,18 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
             if tri.opacity >= 1.0 {
                 let max_d = tri.depths[0].max(tri.depths[1]).max(tri.depths[2]) as f32;
                 if buf.hiz_can_skip(&tri.pts, max_d) { continue; }
+                // Textured faces (OBJ map_Kd): sample the bound texture per pixel
+                // and modulate it by the (white-albedo) lit vertex colors, which
+                // already carry ambient/diffuse/specular + non-per-pixel shadow.
+                if let (Some(ti), Some(uvs)) = (tri.tex, tri.uvs) {
+                    if let Some(tex) = textures.get(ti as usize) {
+                        let light = tri.vertex_colors.unwrap_or([(tri.r, tri.g, tri.b); 3]);
+                        let lod = triangle_texture_lod(&tri.pts, &uvs, tex);
+                        buf.rasterize_triangle_textured(&tri.pts, &tri.depths, &uvs, &light, tex, lod);
+                        buf.hiz_update(&tri.pts);
+                        continue;
+                    }
+                }
                 match (shadow_data.as_ref(), tri.pp) {
                     // Per-pixel shadows: sample the maps at each fragment's world pos.
                     (Some(sd), Some((wp, normal))) => {
