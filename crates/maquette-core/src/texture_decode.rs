@@ -29,6 +29,21 @@ pub fn decode(bytes: &[u8], mime: Option<&str>) -> Result<DecodedImage, String> 
     }
 }
 
+/// PNG/JPEG-only decode (magic-byte sniff, no MIME). For consumers that never
+/// encounter WebP — notably OBJ `map_Kd`, since no tool ships OBJ textures as
+/// WebP. Crucially it never *calls* `decode_webp`, so `image-webp` (~200 KB of
+/// VP8/VP8L decoder) is dead-code-eliminated from that consumer's wasm. A WebP
+/// payload returns a clear error instead of linking the decoder.
+pub fn decode_png_jpeg(bytes: &[u8]) -> Result<DecodedImage, String> {
+    match sniff(bytes) {
+        Some(ImageKind::Png)  => decode_png(bytes),
+        Some(ImageKind::Jpeg) => decode_jpeg(bytes),
+        Some(ImageKind::Webp) =>
+            Err("WebP textures aren't supported here (use PNG or JPEG)".into()),
+        None => Err("unrecognised image format (expected PNG or JPEG)".into()),
+    }
+}
+
 enum ImageKind { Png, Jpeg, Webp }
 
 fn sniff(bytes: &[u8]) -> Option<ImageKind> {
