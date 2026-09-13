@@ -30,6 +30,13 @@ pub struct Triangle {
     /// by the PLY reader when a numeric non-standard vertex property is
     /// present. `color_map: "ply_scalar"` reads this and maps to the palette.
     pub vertex_scalars: Option<[f64; 3]>,
+    /// Per-corner texture coordinates (`vt` in OBJ, `s/t` in PLY). `None` = no
+    /// UVs. When present alongside `tex`, the textured rasterizer path samples
+    /// the bound image per pixel instead of interpolating vertex colors.
+    pub uvs: Option<[[f32; 2]; 3]>,
+    /// Index into the render's texture table (from OBJ `usemtl` → `map_Kd`).
+    /// `None` = untextured; falls back to color / vertex_colors as before.
+    pub tex: Option<u16>,
 }
 
 /// Parse STL data — auto-detects ASCII vs binary format.
@@ -83,7 +90,9 @@ fn parse_ascii(data: &[u8]) -> Result<Vec<Triangle>, String> {
                 alpha: None,
                 vertex_normals: None,
                 smoothing_group: None,
-            vertex_scalars: None,
+                vertex_scalars: None,
+                uvs: None,
+                tex: None,
             });
         }
     }
@@ -151,6 +160,8 @@ fn parse_binary(data: &[u8]) -> Result<Vec<Triangle>, String> {
             vertex_normals: None,
             smoothing_group: None,
             vertex_scalars: None,
+            uvs: None,
+            tex: None,
         });
     }
     Ok(triangles)

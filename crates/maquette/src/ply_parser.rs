@@ -424,7 +424,7 @@ fn triangulate(
         } else {
             None
         };
-        out.push(Triangle { vertices: [v0, v1, v2], normal, color, vertex_colors, group_id: None, alpha, vertex_normals, smoothing_group: None, vertex_scalars });
+        out.push(Triangle { vertices: [v0, v1, v2], normal, color, vertex_colors, group_id: None, alpha, vertex_normals, smoothing_group: None, vertex_scalars, uvs: None, tex: None });
     }
 }
 

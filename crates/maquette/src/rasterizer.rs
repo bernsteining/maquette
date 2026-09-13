@@ -586,6 +586,79 @@ impl PixelBuffer {
         }
     }
 
+    /// Textured rasterize (OBJ `map_Kd`): affine-interpolate per-corner UVs and
+    /// per-vertex lighting, sample the bound texture per pixel and modulate
+    /// (albedo × light) in display space. Scalar path — per-pixel texture
+    /// sampling dominates, so SIMD coverage would add little. `lod` is the
+    /// per-triangle mip level; `light` is the white-albedo shaded vertex colors.
+    pub fn rasterize_triangle_textured(
+        &mut self,
+        pts: &[(f64, f64); 3],
+        depths: &[f64; 3],
+        uvs: &[[f32; 2]; 3],
+        light: &[(u8, u8, u8); 3],
+        tex: &maquette_core::texture::Texture,
+        lod: f32,
+    ) {
+        let setup = match TriSetup::new(pts, self.width, self.height) {
+            Some(s) => s,
+            None => return,
+        };
+        let width = self.width;
+        let zbuf = &mut self.zbuf;
+        let pixels = &mut self.pixels;
+
+        let d0 = depths[0] as f32;
+        let d1 = depths[1] as f32;
+        let d2 = depths[2] as f32;
+
+        let mut row_w0 = setup.row_w0;
+        let mut row_w1 = setup.row_w1;
+        let mut row_w2 = setup.row_w2;
+
+        unsafe {
+            for py in setup.min_y..=setup.max_y {
+                if let Some((xl, xr)) = setup.scanline(row_w0, row_w1, row_w2) {
+                    let offset = (xl - setup.min_x) as f64;
+                    let mut w0 = (row_w0 + offset * setup.dw0_dx) as f32;
+                    let mut w1 = (row_w1 + offset * setup.dw1_dx) as f32;
+                    let mut w2 = (row_w2 + offset * setup.dw2_dx) as f32;
+                    let dw0 = setup.dw0_dx as f32;
+                    let dw1 = setup.dw1_dx as f32;
+                    let dw2 = setup.dw2_dx as f32;
+                    let row_base = py * width;
+                    let mut px = xl;
+                    while px <= xr {
+                        if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
+                            let depth = w0 * d0 + w1 * d1 + w2 * d2;
+                            let idx = row_base + px;
+                            if depth > *zbuf.get_unchecked(idx) {
+                                *zbuf.get_unchecked_mut(idx) = depth;
+                                let u = w0 * uvs[0][0] + w1 * uvs[1][0] + w2 * uvs[2][0];
+                                let v = w0 * uvs[0][1] + w1 * uvs[1][1] + w2 * uvs[2][1];
+                                // sRGB albedo in [0,1]; alpha ignored (opaque pass).
+                                let t = tex.sample_lod([u, v], lod);
+                                // Interpolated lighting (display sRGB, 0-255).
+                                let lr = w0 * light[0].0 as f32 + w1 * light[1].0 as f32 + w2 * light[2].0 as f32;
+                                let lg = w0 * light[0].1 as f32 + w1 * light[1].1 as f32 + w2 * light[2].1 as f32;
+                                let lb = w0 * light[0].2 as f32 + w1 * light[1].2 as f32 + w2 * light[2].2 as f32;
+                                let p = pixels.as_mut_ptr().add(idx * 3);
+                                *p        = (lr * t[0]).round().clamp(0.0, 255.0) as u8;
+                                *p.add(1) = (lg * t[1]).round().clamp(0.0, 255.0) as u8;
+                                *p.add(2) = (lb * t[2]).round().clamp(0.0, 255.0) as u8;
+                            }
+                        }
+                        w0 += dw0; w1 += dw1; w2 += dw2;
+                        px += 1;
+                    }
+                }
+                row_w0 += setup.dw0_dy;
+                row_w1 += setup.dw1_dy;
+                row_w2 += setup.dw2_dy;
+            }
+        }
+    }
+
     /// Per-pixel-shaded rasterize (used by per-pixel shadows): interpolates the
     /// vertex colors + world positions affinely, then runs `shade(color, world)`
     /// per covered pixel to produce the final color. Scalar (quality) path.
