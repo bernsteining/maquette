@@ -29,19 +29,27 @@ pub fn decode(bytes: &[u8], mime: Option<&str>) -> Result<DecodedImage, String> 
     }
 }
 
-/// PNG/JPEG-only decode (magic-byte sniff, no MIME). For consumers that never
-/// encounter WebP — notably OBJ `map_Kd`, since no tool ships OBJ textures as
-/// WebP. Crucially it never *calls* `decode_webp`, so `image-webp` (~200 KB of
-/// VP8/VP8L decoder) is dead-code-eliminated from that consumer's wasm. A WebP
-/// payload returns a clear error instead of linking the decoder.
-pub fn decode_png_jpeg(bytes: &[u8]) -> Result<DecodedImage, String> {
+/// Decode an OBJ `map_Kd` texture: PNG, JPEG or TGA, chosen by magic bytes with
+/// the `filename` extension as the tie-breaker for TGA (which has no reliable
+/// header signature). Never calls `decode_webp`, so `image-webp` (~200 KB of
+/// VP8/VP8L decoder) is dead-code-eliminated from this consumer's wasm — OBJ
+/// textures are never WebP. TGA decodes in-house (no dependency).
+pub fn decode_obj_texture(filename: &str, bytes: &[u8]) -> Result<DecodedImage, String> {
     match sniff(bytes) {
-        Some(ImageKind::Png)  => decode_png(bytes),
-        Some(ImageKind::Jpeg) => decode_jpeg(bytes),
+        Some(ImageKind::Png)  => return decode_png(bytes),
+        Some(ImageKind::Jpeg) => return decode_jpeg(bytes),
         Some(ImageKind::Webp) =>
-            Err("WebP textures aren't supported here (use PNG or JPEG)".into()),
-        None => Err("unrecognised image format (expected PNG or JPEG)".into()),
+            return Err("WebP textures aren't supported for OBJ (use PNG, JPEG or TGA)".into()),
+        None => {}
     }
+    // TGA has no dependable magic; trust the extension (and fall through to it
+    // for anything unrecognised so a mislabelled TGA still has a chance).
+    let is_tga = filename.rsplit('.').next()
+        .map(|e| e.eq_ignore_ascii_case("tga")).unwrap_or(false);
+    if is_tga || looks_like_tga(bytes) {
+        return decode_tga(bytes);
+    }
+    Err("unrecognised image format (OBJ textures support PNG, JPEG and TGA)".into())
 }
 
 enum ImageKind { Png, Jpeg, Webp }
@@ -54,6 +62,122 @@ fn sniff(bytes: &[u8]) -> Option<ImageKind> {
         return Some(ImageKind::Webp);
     }
     None
+}
+
+/// Heuristic TGA check for when the extension is absent/misleading. TGA has no
+/// header magic, but v2 files end with the `TRUEVISION-XFILE.\0` footer, and a
+/// plausible header has a known colour-map-type + image-type and non-zero
+/// dimensions. Conservative: only used as a fallback after PNG/JPEG sniffing.
+fn looks_like_tga(b: &[u8]) -> bool {
+    if b.len() >= 26 && &b[b.len() - 18..b.len() - 2] == b"TRUEVISION-XFILE" {
+        return true;
+    }
+    if b.len() < 18 { return false; }
+    let cmap_type = b[1];
+    let img_type = b[2];
+    let w = u16::from_le_bytes([b[12], b[13]]);
+    let h = u16::from_le_bytes([b[14], b[15]]);
+    (cmap_type == 0 || cmap_type == 1)
+        && matches!(img_type, 1 | 2 | 3 | 9 | 10 | 11)
+        && w != 0 && h != 0
+}
+
+/// In-house Truevision TGA decoder — no dependency (TGA is a trivial header +
+/// raw/RLE pixels, and it's the one texture format that shows up for OBJ but
+/// not for glTF). Supports the formats that actually appear as textures:
+///   - image type 2 / 10  — true-colour 24-bit (BGR) or 32-bit (BGRA), raw/RLE
+///   - image type 3 / 11  — grayscale 8-bit, raw/RLE
+/// Colour-mapped (1/9) and 16-bit true-colour are rare for textures and return
+/// a clear error. Output is top-left-origin RGBA8; the image-descriptor origin
+/// bit is honoured (bottom-left files are flipped).
+fn decode_tga(b: &[u8]) -> Result<DecodedImage, String> {
+    if b.len() < 18 { return Err("tga: header truncated".into()); }
+    let id_len = b[0] as usize;
+    let cmap_type = b[1];
+    let img_type = b[2];
+    let width = u16::from_le_bytes([b[12], b[13]]) as usize;
+    let height = u16::from_le_bytes([b[14], b[15]]) as usize;
+    let bpp = b[16];
+    let descriptor = b[17];
+    if cmap_type != 0 { return Err("tga: colour-mapped images unsupported (use true-colour or grayscale)".into()); }
+    if width == 0 || height == 0 { return Err("tga: zero dimension".into()); }
+
+    let (channels_in, is_gray, is_rle) = match img_type {
+        2  => ((bpp / 8) as usize, false, false),
+        10 => ((bpp / 8) as usize, false, true),
+        3  => (1usize, true, false),
+        11 => (1usize, true, true),
+        1 | 9 => return Err("tga: colour-mapped images unsupported".into()),
+        other => return Err(format!("tga: unsupported image type {}", other)),
+    };
+    if !is_gray && bpp != 24 && bpp != 32 {
+        return Err(format!("tga: unsupported true-colour depth {} bpp (want 24 or 32)", bpp));
+    }
+    if is_gray && bpp != 8 {
+        return Err(format!("tga: unsupported grayscale depth {} bpp (want 8)", bpp));
+    }
+
+    // Skip the ID field and (absent) colour map to reach pixel data.
+    let mut pos = 18 + id_len;
+    let npx = width * height;
+    let mut rgba = vec![0u8; npx * 4];
+
+    // Emit one source pixel (BGR/BGRA or gray) as RGBA into `rgba[i*4..]`.
+    let put = |rgba: &mut [u8], i: usize, src: &[u8]| {
+        if is_gray {
+            let g = src[0];
+            rgba[i * 4] = g; rgba[i * 4 + 1] = g; rgba[i * 4 + 2] = g; rgba[i * 4 + 3] = 255;
+        } else {
+            rgba[i * 4] = src[2];       // R ← B
+            rgba[i * 4 + 1] = src[1];   // G
+            rgba[i * 4 + 2] = src[0];   // B ← R
+            rgba[i * 4 + 3] = if channels_in == 4 { src[3] } else { 255 };
+        }
+    };
+
+    if is_rle {
+        let mut i = 0usize;
+        while i < npx {
+            if pos >= b.len() { return Err("tga: RLE stream truncated (packet header)".into()); }
+            let packet = b[pos]; pos += 1;
+            let count = (packet & 0x7f) as usize + 1;
+            if i + count > npx { return Err("tga: RLE run overruns image".into()); }
+            if packet & 0x80 != 0 {
+                // Run-length packet: one pixel repeated `count` times.
+                if pos + channels_in > b.len() { return Err("tga: RLE run pixel truncated".into()); }
+                let px = &b[pos..pos + channels_in];
+                for k in 0..count { put(&mut rgba, i + k, px); }
+                pos += channels_in;
+            } else {
+                // Raw packet: `count` literal pixels.
+                if pos + count * channels_in > b.len() { return Err("tga: RLE raw run truncated".into()); }
+                for k in 0..count {
+                    put(&mut rgba, i + k, &b[pos + k * channels_in..pos + (k + 1) * channels_in]);
+                }
+                pos += count * channels_in;
+            }
+            i += count;
+        }
+    } else {
+        if pos + npx * channels_in > b.len() { return Err("tga: pixel data truncated".into()); }
+        for i in 0..npx {
+            put(&mut rgba, i, &b[pos + i * channels_in..pos + (i + 1) * channels_in]);
+        }
+    }
+
+    // Origin: descriptor bit 5 set = top-left (rows top→bottom); clear = the TGA
+    // default bottom-left, which we flip to top-left to match the sampler.
+    if descriptor & 0x20 == 0 {
+        let stride = width * 4;
+        for y in 0..height / 2 {
+            let (top, bot) = (y * stride, (height - 1 - y) * stride);
+            for x in 0..stride {
+                rgba.swap(top + x, bot + x);
+            }
+        }
+    }
+
+    Ok(DecodedImage { width: width as u32, height: height as u32, rgba })
 }
 
 fn decode_png(bytes: &[u8]) -> Result<DecodedImage, String> {
