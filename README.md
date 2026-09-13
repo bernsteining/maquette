@@ -1,3 +1,5 @@
+<p align="center"><img src="logo.svg" width="180" alt="Maquette logo"></p>
+
 # Maquette
 
 [![Live demo](https://img.shields.io/badge/demo-live-4f46e5)](https://bernsteining.github.io/maquette/)
