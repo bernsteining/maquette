@@ -494,6 +494,11 @@ dependencies = [
 [[package]]
 name = "maquette-core"
 version = "0.1.0"
+dependencies = [
+ "image-webp",
+ "zune-jpeg",
+ "zune-png",
+]
 
 [[package]]
 name = "maquette-gltf"
@@ -502,14 +507,11 @@ dependencies = [
  "draco-oxide-core",
  "draco-oxide-decoder",
  "gltf",
- "image-webp",
  "maquette-core",
  "meshopt-rs",
  "mikktspace",
  "serde_json",
  "wasm-minimal-protocol",
- "zune-jpeg",
- "zune-png",
 ]
 
 [[package]]

@@ -12,7 +12,7 @@
 use crate::gltf_loader::LoadedGltf;
 use maquette_core::math::{Mat4, Vec3};
 use maquette_core::texture::{build_mips, Filter, MipLevel, Texture, Wrap};
-use crate::texture_decode;
+use maquette_core::texture_decode;
 
 #[derive(Clone, Copy)]
 pub struct Vertex {

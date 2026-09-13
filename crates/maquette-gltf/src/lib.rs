@@ -18,7 +18,6 @@ mod gltf_loader;
 mod pbr;
 mod render;
 mod scene;
-mod texture_decode;
 
 // ── panic diagnostics ─────────────────────────────────────────────────────
 //
