@@ -212,13 +212,22 @@
 // every referenced file with read() under `root`. Returns a (path -> source)
 // dict ready to pass as compile-scad(..., files: …). Every referenced file must
 // exist (Typst's read() has no soft-fail); missing optional libs will error.
-#let scad-collect(entry, root: "") = {
+// Capture the built-in `read` so it stays reachable when the `read` parameter
+// below shadows it — used as the fallback for in-repo / relative-import usage.
+#let _read = read
+
+#let scad-collect(entry, root: "", read: none) = {
+  // Published packages can't read the caller's project files: `read()` inside a
+  // package resolves against the package, not `--root`. So callers pass a
+  // `read:` lambda scoped to their own file — `read: p => read(p)`. When the
+  // module is imported by relative path (in-repo) the built-in fallback works.
+  let rd = if read == none { _read } else { read }
   let files = (:)
   let queue = (entry,)
   while queue.len() > 0 {
     let path = queue.remove(0)
     if path in files { continue }
-    let src = read(root + path)
+    let src = rd(root + path)
     files.insert(path, src)
     let dir = _scad-dir(path)
     for rel in _scad-deps(src) {
@@ -267,14 +276,15 @@
 
 // Compile a whole multi-file OpenSCAD project by its ENTRY file, resolving the
 // `use`/`include` graph automatically (see scad-collect). No file list, no JSON:
-//   #let part = compile-scad-tree("Cyclone.scad", root: "/examples/scad/cyclone-src/")
-// `root` is the source directory and `entry` the top file within it. Because the
-// read() happens inside THIS module (not your file), give `root` as a path from
-// the Typst project root — a leading "/" (resolved against `typst … --root`) —
-// so it resolves the same no matter which file calls. Other args match compile-scad.
-#let compile-scad-tree(entry, root: "", bin: (:), font: none, fn: 32, trace: none, smooth-normals: none) = compile-scad(
+//   #compile-scad-tree("Cyclone.scad", root: "parts/", read: p => read(p))
+// `root` is the source directory (joined onto each discovered path) and `entry`
+// the top file within it. Pass a `read:` lambda scoped to YOUR file so the
+// sources are read from your project — required from the published package,
+// since a package's own `read()` can't reach your project directory. Other args
+// match compile-scad.
+#let compile-scad-tree(entry, root: "", read: none, bin: (:), font: none, fn: 32, trace: none, smooth-normals: none) = compile-scad(
   "include <" + entry + ">\n",
-  files: scad-collect(entry, root: root),
+  files: scad-collect(entry, root: root, read: read),
   bin: bin, font: font, fn: fn, trace: trace, smooth-normals: smooth-normals,
 )
 
