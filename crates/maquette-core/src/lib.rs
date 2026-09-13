@@ -1,8 +1,9 @@
 //! Format-agnostic rendering primitives shared by the maquette plugin family.
 //!
-//! Consumers (currently `maquette-gltf`; eventually the STL/OBJ/PLY `maquette`
-//! plugin too) provide a scene representation and shader; this crate provides
-//! the render primitives that stay the same regardless of asset format:
+//! Consumers — `maquette-gltf` (all of it) and the STL/OBJ/PLY `maquette`
+//! plugin (`color` + `fxaa` so far; the rest of its forked copies to follow) —
+//! provide a scene representation and shader; this crate provides the render
+//! primitives that stay the same regardless of asset format:
 //!
 //!   * [`math`] — Vec3, Mat3, Mat4, FxHasher.
 //!   * [`color`] — sRGB LUTs and colour helpers.
