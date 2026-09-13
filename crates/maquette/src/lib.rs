@@ -133,7 +133,9 @@ fn build_obj_textures(
             Some(&i) => i,
             None => {
                 let Some(bytes) = files.get(file) else { continue };
-                let decoded = maquette_core::texture_decode::decode(bytes, None)
+                // PNG/JPEG only — keeps the WebP (VP8) decoder out of this
+                // plugin's wasm (~200 KB); OBJ textures are never WebP.
+                let decoded = maquette_core::texture_decode::decode_png_jpeg(bytes)
                     .map_err(|e| format!("texture '{}': {}", file, e))?;
                 let base = MipLevel { width: decoded.width, height: decoded.height, rgba: decoded.rgba };
                 let (bw, bh) = (base.width, base.height);
