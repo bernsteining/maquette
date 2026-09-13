@@ -12,3 +12,5 @@ docs/*.stl
 docs/*.ply
 docs/*.glb
 docs/*.blg
+idea.md
+notes.md

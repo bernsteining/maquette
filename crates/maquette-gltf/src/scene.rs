@@ -10,7 +10,7 @@
 /// vertex layout before we start wiring the sampler.
 
 use crate::gltf_loader::LoadedGltf;
-use maquette_core::math::{Mat3, Mat4, Vec3};
+use maquette_core::math::{Mat4, Vec3};
 use maquette_core::texture::{build_mips, Filter, MipLevel, Texture, Wrap};
 use crate::texture_decode;
 

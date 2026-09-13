@@ -16,7 +16,7 @@
 /// Deferred: SSAO / FXAA / tone mapping (phase 3), texture sampling (phase 2),
 /// animations (phase 6).
 
-use crate::config::{GroundCfg, RenderConfig};
+use crate::config::RenderConfig;
 use maquette_core::math::{Mat4, Vec3};
 use crate::pbr::{IblContext, MaterialShader, PbrContext, SplattedLight, ToneMap};
 use maquette_core::rasterizer::{BlendMode, PixelBuffer};

@@ -195,7 +195,7 @@ impl PixelBuffer {
         rgba_b: [f32; 4],
     ) {
         let (mut x0, mut y0) = (a.0, a.1);
-        let (mut x1, mut y1) = (b.0, b.1);
+        let (x1, y1) = (b.0, b.1);
         let dx = (x1 - x0).abs();
         let dy = (y1 - y0).abs();
         let steps = dx.max(dy).ceil() as i32;
