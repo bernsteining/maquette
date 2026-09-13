@@ -272,11 +272,27 @@
 // read() happens inside THIS module (not your file), give `root` as a path from
 // the Typst project root — a leading "/" (resolved against `typst … --root`) —
 // so it resolves the same no matter which file calls. Other args match compile-scad.
-#let compile-scad-tree(entry, root: "", bin: (:), font: none, fn: 32, trace: none) = compile-scad(
+#let compile-scad-tree(entry, root: "", bin: (:), font: none, fn: 32, trace: none, smooth-normals: none) = compile-scad(
   "include <" + entry + ">\n",
   files: scad-collect(entry, root: root),
-  bin: bin, font: font, fn: fn, trace: trace,
+  bin: bin, font: font, fn: fn, trace: trace, smooth-normals: smooth-normals,
 )
+
+// One-call convenience: compile OpenSCAD source AND render it, so you don't have
+// to import maquette's `render-ply` yourself or plumb the PLY between them.
+//   #import "@preview/maquette-scad:0.1.0": render-scad
+//   #render-scad(read("part.scad"), azimuth: 30, color: "#f9d72c")
+// Compile options (`files`, `bin`, `font`, `fn`, `smooth-normals`) go to
+// compile-scad; every other argument forwards to render-ply (camera, shading,
+// background, …). `render-ply` is imported lazily, so plain `compile-scad`
+// users never pull in the maquette renderer.
+#let render-scad(src, files: (:), bin: (:), font: none, fn: 32, smooth-normals: none, ..args) = {
+  import "@preview/maquette:0.1.3": render-ply
+  render-ply(
+    compile-scad(src, files: files, bin: bin, font: font, fn: fn, smooth-normals: smooth-normals),
+    ..args,
+  )
+}
 
 // Direct 2D `.scad` → SVG variant of `compile-scad`. Errors if the source
 // resolves to a 3D solid — SVG output only covers 2D geometry. Same
