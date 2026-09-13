@@ -22,7 +22,7 @@
 use maquette_core::color::srgb_to_linear_f01;
 use maquette_core::math::Vec3;
 use maquette_core::rasterizer::{PixelShader, ShadeIn4, ShadeOut4};
-use crate::scene::{Material, TextureTransform};
+use crate::scene::Material;
 use maquette_core::texture::Texture;
 use std::arch::wasm32::*;
 

@@ -268,41 +268,6 @@ fn octahedral_decode(u: f32, v: f32) -> (f32, f32, f32) {
     (x / len, y / len, z / len)
 }
 
-/// Bilinear sample of one mip. Clamp both axes (octahedral wraps oddly, so
-/// clamp is safer than repeat for MVP).
-#[inline(always)]
-fn sample_mip_bilinear(mip: &MipF32, u: f32, v: f32) -> [f32; 3] {
-    let uc = u.clamp(0.0, 1.0);
-    let vc = v.clamp(0.0, 1.0);
-    let x = uc * mip.width as f32 - 0.5;
-    let y = vc * mip.height as f32 - 0.5;
-    let x0 = x.floor() as i32;
-    let y0 = y.floor() as i32;
-    let fx = x - x0 as f32;
-    let fy = y - y0 as f32;
-    let w = mip.width as i32;
-    let h = mip.height as i32;
-    let x0c = x0.clamp(0, w - 1);
-    let x1c = (x0 + 1).clamp(0, w - 1);
-    let y0c = y0.clamp(0, h - 1);
-    let y1c = (y0 + 1).clamp(0, h - 1);
-    let p = |xi: i32, yi: i32| -> [f32; 3] {
-        let off = ((yi as usize * mip.width as usize + xi as usize) * 3) as usize;
-        [mip.rgb[off], mip.rgb[off + 1], mip.rgb[off + 2]]
-    };
-    let p00 = p(x0c, y0c);
-    let p10 = p(x1c, y0c);
-    let p01 = p(x0c, y1c);
-    let p11 = p(x1c, y1c);
-    let ix = 1.0 - fx;
-    let iy = 1.0 - fy;
-    [
-        (p00[0]*ix + p10[0]*fx)*iy + (p01[0]*ix + p11[0]*fx)*fy,
-        (p00[1]*ix + p10[1]*fx)*iy + (p01[1]*ix + p11[1]*fx)*fy,
-        (p00[2]*ix + p10[2]*fx)*iy + (p01[2]*ix + p11[2]*fx)*fy,
-    ]
-}
-
 /// Seam-aware sampling that side-steps the octahedral encoding's
 /// derivative discontinuity (at the equator fold `py = 0` and along the
 /// outer-square branch cuts). Plain bilinear interpolates using UV

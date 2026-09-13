@@ -2,6 +2,12 @@
 //! time. Sibling to the `maquette` plugin (STL/OBJ/PLY); shares the format-
 //! agnostic render primitives via `maquette-core`.
 
+// The PBR path ships a scalar reference implementation kept for clarity next to
+// the SIMD one, plus a handful of not-yet-wired material fields (iridescence /
+// anisotropy texcoords, light range) — hence `dead_code`. `static mut` scene
+// caches are sound here: Typst runs the plugin on a single thread.
+#![allow(dead_code, static_mut_refs)]
+
 use wasm_minimal_protocol::*;
 
 initiate_protocol!();

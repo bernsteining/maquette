@@ -177,13 +177,8 @@ impl<'a> Iterator for AsciiTokens<'a> {
     }
 }
 
-/// Fast manual integer parser for OBJ indices. Handles negative (relative) indices.
-#[inline]
-pub fn parse_i64_fast(s: &str) -> Option<i64> {
-    parse_i64_bytes(s.as_bytes())
-}
-
-/// Byte-slice core of [`parse_i64_fast`].
+/// Fast base-10 i64 parse from a byte slice (no allocation). Handles negative
+/// (relative) OBJ indices.
 #[inline]
 pub fn parse_i64_bytes(b: &[u8]) -> Option<i64> {
     let len = b.len();
