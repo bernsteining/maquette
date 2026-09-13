@@ -1,10 +1,11 @@
-//! Decode glTF image bytes into an RGBA8 pixel buffer.
+//! Decode image bytes (PNG / JPEG / WebP) into an RGBA8 pixel buffer.
 //!
-//! glTF images can arrive with a MIME type (`image/png`, `image/jpeg`) or
-//! without one, in which case we sniff the magic bytes. All output is RGBA8
-//! — sRGB→linear conversion happens later at sample time, so upstream code
-//! can pick the right space per texture (base color is sRGB, MR/normal/AO are
-//! linear).
+//! Shared by the maquette family: glTF base/MR/normal/occlusion/emissive maps
+//! and OBJ/MTL `map_Kd` diffuse maps. Images can arrive with a MIME type
+//! (`image/png`, `image/jpeg`, `image/webp`) or without one, in which case we
+//! sniff the magic bytes. All output is RGBA8 — sRGB→linear conversion happens
+//! later at sample time, so upstream code can pick the right space per texture
+//! (base color is sRGB, MR/normal/AO are linear).
 
 pub struct DecodedImage {
     pub width: u32,

@@ -31,3 +31,4 @@ pub mod rgbe;
 pub mod shadow;
 pub mod ssao;
 pub mod texture;
+pub mod texture_decode;

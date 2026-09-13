@@ -9,3 +9,10 @@ description = "Format-agnostic render primitives shared by the maquette plugin f
 # Regular rlib — consumed by the plugin cdylibs.
 
 [dependencies]
+# Texture decoders — shared by the maquette family: glTF ships base/MR/normal/
+# occlusion/emissive maps and OBJ/MTL references PNG/JPEG (and WebP via
+# EXT_texture_webp) diffuse maps. Pure Rust, wasm-friendly. Output is always
+# RGBA8; sRGB→linear happens at sample time so each consumer picks the space.
+zune-jpeg = { version = "0.5", default-features = false, features = ["std"] }
+zune-png  = { version = "0.5", default-features = false, features = ["std"] }
+image-webp = "0.2"
