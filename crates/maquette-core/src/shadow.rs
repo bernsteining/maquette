@@ -21,9 +21,9 @@ const EMPTY: f32 = f32::MAX;
 
 #[derive(Clone, Copy)]
 pub struct BiasParams {
-    pub bias: f32,
-    pub normal_bias: f32,
-    pub slope_bias: f32,
+    pub bias: f64,
+    pub normal_bias: f64,
+    pub slope_bias: f64,
 }
 
 /// Single-frustum depth map + light-view projection.
@@ -41,6 +41,35 @@ pub struct ShadowMap {
 }
 
 impl ShadowMap {
+    /// Construct an empty depth map for a frustum. Per-format shadow builders
+    /// (which frame the light view differently) create the map, then fill it
+    /// via `splat_tri`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        view: Mat4,
+        ortho: bool,
+        half_extent: f64,
+        tan_half_fov: f64,
+        near: f64,
+        far: f64,
+        res: usize,
+        forward: Vec3,
+        eye: Vec3,
+    ) -> Self {
+        ShadowMap {
+            view,
+            ortho,
+            half_extent,
+            tan_half_fov,
+            near,
+            far,
+            res,
+            depth: vec![EMPTY; res * res],
+            forward,
+            eye,
+        }
+    }
+
     #[inline(always)]
     fn project(&self, p: Vec3) -> Option<(f64, f64, f64)> {
         let v = self.view.transform_point(p);
@@ -81,13 +110,13 @@ impl ShadowMap {
     /// Applies normal-offset + slope-scaled bias, then PCF-filters.
     pub fn lit(&self, p: Vec3, normal: Vec3, b: &BiasParams, softness: usize) -> f32 {
         let sample = if b.normal_bias > 0.0 {
-            p.add(normal.scale(b.normal_bias as f64 * self.texel_world(p)))
+            p.add(normal.scale(b.normal_bias * self.texel_world(p)))
         } else {
             p
         };
         let ndotl = normal.dot(self.light_dir(p)).abs().max(0.15);
         let tan_theta = ((1.0 - ndotl * ndotl).max(0.0)).sqrt() / ndotl;
-        let bias = b.bias as f64 * (1.0 + b.slope_bias as f64 * tan_theta.min(6.0));
+        let bias = b.bias * (1.0 + b.slope_bias * tan_theta.min(6.0));
 
         let (sx, sy, depth) = match self.project(sample) {
             Some(v) => v,
@@ -123,13 +152,13 @@ impl ShadowMap {
     /// cost sane. Ported from maquette.
     pub fn lit_pcss(&self, p: Vec3, normal: Vec3, b: &BiasParams, base_softness: usize, light_size: f64) -> f32 {
         let sample = if b.normal_bias > 0.0 {
-            p.add(normal.scale(b.normal_bias as f64 * self.texel_world(p)))
+            p.add(normal.scale(b.normal_bias * self.texel_world(p)))
         } else {
             p
         };
         let ndotl = normal.dot(self.light_dir(p)).abs().max(0.15);
         let tan_theta = ((1.0 - ndotl * ndotl).max(0.0)).sqrt() / ndotl;
-        let bias = b.bias as f64 * (1.0 + b.slope_bias as f64 * tan_theta.min(6.0));
+        let bias = b.bias * (1.0 + b.slope_bias * tan_theta.min(6.0));
         let (sx, sy, depth) = match self.project(sample) {
             Some(v) => v,
             None => return 1.0,
@@ -197,19 +226,24 @@ impl ShadowMap {
 
     /// Rasterise scene triangles (no material filter — everything casts) into
     /// this map's depth buffer, keeping the nearest depth per texel.
-    fn render(&mut self, triangles: &[CasterTri]) {
+    /// Project + rasterise one world-space triangle into this map, keeping the
+    /// nearest depth per texel. Public so per-format builders can drive their
+    /// own caster iteration (e.g. with an occluder filter).
+    pub fn splat_tri(&mut self, tri: CasterTri) {
         let res = self.res;
-        for tri in triangles {
-            let mut sp = [(0.0f64, 0.0f64, 0.0f64); 3];
-            let mut behind = false;
-            for (i, v) in tri.iter().enumerate() {
-                match self.project(*v) {
-                    Some(p) => sp[i] = p,
-                    None => { behind = true; break; }
-                }
+        let mut sp = [(0.0f64, 0.0f64, 0.0f64); 3];
+        for (i, v) in tri.iter().enumerate() {
+            match self.project(*v) {
+                Some(p) => sp[i] = p,
+                None => return, // triangle crosses the light plane; skip (rare)
             }
-            if behind { continue; }
-            rasterize_depth(&mut self.depth, res, &sp);
+        }
+        rasterize_depth(&mut self.depth, res, &sp);
+    }
+
+    fn render(&mut self, triangles: &[CasterTri]) {
+        for tri in triangles {
+            self.splat_tri(*tri);
         }
     }
 }
@@ -271,7 +305,7 @@ fn cube_face_map(eye: Vec3, forward: Vec3, up: Vec3, near: f64, far: f64, res: u
     }
 }
 
-fn build_cube(eye: Vec3, br: f64, res: usize) -> Box<[ShadowMap; 6]> {
+pub fn build_cube(eye: Vec3, br: f64, res: usize) -> Box<[ShadowMap; 6]> {
     let near = (br * 0.02).max(1e-4);
     let far = br * 3.5;
     let z = Vec3::new(0.0, 0.0, 1.0);
