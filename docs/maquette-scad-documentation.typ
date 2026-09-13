@@ -604,11 +604,11 @@ A project split across many files with `use <..>` / `include <..>` compiles in o
 #import "@preview/maquette:0.1.3": render-ply
 
 #let machine = compile-scad-tree("Cyclone.scad",
-  root: "/examples/scad/cyclone-src/", fn: 8)
+  root: "cyclone-src/", read: p => read(p), fn: 8)
 #render-ply(machine, ..openscad-view, azimuth: 35, elevation: 20, up: (0, 0, 1))
 ```
 
-`root` is the source folder as a project-root path (leading `/`); `entry` is the top file inside it. The whole Cyclone-PCB-Factory below — 69 files — comes from that single call:
+`root` is the source folder joined onto each discovered path; `entry` is the top file inside it. Pass a `read:` lambda scoped to your document — `read: p => read(p)` — so the sources are read from *your* project (a package's own `read()` can't reach your files). The whole Cyclone-PCB-Factory below — 69 files — comes from that single call:
 
 #figure(
   image("cyclone-example.png", width: 88%),
