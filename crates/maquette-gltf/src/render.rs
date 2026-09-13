@@ -160,7 +160,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
             &caster_tris, &raw_lights, bc, effective_br, up, sh_cfg.resolution,
         );
         let bias = maquette_core::shadow::BiasParams {
-            bias: sh_cfg.bias, normal_bias: sh_cfg.normal_bias, slope_bias: sh_cfg.slope_bias,
+            bias: sh_cfg.bias as f64, normal_bias: sh_cfg.normal_bias as f64, slope_bias: sh_cfg.slope_bias as f64,
         };
         (maps, bias, sh_cfg.softness, sh_cfg.pcss_light_size)
     } else {
