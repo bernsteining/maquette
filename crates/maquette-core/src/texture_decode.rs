@@ -29,18 +29,22 @@ pub fn decode(bytes: &[u8], mime: Option<&str>) -> Result<DecodedImage, String> 
     }
 }
 
-/// Decode an OBJ `map_Kd` texture: PNG, JPEG or TGA, chosen by magic bytes with
-/// the `filename` extension as the tie-breaker for TGA (which has no reliable
-/// header signature). Never calls `decode_webp`, so `image-webp` (~200 KB of
-/// VP8/VP8L decoder) is dead-code-eliminated from this consumer's wasm — OBJ
-/// textures are never WebP. TGA decodes in-house (no dependency).
+/// Decode an OBJ `map_Kd` texture: PNG, JPEG, TGA or BMP, chosen by magic bytes
+/// with the `filename` extension as the tie-breaker for TGA (which has no
+/// reliable header signature). Never calls `decode_webp`, so `image-webp`
+/// (~200 KB of VP8/VP8L decoder) is dead-code-eliminated from this consumer's
+/// wasm — OBJ textures are never WebP. TGA and BMP decode in-house (no
+/// dependency), covering the legacy formats that still appear in OBJ/MTL.
 pub fn decode_obj_texture(filename: &str, bytes: &[u8]) -> Result<DecodedImage, String> {
     match sniff(bytes) {
         Some(ImageKind::Png)  => return decode_png(bytes),
         Some(ImageKind::Jpeg) => return decode_jpeg(bytes),
         Some(ImageKind::Webp) =>
-            return Err("WebP textures aren't supported for OBJ (use PNG, JPEG or TGA)".into()),
+            return Err("WebP textures aren't supported for OBJ (use PNG, JPEG, TGA or BMP)".into()),
         None => {}
+    }
+    if looks_like_bmp(bytes) {
+        return decode_bmp(bytes);
     }
     // TGA has no dependable magic; trust the extension (and fall through to it
     // for anything unrecognised so a mislabelled TGA still has a chance).
@@ -49,7 +53,7 @@ pub fn decode_obj_texture(filename: &str, bytes: &[u8]) -> Result<DecodedImage, 
     if is_tga || looks_like_tga(bytes) {
         return decode_tga(bytes);
     }
-    Err("unrecognised image format (OBJ textures support PNG, JPEG and TGA)".into())
+    Err("unrecognised image format (OBJ textures support PNG, JPEG, TGA and BMP)".into())
 }
 
 enum ImageKind { Png, Jpeg, Webp }
@@ -80,6 +84,13 @@ fn looks_like_tga(b: &[u8]) -> bool {
     (cmap_type == 0 || cmap_type == 1)
         && matches!(img_type, 1 | 2 | 3 | 9 | 10 | 11)
         && w != 0 && h != 0
+}
+
+/// BMP has a reliable `BM` magic; also require a known DIB-header size so a
+/// stray `BM`-prefixed blob isn't mistaken for one.
+fn looks_like_bmp(b: &[u8]) -> bool {
+    b.len() >= 18 && &b[0..2] == b"BM"
+        && matches!(u32::from_le_bytes([b[14], b[15], b[16], b[17]]), 12 | 40 | 52 | 56 | 108 | 124)
 }
 
 /// In-house Truevision TGA decoder — no dependency (TGA is a trivial header +
@@ -177,6 +188,90 @@ fn decode_tga(b: &[u8]) -> Result<DecodedImage, String> {
         }
     }
 
+    Ok(DecodedImage { width: width as u32, height: height as u32, rgba })
+}
+
+/// In-house uncompressed BMP decoder — no dependency, the other legacy format
+/// (alongside TGA) that turns up in Windows-authored OBJ/MTL bundles. Supports
+/// BITMAPINFOHEADER (40) and its V4/V5 supersets (108/124), which share field
+/// offsets, in the forms that appear as textures:
+///   - 24-bit BGR and 32-bit BGRX/BGRA, uncompressed (BI_RGB) — plus 32-bit
+///     BI_BITFIELDS, treated as BGRX
+///   - 8-bit palette-indexed (BI_RGB) with a BGRX colour table
+/// RLE, 16/4/1-bit and the 12-byte OS/2 core header are rare for textures and
+/// return a clear error. Output is top-left-origin RGBA8 (BMP rows are stored
+/// bottom-up unless the height is negative); 32-bit alpha is forced opaque,
+/// since BI_RGB leaves that byte undefined and many writers zero it.
+fn decode_bmp(b: &[u8]) -> Result<DecodedImage, String> {
+    if b.len() < 54 { return Err("bmp: header truncated".into()); }
+    if &b[0..2] != b"BM" { return Err("bmp: bad magic".into()); }
+    let data_offset = u32::from_le_bytes([b[10], b[11], b[12], b[13]]) as usize;
+    let dib_size = u32::from_le_bytes([b[14], b[15], b[16], b[17]]) as usize;
+    if dib_size < 40 {
+        return Err("bmp: unsupported DIB header (need BITMAPINFOHEADER or newer)".into());
+    }
+    let width = i32::from_le_bytes([b[18], b[19], b[20], b[21]]);
+    let height_raw = i32::from_le_bytes([b[22], b[23], b[24], b[25]]);
+    let bpp = u16::from_le_bytes([b[28], b[29]]);
+    let compression = u32::from_le_bytes([b[30], b[31], b[32], b[33]]);
+    if width <= 0 || height_raw == 0 { return Err("bmp: bad dimensions".into()); }
+    let top_down = height_raw < 0;
+    let width = width as usize;
+    let height = height_raw.unsigned_abs() as usize;
+
+    // BI_RGB (0) everywhere; BI_BITFIELDS (3) accepted only for 32-bit (masks
+    // are the standard BGRA layout in practice — we take BGR and force alpha).
+    if compression != 0 && !(compression == 3 && bpp == 32) {
+        return Err(format!("bmp: unsupported compression {} (only uncompressed)", compression));
+    }
+
+    // Rows are padded to a 4-byte boundary.
+    let row_stride = ((bpp as usize * width + 31) / 32) * 4;
+    if data_offset.checked_add(row_stride * height).map_or(true, |e| e > b.len()) {
+        return Err("bmp: pixel data truncated".into());
+    }
+    let mut rgba = vec![0u8; width * height * 4];
+    let dst_row = |y: usize| if top_down { y } else { height - 1 - y };
+
+    match bpp {
+        24 | 32 => {
+            let bytespp = (bpp / 8) as usize;
+            for y in 0..height {
+                let src = data_offset + y * row_stride;
+                let dy = dst_row(y);
+                for x in 0..width {
+                    let s = src + x * bytespp;
+                    let di = (dy * width + x) * 4;
+                    rgba[di]     = b[s + 2]; // R ← B
+                    rgba[di + 1] = b[s + 1]; // G
+                    rgba[di + 2] = b[s];     // B ← R
+                    rgba[di + 3] = 255;      // opaque (BI_RGB alpha byte undefined)
+                }
+            }
+        }
+        8 => {
+            // Palette (BGRX, 4 bytes/entry) sits between the DIB header and pixels.
+            let colors_used = u32::from_le_bytes([b[46], b[47], b[48], b[49]]) as usize;
+            let ncol = if colors_used == 0 { 256 } else { colors_used };
+            let pal = 14 + dib_size;
+            if pal + ncol * 4 > b.len() { return Err("bmp: palette truncated".into()); }
+            for y in 0..height {
+                let src = data_offset + y * row_stride;
+                let dy = dst_row(y);
+                for x in 0..width {
+                    let idx = b[src + x] as usize;
+                    if idx >= ncol { return Err("bmp: palette index out of range".into()); }
+                    let p = pal + idx * 4;
+                    let di = (dy * width + x) * 4;
+                    rgba[di]     = b[p + 2]; // R ← palette B
+                    rgba[di + 1] = b[p + 1];
+                    rgba[di + 2] = b[p];
+                    rgba[di + 3] = 255;
+                }
+            }
+        }
+        other => return Err(format!("bmp: unsupported {} bpp (want 8, 24 or 32)", other)),
+    }
     Ok(DecodedImage { width: width as u32, height: height as u32, rgba })
 }
 
