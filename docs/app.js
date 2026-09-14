@@ -2089,7 +2089,7 @@ function ensureSpherical() {
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { stage.setPointerCapture(e.pointerId); } catch {}
     stage.classList.add("grabbing");
-    // Maquette side: convert current cartesian→spherical so orbit updates
+    // maquette side: convert current cartesian→spherical so orbit updates
     // az/el instead of dropping the user's view. glTF stays cartesian.
     if (!model._gltf) ensureSpherical();
     if (pts.size === 2) seedPinch();                        // enter pinch

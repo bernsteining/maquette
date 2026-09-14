@@ -6,9 +6,9 @@
 
 Part of the [maquette workspace](../README.md) — this crate is the STL / OBJ / PLY plugin. Sibling packages: [`maquette-gltf`](../crates/maquette-gltf/README.md) (glTF 2.0), [`maquette-scad`](../crates/maquette-scad/README.md) (OpenSCAD → mesh), and the shared [`maquette-core`](../crates/maquette-core/README.md) render primitives.
 
-Maquette is a [Typst](https://typst.app) plugin that renders 3D models directly inside your documents — no screenshots, no external tools, no manual re-exports when you tweak the camera angle.
+maquette is a [Typst](https://typst.app) plugin that renders 3D models directly inside your documents — no screenshots, no external tools, no manual re-exports when you tweak the camera angle.
 
-Maquette takes STL, OBJ, and PLY files and turns them into SVG or PNG images at compile time, right inside the Typst pipeline. Point a camera, set up lighting, pick a shading model, and the result lands in your PDF. Change a parameter, recompile, done. This makes it practical to embed technical 3D illustrations in engineering reports, research papers, and documentation without maintaining a separate asset pipeline.
+maquette takes STL, OBJ, and PLY files and turns them into SVG or PNG images at compile time, right inside the Typst pipeline. Point a camera, set up lighting, pick a shading model, and the result lands in your PDF. Change a parameter, recompile, done. This makes it practical to embed technical 3D illustrations in engineering reports, research papers, and documentation without maintaining a separate asset pipeline.
 
 Everything runs as a single WASM plugin (~505 KB), with focus on speed.
 
