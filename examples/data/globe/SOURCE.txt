@@ -1,0 +1,7 @@
+earth.jpg — NASA "Blue Marble Next Generation" (land/ocean/ice/cloud
+composite). NASA imagery is in the public domain.
+Source: NASA Visible Earth — https://visibleearth.nasa.gov/
+Downscaled to 1024x512 for repository size.
+
+globe.obj / globe.mtl — a UV sphere with equirectangular texture
+coordinates, generated for this example (public domain / CC0).

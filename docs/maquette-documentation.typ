@@ -1915,6 +1915,26 @@ Because it's a plain dictionary, you can drive labels, callouts, or camera frami
 
 #pagebreak()
 
+= Textured Models
+
+Wavefront OBJ models often ship a material library (`.mtl`) that points at image textures through `map_Kd`. Instead of passing bytes, give `render-obj` the model *path* plus a `read:` lambda: maquette then discovers the `.mtl` and every `map_Kd` texture referenced by it, reads each one _relative to the model_, decodes it, and maps it across the surface — no manual wiring. Supported texture formats are *PNG, JPEG and TGA*.
+
+#grid(columns: (1.05fr, 1fr), column-gutter: 1.5em, align: horizon,
+  [
+    #raw(block: true, lang: "typ", "#import \"@preview/maquette:0.1.3\": render-obj\n\n// Give the .obj PATH + a read: lambda —\n// maquette finds the .mtl and its\n// map_Kd textures (PNG / JPEG / TGA),\n// resolved next to the model.\n#render-obj(\"globe.obj\",\n  read: p => read(p, encoding: none),\n  smooth: true, zoom: 1.5,\n  background: \"#05070d\",\n  lights: ((type: \"sun\",\n    vector: (-0.55, 0.45, 0.85),\n    color: \"#fff4e0\",\n    intensity: 1.5),),\n)")
+    #v(0.7em)
+    #text(size: 9pt)[Textures modulate the lit surface, so lighting, ambient and shadows all still apply. Textures are sampled for *raster (PNG) output*; the diffuse `map_Kd` map is used (SVG output falls back to the material's flat `Kd` colour). The `read:` handshake is needed because a Typst package can't reach your project's files on its own.]
+  ],
+  align(center + horizon, render-obj("/examples/data/globe/globe.obj",
+    read: p => read(p, encoding: none),
+    smooth: true, zoom: 1.5,
+    background: "#05070d",
+    lights: ((type: "sun", vector: (-0.55, 0.45, 0.85), color: "#fff4e0", intensity: 1.5),),
+    width: 100%)),
+)
+
+#pagebreak()
+
 = Models Credits
 
 - #link("https://graphics.stanford.edu/courses/cs148-10-summer/as3/code/as3/teapot.obj")[Utah teapot] — Stanford
@@ -1923,6 +1943,7 @@ Because it's a plain dictionary, you can drive labels, callouts, or camera frami
 - #link("https://sketchfab.com/3d-models/the-brain-007847f9d2b5481a882d8996c0fd1847")[Low-poly brain] — Sketchfab
 - #link("https://www.printables.com/model/1047493-low-poly-skull/files")[Low-poly skull] — Printables
 - Rubik's cubes: Blender generated & LiDAR scanned by myself
+- #link("https://visibleearth.nasa.gov/")[Blue Marble] Earth texture — NASA (public domain); globe mesh generated for this example
 
 = Contributing
 
