@@ -4,7 +4,7 @@
 
 #set page(margin: 1.5em, footer: context grid(
   columns: (1fr, 1fr),
-  align(left, text(size: 7.5pt, fill: luma(120))[Maquette Documentation]),
+  align(left, text(size: 7.5pt, fill: luma(120))[maquette documentation]),
   align(right, text(size: 7.5pt, fill: luma(120), counter(page).display())),
 ))
 #set par(justify: true)
@@ -170,7 +170,9 @@
 
 #v(1fr)
 #align(center)[
-  #text(font: "Libertinus Serif", size: 32pt, weight: "bold")[Maquette]
+  #box(clip: true, radius: 22pt, image("logo.svg", width: 120pt))
+  #v(0.6em)
+  #text(font: "Libertinus Serif", size: 32pt, weight: "bold")[maquette]
   #v(0.3em)
   #text(size: 14pt, fill: gray)[Render 3D models in Typst]
   #v(1.5em)
@@ -212,9 +214,9 @@
 
 = Introduction
 
-Maquette is a Typst plugin for rendering 3D models directly inside your documents. It loads STL, OBJ, and PLY files and produces publication-ready images — no external renderer, no screenshots, no manual exporting. Everything runs with WASM.
+maquette is a Typst plugin for rendering 3D models directly inside your documents. It loads STL, OBJ, and PLY files and produces publication-ready images — no external renderer, no screenshots, no manual exporting. Everything runs with WASM.
 
-Under the hood, Maquette is a small rasterizer with a real lighting pipeline: multi-light Blinn-Phong shading, Fresnel reflections, subsurface scattering, ambient occlusion (SSAO), bloom, tone mapping, and more. Models can be rendered to PNG (rasterized, constant-size output) or SVG (scalable vector polygons). The full configuration — camera, lights, materials, post-processing — lives in your `.typ` source, so every view is reproducible and version-controllable.
+Under the hood, maquette is a small rasterizer with a real lighting pipeline: multi-light Blinn-Phong shading, Fresnel reflections, subsurface scattering, ambient occlusion (SSAO), bloom, tone mapping, and more. Models can be rendered to PNG (rasterized, constant-size output) or SVG (scalable vector polygons). The full configuration — camera, lights, materials, post-processing — lives in your `.typ` source, so every view is reproducible and version-controllable.
 
 = Where to find sample models
 
@@ -385,7 +387,7 @@ The cube looks like a flat square from this angle — let's learn how to change 
 
 == #link("https://en.wikipedia.org/wiki/Cartesian_coordinate_system")[Cartesian coordinates]
 
-Change the camera position and where it points to using cartesian coordinates with `camera:(x,y,z)` and `center:(x,y,z)`. As you may have noticed with previous examples, Maquette finds the model's bounding box automatically and points the camera at its centre — that is `auto_center: true`, the default — so most of the time no `center` is needed. Set `auto_center: false` to aim at the explicit `center` you provide instead.
+Change the camera position and where it points to using cartesian coordinates with `camera:(x,y,z)` and `center:(x,y,z)`. As you may have noticed with previous examples, maquette finds the model's bounding box automatically and points the camera at its centre — that is `auto_center: true`, the default — so most of the time no `center` is needed. Set `auto_center: false` to aim at the explicit `center` you provide instead.
 
 ```example
 // hl: 2-3
@@ -436,7 +438,7 @@ Instead of placing the camera with Cartesian `(x, y, z)` coordinates, you can us
 )
 ```
 
-The `fov` parameter controls the vertical field of view angle (in degrees) for perspective projection. Lower values produce a telephoto effect, higher values create wide-angle distortion. Default is 45. By default (`auto_fit: true`), Maquette scales the model to fill the viewport; set `auto_fit: false` to use raw world-space coordinates, which lets you control framing manually with `distance` and `fov`.
+The `fov` parameter controls the vertical field of view angle (in degrees) for perspective projection. Lower values produce a telephoto effect, higher values create wide-angle distortion. Default is 45. By default (`auto_fit: true`), maquette scales the model to fill the viewport; set `auto_fit: false` to use raw world-space coordinates, which lets you control framing manually with `distance` and `fov`.
 
 == Framing — Zoom & Pan
 
@@ -461,7 +463,7 @@ At `zoom: 1.45` the teapot fills the frame vertically, but its spout and handle 
 
 = #link("https://en.wikipedia.org/wiki/3D_projection")[Projections]
 
-Maquette supports 14 projection types. Set `projection: "name"` to switch. 
+maquette supports 14 projection types. Set `projection: "name"` to switch. 
 
 In the following examples we're using `stroke: (color, width)` to visualize triangle edges, in order to better visualize each projection's property.
 
@@ -1028,7 +1030,7 @@ The `shading` parameter selects the lighting model, to configure the lights beha
 
 == #link("https://en.wikipedia.org/wiki/Subsurface_scattering")[Subsurface Scattering]
 
-Maquette approximates subsurface scattering with a cheap, view-dependent hack rather than true volumetric light transport: the #link("https://colinbarrebrisebois.com/2011/03/07/gdc-2011-approximating-translucency-for-a-fast-cheap-and-convincing-subsurface-scattering-look/")[_Approximating Translucency_] technique (Barré-Brisebois & Bouchard, GDC 2011) — a single dot product between the view direction and the back-facing light. It gives the warm glow of light passing through thin geometry (wax, skin, marble, leaves); back-lit areas glow with a color derived from the light and the model's base color. There's no real thickness sampling, so the glow is uniform rather than thickness-driven. Works with any shading model.
+maquette approximates subsurface scattering with a cheap, view-dependent hack rather than true volumetric light transport: the #link("https://colinbarrebrisebois.com/2011/03/07/gdc-2011-approximating-translucency-for-a-fast-cheap-and-convincing-subsurface-scattering-look/")[_Approximating Translucency_] technique (Barré-Brisebois & Bouchard, GDC 2011) — a single dot product between the view direction and the back-facing light. It gives the warm glow of light passing through thin geometry (wax, skin, marble, leaves); back-lit areas glow with a color derived from the light and the model's base color. There's no real thickness sampling, so the glow is uniform rather than thickness-driven. Works with any shading model.
 
 === Without Subsurface Scattering
 
@@ -1188,7 +1190,7 @@ Some examples:
 
 == STL Per-face Color
 
-Some binary STL files encode per-face colors in the attribute bytes using the RGB565 format. Maquette detects and renders these automatically — no config needed. When present, the `color` parameter is ignored in favor of the embedded colors.
+Some binary STL files encode per-face colors in the attribute bytes using the RGB565 format. maquette detects and renders these automatically — no config needed. When present, the `color` parameter is ignored in favor of the embedded colors.
 
 ```example
 // hl: 1
@@ -1201,7 +1203,7 @@ Some binary STL files encode per-face colors in the attribute bytes using the RG
 
 === Meshes
 
-Maquette handles PLY files in ASCII and binary (little/big-endian) formats — all three are parsed automatically. PLY can store colors in its format, allowing us to color the model directly. Enjoy this beautiful PLY-colored Rubik's cube.
+maquette handles PLY files in ASCII and binary (little/big-endian) formats — all three are parsed automatically. PLY can store colors in its format, allowing us to color the model directly. Enjoy this beautiful PLY-colored Rubik's cube.
 
 ```example
 // hl: 1
@@ -1217,7 +1219,7 @@ Maquette handles PLY files in ASCII and binary (little/big-endian) formats — a
 
 === Point Clouds
 
-PLY files can also contain clouds of points. 3D scanning apps usually allow to export in such a format. Enjoy my Rubik's cube scanned with the help of my iPad's LiDAR! Maquette reconstructs the surface with #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN], tuned by three knobs:
+PLY files can also contain clouds of points. 3D scanning apps usually allow to export in such a format. Enjoy my Rubik's cube scanned with the help of my iPad's LiDAR! maquette reconstructs the surface with #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN], tuned by three knobs:
 - `point_size` (default: `0`) — neighbor search radius. `0` auto-sizes it from point density; larger connects more distant points.
 - `point_neighbors` (default: `12`) — neighbors fanned per point. Higher closes small holes but is denser and slower; lower is faster but gappier.
 - `point_boundary` (default: `60`) — connections spanning a normal jump wider than this angle (degrees) are cut. Lower cuts more (fewer fringes, but can gap sharp edges); higher keeps more; `0` disables it.

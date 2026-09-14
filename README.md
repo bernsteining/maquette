@@ -1,13 +1,13 @@
-<p align="center"><img src="logo.svg" width="180" alt="Maquette logo"></p>
+<p align="center"><img src="logo.svg" width="180" alt="maquette logo"></p>
 
-# Maquette
+# maquette
 
 [![Live demo](https://img.shields.io/badge/demo-live-4f46e5)](https://bernsteining.github.io/maquette/)
 [![Typst Universe](https://img.shields.io/badge/Typst_Universe-maquette-239dad)](https://typst.app/universe/package/maquette)
 [![Build](https://img.shields.io/github/actions/workflow/status/bernsteining/maquette/build.yml?branch=master&label=build)](https://github.com/bernsteining/maquette/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**Maquette is a set of Typst plugins for embedding 3D renders directly in your documents.** Change a parameter, recompile the `.typ`, and the render lands in your PDF, no external tools, no manual re-exports, no separate asset pipeline.
+**maquette is a set of Typst plugins for embedding 3D renders directly in your documents.** Change a parameter, recompile the `.typ`, and the render lands in your PDF, no external tools, no manual re-exports, no separate asset pipeline.
 
 **[Try it live →](https://bernsteining.github.io/maquette/)** — a browser demo runs the exact same WebAssembly the plugins ship. Drag to orbit, tweak every setting, copy the generated Typst source. The demo runs the wasm through a browser JIT rather than Typst's interpreter, so it iterates ~10× faster than a document rebuild.
 
