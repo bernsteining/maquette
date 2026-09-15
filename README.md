@@ -1,4 +1,4 @@
-<p align="center"><img src="logo.svg" width="180" alt="maquette logo"></p>
+<p align="center"><img src="logo.svg?v=2" width="180" alt="maquette logo"></p>
 
 # maquette
 
