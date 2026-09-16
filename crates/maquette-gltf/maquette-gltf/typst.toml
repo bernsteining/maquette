@@ -2,7 +2,7 @@
 name = "maquette-gltf"
 version = "0.1.0"
 entrypoint = "maquette-gltf.typ"
-authors = ["https://github.com/bernsteining"]
+authors = ["bernsteining"]
 repository = "https://github.com/bernsteining/maquette"
 license = "MIT"
 description = "Render glTF 2.0 assets (.gltf / .glb) as raster images in Typst."

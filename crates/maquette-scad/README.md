@@ -1,84 +1,135 @@
 # maquette-scad
 
-A [Typst](https://typst.app) plugin that lets you write **procedural CAD in Typst source** using an OpenSCAD-flavored DSL, compile it to a mesh in-browser (no OpenSCAD install), and hand the result straight to [`maquette`](../../maquette/README.md) (STL/OBJ/PLY renderer) or [`maquette-gltf`](../maquette-gltf/README.md) for rendering.
+[![Typst Universe](https://img.shields.io/badge/Typst%20Universe-maquette--scad-239dad)](https://typst.app/universe/package/maquette-scad)
+[![Live demo](https://img.shields.io/badge/demo-live-4f46e5)](https://bernsteining.github.io/maquette/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-The heavy lifting is a full CSG evaluator sitting on top of the **Manifold** kernel (elalish/manifold, via the `manifold-csg` crate). Manifold guarantees watertight, correctly-triangulated boolean output — none of the "20% of faces open on any non-trivial cut" issue you get from BSP-based CSG kernels. See [`FIDELITY.md`](FIDELITY.md) for the full OpenSCAD language coverage tracker.
+Render OpenSCAD files in Typst with `maquette-scad`. 
+
+Load `.scad` files, or use the `scadyst` DSL to render them with [maquette](https://github.com/bernsteining/maquette). 
+
+**[Try it live →](https://bernsteining.github.io/maquette/)**  edit SCAD source, orbit the result, tweak the render, and copy the generated Typst code snippet.
 
 ## Usage
 
-Two entry points: a **Typst DSL** for terse in-document geometry, and a **`.scad` text ingestion** path for existing OpenSCAD files.
+Three ways in: a **`.scad` file** (the homepage example), the Typst **DSL**, and a whole **multi-file project** compiled by walking its `use`/`include` graph. The DSL and project rows use the one-call `render-scad` / `render-scad-tree`, which compile and render in one step with no `maquette` import.
 
-### Typst DSL
+<table>
+<tr><th align="left">Code</th><th>Render</th></tr>
+<tr>
+<td>
 
-```typst
-#import "@preview/maquette-scad:0.1.0": *
-#import "@preview/maquette:0.1.3": render-ply
-
-// Compose primitives + booleans + transforms directly in Typst.
-#let part = scadypst(
-  difference(
-    cube(20, center: true),
-    sphere(12, fn: 48),
-  )
-)
-
-// Hand the PLY bytes to the renderer.
-#render-ply(part, color: "#4488cc", shading: "gooch")
+```scad
+// example.scad
+$fn = 100;
+module rod(d, h) cylinder(h, d = d, center = true);
+hole = 25;
+len = 62.5;
+difference() {
+  sphere(d = 50);
+  rod(hole, len);
+  rotate([90, 0, 0]) rod(hole, len);
+}
+color([0.5, 0.3, 0.1, 0.6])
+rotate([0, 90, 0]) rod(hole, len);
 ```
-
-Primitives, transforms, and boolean operators map 1:1 to their OpenSCAD names (`cube`, `sphere`, `cylinder`, `translate`, `rotate`, `scale`, `union`, `difference`, `intersection`, `hull`, `minkowski`, `linear-extrude`, `rotate-extrude`, `polyhedron`, `polygon`, ...). Use Typst's own `for` / `range` / `calc` for procedural placement — no separate `for` loop syntax needed.
-
-### `.scad` files
 
 ```typst
 #import "@preview/maquette-scad:0.1.0": compile-scad
 #import "@preview/maquette:0.1.3": render-ply
 
-#let part = compile-scad(read("my-model.scad"))
-#render-ply(part)
+#render-ply(
+  compile-scad(read("example.scad"), smooth-normals: 30),
+  azimuth: 219,
+  elevation: 33,
+  up: (0, 1, 0),
+  fov: 40,
+  zoom: 1.2,
+  color: "#f9d72c",
+  specular: 0,
+  cull_backface: false,
+  background: none,
+)
 ```
 
-Takes real OpenSCAD source text (parsed via [`openscad-rs`](https://crates.io/crates/openscad-rs), evaluated in-crate). The full language surface — variables, `let()`, `function`, `module`, `for`, control flow, math ops, `$fn`/`$fa`/`$fs`, `include`/`use`, list comprehensions — is covered per [`FIDELITY.md`](FIDELITY.md).
+</td>
+<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-logo.png" width="300" alt="OpenSCAD logo compiled from source" /></a></td>
+</tr>
+<tr>
+<td>
 
-## What's supported
+```typst
+#import "@preview/maquette-scad:0.1.0": *
 
-- **CSG kernel:** Manifold (watertight guaranteed).
-- **All primitives** — 2D (`square`, `circle`, `polygon`, `text`) and 3D (`cube`, `sphere`, `cylinder`, `polyhedron`).
-- **All transforms** — `translate`, `rotate`, `scale`, `mirror`, `resize`, `multmatrix`, `color`, `offset`.
-- **All booleans** — `union`, `difference`, `intersection`.
-- **Extrusions** — `linear_extrude` (with twist/scale), `rotate_extrude`.
-- **Hull + minkowski** (3D).
-- **Language features** — `function`, `module`, `let()`, `for`, `if`, `intersection_for`, `render`, list comprehensions, string ops, math functions.
-- **Special vars** — `$fn`, `$t`, `$preview`, `$children` (full); `$fa`, `$fs` (defined but not adaptively tessellated — see FIDELITY.md).
-- **`include` / `use`** — for embedded module libraries.
-- **Colored output** — `color()` blocks propagate to per-face RGB in the emitted PLY.
+#let bore = cylinder(30, r: 4.5, center: true, fn: 48)
+#render-scad(
+  color((0.16, 0.62, 0.71), difference(
+    cube(20, center: true),
+    sphere(12, fn: 64),
+    ..((0, 0, 0), (90, 0, 0), (0, 90, 0)).map(r => rotate(r, bore)),
+  )),
+  smooth-normals: 25,
+  azimuth: 32,
+  elevation: 24,
+  up: (0, 1, 0),
+  specular: 0.35,
+  background: none,
+)
+```
 
-## What's not supported
+</td>
+<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-dsl.png" width="300" alt="CSG cube built with the Typst DSL" /></td>
+</tr>
+<tr>
+<td>
 
-See [`FIDELITY.md`](FIDELITY.md) for the exhaustive coverage tracker. Highlights of what's **missing** (all marked ❌ or 🟡 in FIDELITY):
+```typst
+#import "@preview/maquette-scad:0.1.0": *
 
-- `import()` of external STL/OBJ/DXF files at compile time (wasm sandbox has no filesystem).
-- `surface()` heightmap import (same reason).
-- `$vpr` / `$vpt` / `$vpd` / `$vpf` viewport variables (n/a — we don't have a viewport at eval time).
-- Adaptive tessellation via `$fa` / `$fs` (defined for library compatibility but our primitive builder uses `$fn` only).
-- Text-shape rendering that needs a font file (basic Latin-1 skeletons only).
+#render-scad-tree(
+  "Cyclone.scad",
+  root: "cyclone-src/",
+  read: p => read(p),
+  ..openscad-view,
+  azimuth: 35,
+  elevation: 20,
+  up: (0, 0, 1),
+)
+```
 
-Anything in the [OpenSCAD cheat sheet](https://openscad.org/cheatsheet/) not marked ❌ in FIDELITY.md should evaluate correctly. Anything that emits geometry produces a watertight mesh.
+</td>
+<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/docs/cyclone-example.png" width="300" alt="Cyclone-PCB-Factory CNC mill, a full multi-file OpenSCAD project" /></td>
+</tr>
+</table>
+
+The Cyclone example is the [Cyclone-PCB-Factory](https://github.com/carlosgs/Cyclone-PCB-Factory).
+
+## Rendering & options
+
+`render-scad` and `render-scad-tree` apply the web-demo defaults (matte, two-sided, smooth) and forward every other argument to maquette's `render-ply`, so camera, lights, shading, specular, SSAO, shadows and colour maps all work (see the [maquette README](https://github.com/bernsteining/maquette/blob/master/crates/maquette/maquette/README.md)). One exception: `color:`/`materials:` are ignored — an OpenSCAD model carries its own per-face colours (`color()`, or the default yellow), so recolour with `color()` in the SCAD/DSL.
+
+Shading is a free choice: the default is **smooth and matte**; `shading: "gooch"` gives a warm/cool **technical-diagram** style; spreading the `openscad-view` preset mimics OpenSCAD's own **flat-shaded** preview.
+
+For full control, `scadypst`, `compile-scad` and `compile-scad-tree` return the PLY bytes directly, to hand to `render-ply` yourself.
+
+## Documentation
+
+[docs/maquette-scad-documentation.pdf](https://github.com/bernsteining/maquette/blob/master/docs/maquette-scad-documentation.pdf) has examples and the language walkthrough; [`FIDELITY.md`](FIDELITY.md) tracks exact OpenSCAD language coverage 
+
+## How it's built
+
+- **[Manifold](https://github.com/elalish/manifold)** (via the [`manifold-csg`](https://crates.io/crates/manifold-csg) crate) — the CSG kernel. It guarantees watertight, correctly-triangulated boolean output, so cuts and overlaps never leave open faces. On wasm its C++ is linked in-crate (through `wasm-cxx-shim`, built `-fno-exceptions`), keeping the module self-contained with zero host imports.
+- **[`openscad-rs`](https://crates.io/crates/openscad-rs)** — parses real `.scad` source; the language evaluator (variables, `module`/`function`, `for`, list comprehensions, `$fn`, `use`/`include`) is written in-crate on top of it.
+- **[`ttf-parser`](https://crates.io/crates/ttf-parser)** — glyph outlines for OpenSCAD `text()`; a subset DejaVu Sans ships as the default font, or pass your own.
+- **[`rpds`](https://crates.io/crates/rpds)** + **[`archery`](https://crates.io/crates/archery)** + **[`rustc-hash`](https://crates.io/crates/rustc-hash)** — immutable scope maps with a fast (Fx) hasher for the evaluator.
+- **[`wasm-minimal-protocol`](https://github.com/astrale-sharp/wasm-minimal-protocol)** the Typst plugin ABI.
+
+A compile produces triangulated PLY bytes with per-face colours from any `color()` blocks which you hand to maquette's `render-ply`.
 
 ## Building from source
 
 ```sh
-make scad-wasm    # release wasm into crates/maquette-scad/maquette-scad.wasm
+make scad-build   # cargo build → wasm-opt -O3 → install into the local Typst package dir
 ```
 
-The wasm build links Manifold's C++ CSG kernel in-crate via [`wasm-cxx-shim`](https://crates.io/crates/wasm-cxx-shim) — the module has zero host imports and runs under Typst's `wasmi` interpreter. Requires `clang` + `cmake` for the native probe harnesses; the wasm build itself only needs `cargo` + `wasm-opt`.
-
-The full wasm module is roughly 3 MB after `wasm-opt -O3` — mostly the Manifold kernel. Amortized: the CSG eval is compiled in the browser at demo time (JIT), where it runs an order of magnitude faster than Typst's interpreter, so live iteration on `.scad` source is snappy.
-
-## Language coverage
-
-Detailed status per feature: [`FIDELITY.md`](FIDELITY.md). TL;DR — everything a real-world `.scad` file typically uses is ✅. The gaps are (1) external-asset imports the wasm sandbox blocks and (2) preview-viewport variables that only matter inside OpenSCAD's own GUI.
-
-## License
-
-MIT.
+The wasm links Manifold's C++ CSG kernel in-crate — zero host imports, runs under Typst's `wasmi` interpreter.
