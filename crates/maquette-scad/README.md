@@ -94,6 +94,7 @@ rotate([0, 90, 0]) rod(hole, len);
   azimuth: 35,
   elevation: 20,
   up: (0, 0, 1),
+  background: none,
 )
 ```
 
