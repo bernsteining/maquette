@@ -10,7 +10,7 @@
 = Cyclone-PCB-Factory — compiled in-plugin from Typst
 #text(size: 15pt)[`compile-scad-tree("Cyclone.scad", root: …)` walks use/include, runs Manifold, returns PLY — all in the wasm plugin.]
 
-#let model = compile-scad-tree("Cyclone.scad", root: "/examples/scad/cyclone-src/", fn: 8)
+#let model = compile-scad-tree("Cyclone.scad", root: "/examples/scad/cyclone-src/", read: p => read(p), fn: 8)
 
 #let cfg = openscad-view + (width: 1400, height: 1400, zoom: 1.4, up: (0, 0, 1))
 #render-ply(model, cfg + (azimuth: 35, elevation: 20), width: 100%)

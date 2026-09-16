@@ -282,11 +282,22 @@
 // sources are read from your project — required from the published package,
 // since a package's own `read()` can't reach your project directory. Other args
 // match compile-scad.
-#let compile-scad-tree(entry, root: "", read: none, bin: (:), font: none, fn: 32, trace: none, smooth-normals: none) = compile-scad(
-  "include <" + entry + ">\n",
-  files: scad-collect(entry, root: root, read: read),
-  bin: bin, font: font, fn: fn, trace: trace, smooth-normals: smooth-normals,
-)
+#let compile-scad-tree(entry, root: "", read: none, bin: (:), font: none, fn: 32, trace: none, smooth-normals: none) = {
+  if read == none {
+    panic(
+      "compile-scad-tree: pass a `read:` handler so it can open your project's " +
+      ".scad files. Typst sandboxes packages, so the plugin can't read them " +
+      "itself — give it an inline lambda scoped to your document:\n\n" +
+      "  compile-scad-tree(\"" + entry + "\", root: \"" + root + "\", read: p => read(p))\n\n" +
+      "(A single self-contained file needs no tree: compile-scad(read(\"model.scad\")).)"
+    )
+  }
+  compile-scad(
+    "include <" + entry + ">\n",
+    files: scad-collect(entry, root: root, read: read),
+    bin: bin, font: font, fn: fn, trace: trace, smooth-normals: smooth-normals,
+  )
+}
 
 // One-call convenience: compile OpenSCAD source AND render it, so you don't have
 // to import maquette's `render-ply` yourself or plumb the PLY between them.
@@ -296,10 +307,25 @@
 // compile-scad; every other argument forwards to render-ply (camera, shading,
 // background, …). `render-ply` is imported lazily, so plain `compile-scad`
 // users never pull in the maquette renderer.
-#let render-scad(src, files: (:), bin: (:), font: none, fn: 32, smooth-normals: none, ..args) = {
+#let render-scad(model, files: (:), bin: (:), font: none, fn: 32, smooth-normals: 30, ..args) = {
+  import "@preview/maquette:0.1.3": render-ply
+  // `model` is a DSL node (dict) or `.scad` source text. No `color:` default:
+  // the mesh carries its own per-face colours.
+  let ply = if type(model) == dictionary {
+    scadypst(model, bin: bin, font: font, fn: fn, smooth-normals: smooth-normals)
+  } else {
+    compile-scad(model, files: files, bin: bin, font: font, fn: fn, smooth-normals: smooth-normals)
+  }
+  render-ply(ply, specular: 0, cull_backface: false, ..args)
+}
+
+/// One-call render for a multi-file project (compile-scad-tree + render-ply).
+#let render-scad-tree(entry, root: "", read: none, bin: (:), font: none, fn: 32, trace: none, smooth-normals: 30, ..args) = {
   import "@preview/maquette:0.1.3": render-ply
   render-ply(
-    compile-scad(src, files: files, bin: bin, font: font, fn: fn, smooth-normals: smooth-normals),
+    compile-scad-tree(entry, root: root, read: read, bin: bin, font: font, fn: fn, trace: trace, smooth-normals: smooth-normals),
+    specular: 0,
+    cull_backface: false,
     ..args,
   )
 }
