@@ -14,6 +14,8 @@ pub struct PixelBuffer {
     pub pixels: Vec<u8>,
     /// Depth buffer (one f32 per pixel, initialized to -infinity).
     zbuf: Vec<f32>,
+    tcov: Vec<f32>,
+    bg: [f32; 3],
     /// Hi-Z: conservative lower bound on min zbuf per 16×16 tile.
     hiz: Vec<f32>,
     hiz_tiles_x: usize,
@@ -31,6 +33,8 @@ impl PixelBuffer {
             height,
             pixels,
             zbuf: vec![f32::NEG_INFINITY; n],
+            tcov: vec![0.0; n],
+            bg: [bg.0 as f32, bg.1 as f32, bg.2 as f32],
             hiz: vec![f32::NEG_INFINITY; hiz_tiles_x * hiz_tiles_y],
             hiz_tiles_x,
         }
@@ -742,6 +746,8 @@ impl PixelBuffer {
         let width = self.width;
         let zbuf = &self.zbuf;
         let pixels = &mut self.pixels;
+        let tcov = &mut self.tcov;
+        let opf = opacity as f32;
         let d0 = depths[0] as f32;
         let d1 = depths[1] as f32;
         let d2 = depths[2] as f32;
@@ -801,6 +807,8 @@ impl PixelBuffer {
                                         *p = i32x4_extract_lane::<0>(result) as u8;
                                         *p.add(1) = i32x4_extract_lane::<1>(result) as u8;
                                         *p.add(2) = i32x4_extract_lane::<2>(result) as u8;
+                                        let t = tcov.get_unchecked_mut(idx0 + $off);
+                                        *t += opf * (1.0 - *t);
                                     }
                                 }
                             }
@@ -831,6 +839,8 @@ impl PixelBuffer {
                                 *p = i32x4_extract_lane::<0>(result) as u8;
                                 *p.add(1) = i32x4_extract_lane::<1>(result) as u8;
                                 *p.add(2) = i32x4_extract_lane::<2>(result) as u8;
+                                let t = tcov.get_unchecked_mut(idx);
+                                *t += opf * (1.0 - *t);
                             }
                         }
                         w0s += dw0; w1s += dw1; w2s += dw2;
@@ -861,6 +871,8 @@ impl PixelBuffer {
         let width = self.width;
         let zbuf = &self.zbuf;
         let pixels = &mut self.pixels;
+        let tcov = &mut self.tcov;
+        let opf = opacity as f32;
         let d0 = depths[0] as f32;
         let d1 = depths[1] as f32;
         let d2 = depths[2] as f32;
@@ -930,6 +942,8 @@ impl PixelBuffer {
                                         *p = i32x4_extract_lane::<0>(result) as u8;
                                         *p.add(1) = i32x4_extract_lane::<1>(result) as u8;
                                         *p.add(2) = i32x4_extract_lane::<2>(result) as u8;
+                                        let t = tcov.get_unchecked_mut(idx0 + $off);
+                                        *t += opf * (1.0 - *t);
                                     }
                                 }
                             }
@@ -964,6 +978,8 @@ impl PixelBuffer {
                                 *p = i32x4_extract_lane::<0>(result) as u8;
                                 *p.add(1) = i32x4_extract_lane::<1>(result) as u8;
                                 *p.add(2) = i32x4_extract_lane::<2>(result) as u8;
+                                let t = tcov.get_unchecked_mut(idx);
+                                *t += opf * (1.0 - *t);
                             }
                         }
                         w0s += dw0; w1s += dw1; w2s += dw2;
@@ -1206,7 +1222,7 @@ impl PixelBuffer {
                 }
             }
         }
-        Self { width: nw, height: nh, pixels, zbuf: Vec::new(), hiz: Vec::new(), hiz_tiles_x: 0 }
+        Self { width: nw, height: nh, pixels, zbuf: Vec::new(), tcov: Vec::new(), bg: [0.0; 3], hiz: Vec::new(), hiz_tiles_x: 0 }
     }
 
     /// SIMD 2× downsample: processes 4 output pixels per iteration using
@@ -1310,7 +1326,7 @@ impl PixelBuffer {
             }
         }
 
-        Self { width: nw, height: nh, pixels: out, zbuf: Vec::new(), hiz: Vec::new(), hiz_tiles_x: 0 }
+        Self { width: nw, height: nh, pixels: out, zbuf: Vec::new(), tcov: Vec::new(), bg: [0.0; 3], hiz: Vec::new(), hiz_tiles_x: 0 }
     }
 
     /// Apply Screen-Space Ambient Occlusion (SSAO) to the rendered image.
@@ -1833,32 +1849,34 @@ impl PixelBuffer {
         let f = factor.max(1);
         let nw = self.width / f;
         let nh = self.height / f;
-        let count = (f * f) as u32;
+        let count = (f * f) as f32;
+        let [bgr, bgg, bgb] = self.bg;
         let mut rgba = vec![0u8; nw * nh * 4];
         for ny in 0..nh {
             for nx in 0..nw {
-                let (mut sr, mut sg, mut sb, mut covered) = (0u32, 0u32, 0u32, 0u32);
+                let (mut pr, mut pg, mut pb, mut asum) = (0f32, 0f32, 0f32, 0f32);
                 for sy in 0..f {
                     let row = (ny * f + sy) * self.width + nx * f;
                     for sx in 0..f {
                         let si = row + sx;
-                        if self.zbuf[si] != f32::NEG_INFINITY {
+                        let cov = if self.zbuf[si] != f32::NEG_INFINITY { 1.0 } else { self.tcov[si] };
+                        if cov > 0.0 {
                             let pi = si * 3;
-                            sr += self.pixels[pi] as u32;
-                            sg += self.pixels[pi + 1] as u32;
-                            sb += self.pixels[pi + 2] as u32;
-                            covered += 1;
+                            let show = 1.0 - cov;
+                            pr += self.pixels[pi] as f32 - show * bgr;
+                            pg += self.pixels[pi + 1] as f32 - show * bgg;
+                            pb += self.pixels[pi + 2] as f32 - show * bgb;
+                            asum += cov;
                         }
                     }
                 }
                 let di = (ny * nw + nx) * 4;
-                if covered > 0 {
-                    rgba[di] = (sr / covered) as u8;
-                    rgba[di + 1] = (sg / covered) as u8;
-                    rgba[di + 2] = (sb / covered) as u8;
-                    rgba[di + 3] = ((covered * 255 + count / 2) / count) as u8;
+                if asum > 0.0 {
+                    rgba[di] = (pr / asum).round().clamp(0.0, 255.0) as u8;
+                    rgba[di + 1] = (pg / asum).round().clamp(0.0, 255.0) as u8;
+                    rgba[di + 2] = (pb / asum).round().clamp(0.0, 255.0) as u8;
+                    rgba[di + 3] = (asum / count * 255.0).round().clamp(0.0, 255.0) as u8;
                 }
-                // else leaves (0,0,0,0) — fully transparent
             }
         }
         (nw as u32, nh as u32, rgba)
