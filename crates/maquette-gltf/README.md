@@ -24,36 +24,40 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 #let tokyo = read("tokyo.glb", encoding: none)
 
 #render-gltf(tokyo, (
-  camera: (290, 464, 774),
+  camera: (-71.915, 159.083, 1026.801),
   center: (-86, 5, -25),
-  up: (0, 1, 0),
-  fov: 40,
-  time: 6.0,
-  background: none,
+  up: (0, 0.989, -0.145),
+  auto_center: false,
+  auto_fit: false,
+  background: "#182028",
+  shadows: true,
+  time: 5.4,
 ))
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B290%2C464%2C774%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C1%2C0%5D&fov=40&time=6&background=%22none%22" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo.png" width="340" alt="Little Tokyo diorama, high three-quarter view" /></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-71.915%2C159.083%2C1026.801%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C0.989%2C-0.145%5D&auto_center=false&auto_fit=false&background=%22%23182028%22&shadows=true&time=5.4" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo.png?v=2" width="340" alt="Little Tokyo diorama, front view" /></a></td>
 </tr>
 <tr>
 <td>
 
 ```typst
-// Same scene — move the camera and aim.
+// Same scene, camera and aim moved.
 
 #render-gltf(tokyo, (
-  camera: (350, 200, 620),
+  camera: (-404.494, 348.337, 960.992),
   center: (-86, 5, -25),
-  up: (0, 1, 0),
-  fov: 45,
-  time: 2.0,
-  background: none,
+  up: (0.052, 0.948, -0.314),
+  auto_center: false,
+  auto_fit: false,
+  background: "#182028",
+  shadows: true,
+  time: 0.55,
 ))
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B350%2C200%2C620%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C1%2C0%5D&fov=45&time=2&background=%22none%22" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo-camera.png" width="340" alt="Little Tokyo diorama from a lower, closer camera" /></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-404.494%2C348.337%2C960.992%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0.052%2C0.948%2C-0.314%5D&auto_center=false&auto_fit=false&background=%22%23182028%22&shadows=true&time=0.55" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo-camera.png?v=2" width="340" alt="Little Tokyo diorama from a high three-quarter angle" /></a></td>
 </tr>
 </table>
 

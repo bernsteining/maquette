@@ -99,17 +99,19 @@ rotate([0, 90, 0]) rod(hole, len);
 #import "@preview/maquette-gltf:0.1.0": render-gltf
 
 #render-gltf(read("tokyo.glb", encoding: none), (
-  camera: (290, 464, 774),
+  camera: (-71.915, 159.083, 1026.801),
   center: (-86, 5, -25),
-  up: (0, 1, 0),
-  fov: 40,
-  time: 6.0,
-  background: none,
+  up: (0, 0.989, -0.145),
+  auto_center: false,
+  auto_fit: false,
+  background: "#182028",
+  shadows: true,
+  time: 5.4,
 ))
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B290%2C464%2C774%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C1%2C0%5D&fov=40&time=6&background=%22none%22" title="Open in the live demo"><img src="examples/readme/gltf-tokyo.png" width="340" alt="glTF Little Tokyo diorama rendered with PBR"></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-71.915%2C159.083%2C1026.801%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C0.989%2C-0.145%5D&auto_center=false&auto_fit=false&background=%22%23182028%22&shadows=true&time=5.4" title="Open in the live demo"><img src="examples/readme/gltf-tokyo.png?v=2" width="340" alt="glTF Little Tokyo diorama rendered with PBR"></a></td>
 </tr>
 </table>
 
