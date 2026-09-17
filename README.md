@@ -124,6 +124,10 @@ Documentation contains many examples showcasing all the features, with each exam
 * [maquette-gltf](docs/maquette-gltf-documentation.pdf)
 
 
+## Other projects using `maquette`
+
+* [molfig](https://github.com/rice8y/molfig): Render molecular data (PDB, mmCIF, BinaryCIF, XYZ) in Typst. [Try it Live](https://bernsteining.github.io/maquette/?a=lsd)
+
 ## Building
 
 ```sh
