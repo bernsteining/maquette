@@ -160,8 +160,7 @@ const SCHEMA = [
         ["cartoon", "cartoon"],
         ["ribbon", "ribbon"],
         ["backbone", "backbone"],
-        ["molecular-surface", "molecular-surface"],
-        ["gaussian-surface", "gaussian-surface"],
+        ["surface", "molecular-surface"],
       ], recompile: "mol" },
     // See MOL_ALWAYS_SEND — this value is always forwarded even when it equals our default.
     { k: "mol_color_theme", label: "Color theme", t: "sel", def: "element-symbol",
@@ -172,7 +171,6 @@ const SCHEMA = [
         ["plddt-confidence", "pLDDT confidence"],
         ["partial-charges", "partial charges"],
       ], recompile: "mol" },
-    // Only honored under cartoon representation in molfig 0.1.4 — the ball-and-stick / spacefill code path always falls back to chain-id.
     { k: "mol_carbon_color", label: "Carbon color", t: "sel", def: "element-symbol",
       opts: [
         ["chain-id", "chain-id (per-chain)"],
@@ -180,9 +178,7 @@ const SCHEMA = [
         ["operator-name", "operator-name"],
       ], recompile: "mol" },
     { k: "mol_quality", label: "Mesh quality", t: "sel", def: "medium",
-      opts: [["low","low"],["medium","medium"],["high","high"]], recompile: "mol" },
-    { k: "mol_style", label: "Style", t: "sel", def: "default",
-      opts: [["default","default"],["illustrative","illustrative"]], recompile: "mol" },
+      opts: [["lowest","lowest"],["low","low"],["medium","medium"],["high","high"],["higher","higher"],["highest","highest"]], recompile: "mol" },
     { k: "mol_infer_bonds", label: "Infer bonds (small molecules)", t: "bool", def: true, recompile: "mol" },
     { k: "mol_radius_scale", label: "Radius scale", t: "rng", def: 1.0, min: 0.1, max: 3, step: 0.05, recompile: "mol" },
     { k: "mol_atom_radius", label: "Atom radius (Å)", t: "num", def: 0.28, recompile: "mol" },
@@ -1807,6 +1803,7 @@ function buildMolOpts(s, format) {
     if (v === "" || v == null) continue;
     const f = TF[k];
     if (!MOL_ALWAYS_SEND.has(k) && f && eq(v, f.def)) continue;
+    if (k === "mol_carbon_color") { (o.theme ??= {}).carbonColor = v; continue; }
     o[k.slice(4).replace(/_/g, "-")] = v;
   }
   return o;
