@@ -96,37 +96,21 @@
 
 #v(1fr)
 #align(center)[
+  #image("/examples/readme/scad-logo.png", width: 46%)
+  #v(0.8em)
   #text(font: "Libertinus Serif", size: 32pt, weight: "bold")[maquette-scad]
   #v(0.3em)
   #text(size: 14pt, fill: gray)[Parametric CAD in Typst, via OpenSCAD + Manifold]
-  #v(1.5em)
+  #v(1.2em)
   #text(size: 12pt, blue)[
     #link("https://github.com/bernsteining/maquette")[github.com/bernsteining/maquette] · #link("https://bernsteining.github.io/maquette")[bernsteining.github.io/maquette]
   ]
-  #v(1em)
-  #show-part(
-    difference(
-      union(
-        cube(30, center: true),
-        translate((0, 0, 15), sphere(15, fn: 48)),
-      ),
-      union(
-        cylinder(50, r: 6, center: true, fn: 48),
-        rotate((0, 90, 0), cylinder(50, r: 6, center: true, fn: 48)),
-        rotate((90, 0, 0), cylinder(50, r: 6, center: true, fn: 48)),
-      ),
-    ),
-    width: 55%,
-    camera: (60, 60, 50), zoom: 1.1,
-    shadows: (resolution: 1024, softness: 1),
-    ssao: (samples: 12, radius: 0.3, strength: 0.9),
-  )
-  #v(0.4em)
+  #v(0.6em)
   #text(size: 10pt, fill: luma(150))[Version 0.1.0 #h(0.4em)·#h(0.4em) #datetime.today().display("[month repr:long] [day], [year]")]
 ]
 #v(1fr)
 
-#pagebreak(weak: true)
+#pagebreak()
 
 #{
   align(center, text(size: 20pt, weight: "bold", tracking: 2pt)[CONTENTS])
@@ -139,20 +123,20 @@
   columns(2, gutter: 2em, outline(indent: 1.2em))
 }
 
-#pagebreak(weak: true)
+#v(1.5em)
 
 = Introduction
 
-*maquette-scad* produces a PLY mesh (or 2D SVG) from a geometry description. Two ways to write the description:
+*maquette-scad* builds 3D models right inside your Typst document — write the geometry, compile, and the render lands in your PDF. No OpenSCAD install, no external tools.
 
-- *`scadypst(tree)`* — build geometry from Typst-native helpers (`cube`, `sphere`, `difference`, `translate`, …) composed with Typst's own `for`, `range`, and `calc`. Returns PLY bytes.
-- *`compile-scad(source)`* — pass the text of an existing `.scad` file. Returns PLY bytes.
+There are two ways to describe a model:
 
-Both entry points also have a `-svg` sibling (`scadypst-svg`, `compile-scad-svg`) for direct 2D vector output — no rasterizer in the loop.
+- *The DSL* — build it from Typst helpers (`cube`, `sphere`, `difference`, `translate`, …), using Typst's own `for`, `range` and `calc` for anything procedural.
+- *A `.scad` file* — pass the text of an existing OpenSCAD file, libraries and all.
 
-This document is the plugin's Typst API reference: what each helper accepts, what the compile calls return, and how to route sidecar assets. Downstream rendering options (camera, lighting, shadows, tone mapping) belong to `maquette` — see its #link("maquette-documentation.pdf")[manual]. For the OpenSCAD language itself see the #link("https://openscad.org/documentation.html")[OpenSCAD Users Manual].
+Either way you get a watertight mesh — the Manifold kernel guarantees it — which `maquette` renders. `render-scad` does both steps in a single call; and for flat parts the `-svg` variants emit 2D vector output directly, with no rasterizer in the loop.
 
-#pagebreak(weak: true)
+This is the API reference: what each helper takes and returns, and how to hand in sidecar files. Camera, lighting and post-processing live in `maquette` — see its #link("maquette-documentation.pdf")[manual]; for the OpenSCAD language itself, the #link("https://openscad.org/documentation.html")[OpenSCAD Users Manual].
 
 = Where to find sample `.scad` files
 
@@ -189,8 +173,6 @@ The DSL examples in this document build their geometry inline, so no external so
 
 One call compiles and renders; no `maquette` import. Examples below use a `show-part` wrapper so the code can focus on geometry.
 
-#pagebreak(weak: true)
-
 = Building geometry from Typst — `scadypst`
 
 `scadypst(tree)` walks a tree of Typst dicts and returns PLY bytes. Each helper (`cube`, `sphere`, `translate`, …) builds a node; nothing runs until `scadypst` receives the whole tree.
@@ -211,8 +193,6 @@ Because the tree is Typst code, iteration and arithmetic come from Typst. A `..f
 ```
 
 Variadic ops (`union`, `difference`, `hull`, `intersection`) accept `..items` — spread a Typst `for` block to feed a computed list.
-
-#pagebreak(weak: true)
 
 == DSL reference
 
@@ -275,8 +255,6 @@ All variadic — use `..` spread with a Typst `for` block to feed a computed lis
 ))
 ```
 
-#pagebreak(weak: true)
-
 == Colours and alpha
 
 Colours propagate through boolean operations. The emitted PLY carries per-vertex RGB and `render-ply` picks it up automatically. Any part without a `color()` wrapper inherits the render config's `color:` argument.
@@ -300,8 +278,6 @@ color((0.9, 0.35, 0.35), child, alpha: 0.5)       // RGB + separate alpha
 
 Interior geometry shows through translucent subtrees, so a coloured cover can reveal the shape's internal features.
 
-#pagebreak(weak: true)
-
 == `scadypst()` — the compile call
 
 ```typc
@@ -314,8 +290,6 @@ scadypst(node, bin: (:), font: none, fn: 32)
 - *`fn`* — default `$fn` for the whole compile. Per-primitive `fn:` overrides.
 
 Returns the same PLY `bytes` that `compile-scad` returns — pass it to `render-ply`.
-
-#pagebreak(weak: true)
 
 == Name clashes with Typst built-ins
 
@@ -340,8 +314,6 @@ Two ways around it:
 ```
 
 Both leave Typst's own `#text` / `#circle` / … intact. The `scad-*` aliases live alongside the unprefixed names, so you can mix approaches within one document.
-
-#pagebreak(weak: true)
 
 = Compiling `.scad` sources — `compile-scad`
 
@@ -378,8 +350,6 @@ Options:
 - *`fn`* (int) — default `$fn` for this compile. Any per-primitive `fn:` overrides it.
 - *`trace`* (string) — dump the evaluator trace to this path. Handy when a nested `for` or `module` isn't producing what you expected.
 
-#pagebreak(weak: true)
-
 = Inspection: `scadypst-info` / `compile-scad-info`
 
 Returns a Typst dict with the final geometry's stats without building
@@ -404,8 +374,6 @@ Fields: `bbox_min`, `bbox_max`, `center`, `radius`, `volume`,
 
 `compile-scad-info(src, files: (:), bin: (:), font: none, fn: 32)` is
 the `.scad`-source variant with the same return shape.
-
-#pagebreak(weak: true)
 
 = Decomposing: `scadypst-parts` / `compile-scad-parts`
 
@@ -434,8 +402,6 @@ Got #parts.len() parts:
 `compile-scad-parts(src, files: (:), bin: (:), font: none, fn: 32)` is
 the `.scad`-source variant.
 
-#pagebreak(weak: true)
-
 = Vertex reduction: `simplify(child, epsilon)`
 
 Collapses edges shorter than `epsilon` (in the input's units) — a
@@ -462,8 +428,6 @@ Dimension-agnostic: pass a 2D shape (`CrossSection`) or a 3D solid
 
 `epsilon` is in model units — tiny for a fine mesh, generous when you
 want to knock a curve down to a coarse polyline.
-
-#pagebreak(weak: true)
 
 = Smooth shading: `calculate-normals(child, sharp_angle)`
 
@@ -518,8 +482,6 @@ compile-scad(read("part.scad"), smooth-normals: 30)
 Either way, the render call needs a smooth shading mode
 (`shading: "smooth"`) to actually consume the normals.
 
-#pagebreak(weak: true)
-
 = Ray casting: `scadypst-raycast` / `compile-scad-raycast`
 
 Fires a segment from `origin` to `end` at the evaluated geometry and
@@ -557,8 +519,6 @@ Empty array means the segment missed.
 `compile-scad-raycast(src, origin, end, files: (:), bin: (:), font: none, fn: 32)`
 is the `.scad`-source variant.
 
-#pagebreak(weak: true)
-
 = Direct 2D → SVG: `scadypst-svg` / `compile-scad-svg`
 
 For sources that resolve to a 2D shape (`circle`, `square`, `polygon`,
@@ -590,8 +550,6 @@ cross-section → vector contour, in one call.
 
 `compile-scad-svg(src, ...)` is the `.scad`-source variant.
 
-#pagebreak(weak: true)
-
 = Multi-file projects: `compile-scad-tree`
 
 A project split across many files with `use <..>` / `include <..>` compiles in one call — `compile-scad-tree` reads the entry file and follows its include graph for you, so there's no file list to maintain:
@@ -603,11 +561,11 @@ A project split across many files with `use <..>` / `include <..>` compiles in o
   "Cyclone.scad",
   root: "cyclone-src/",
   read: p => read(p),
-  fn: 8,
   ..openscad-view,
   azimuth: 35,
   elevation: 20,
   up: (0, 0, 1),
+  background: none,
 )
 ```
 
@@ -619,21 +577,6 @@ A project split across many files with `use <..>` / `include <..>` compiles in o
 )
 
 Need the files as a dict instead (to edit one before compiling)? `scad-collect(entry, root:)` returns `path → source` for `compile-scad(main, files: …)`.
-
-#pagebreak(weak: true)
-
-= Very large assemblies
-
-If a model is too big to build in the plugin, compile it once natively and render the resulting `.ply`:
-
-```typ
-#import "@preview/maquette:0.1.3": render-ply
-
-#let full = read("model.ply", encoding: none)
-#render-ply(full, ..openscad-view, azimuth: 35, elevation: 20)
-```
-
-#pagebreak(weak: true)
 
 = What `compile-scad` accepts
 
