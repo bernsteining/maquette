@@ -18,7 +18,7 @@
       "typst": "https://typst.app/universe/package/maquette-scad",
       "github": "https://github.com/bernsteining/maquette",
       "models": [
-      ["__scad__",        "OpenSCAD editor"],
+      ["__scad__",        "OpenSCAD logo"],
       ["scad/gear.scad",  "Parametric gear"]
     ]},
     { "id": "gltf", "label": "glTF", "hint": "Accepts .glb .gltf",
