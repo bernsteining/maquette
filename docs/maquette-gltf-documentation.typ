@@ -149,9 +149,7 @@ For the IBL section, HDR environment maps come from #link("https://polyhaven.com
 
 = Quickstart
 
-Two input shapes, one entry point.
-
-*Self-contained `.glb` or fully-embedded `.gltf`.* Pass the bytes. This covers most Sketchfab downloads, Damaged Helmet, boombox, and so on.
+The entry point is `render-gltf`. A self-contained `.glb`, or a fully-embedded `.gltf`, is just bytes, so pass them straight in. This covers most Sketchfab downloads, Damaged Helmet, boombox, and so on.
 
 #{
   align(center)[
@@ -161,17 +159,19 @@ Two input shapes, one entry point.
   ]
 }
 
-*Split `.gltf`.* The JSON references external `.bin` and textures by relative URI. Pass the path string and an inline `read:` lambda; the wrapper walks the JSON, resolves every URI through your lambda, and packs the results into a sidecar bundle for the plugin.
+= Split `.gltf` files
+
+A `.glb` (or a fully-embedded `.gltf`) is just bytes. A *split* `.gltf` that references external `.bin` buffers and image files needs a `read:` lambda: pass the path plus `read: p => read(p, encoding: none)` and the wrapper walks the JSON, reads every external URI through your lambda, and bundles them for the plugin, so you write zero filenames.
 
 #{
   align(center)[
-    #raw(block: true, lang: "typ", "#render-gltf(\"Duck.gltf\", read: p => read(p, encoding: none))")
+    #raw(block: true, lang: "typ", "#render-gltf(\"assets/scene.gltf\", read: p => read(p, encoding: none))")
     #v(0.5em)
     #render-gltf(duck-split, read: R, width: 30%)
   ]
 }
 
-The `read:` argument must be an inline lambda, not a bare `read` reference. Typst resolves `read()` paths against the file the call textually lives in; a bare reference from the package binds to the package's own directory. `p => read(p, ...)` gives the wrapper a filesystem handle rooted at your `.typ`.
+The lambda is required because a Typst package can't reach your project's files on its own: `read()` inside the package resolves against the package's path, not your `.typ`.
 
 #pagebreak(weak: true)
 

@@ -4,7 +4,9 @@
 [![Live demo](https://img.shields.io/badge/demo-live-4f46e5)](https://bernsteining.github.io/maquette/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-maquette-gltf renders **glTF 2.0** assets (`.glb` / `.gltf`) directly inside your Typst documents — full Cook-Torrance PBR, image-based lighting, animation, skinning and 20+ KHR/EXT extensions — as a single WebAssembly module. Part of the [maquette](https://github.com/bernsteining/maquette) family (sibling to the STL/OBJ/PLY and OpenSCAD plugins), sharing the same render core.
+maquette-gltf renders **glTF 2.0** assets (`.glb` / `.gltf`) directly inside your Typst documents — full Cook-Torrance PBR, image-based lighting, animation, skinning and 20+ KHR/EXT extensions — as a single WebAssembly module. 
+
+Part of the [maquette](https://github.com/bernsteining/maquette) family (sibling to the STL/OBJ/PLY and OpenSCAD plugins), sharing the same render core.
 
 **[Try it live →](https://bernsteining.github.io/maquette/)** — load a glTF, orbit, scrub the animation, tweak every setting, and copy the generated Typst snippet.
 
@@ -54,17 +56,7 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 </tr>
 </table>
 
-`get-gltf-info(read("tokyo.glb", encoding: none))` returns the triangle count, bounding box and `max_animation_time` — handy for framing the camera or bounding an animation slider.
-
-## Split `.gltf` files
-
-A `.glb` (or a fully-embedded `.gltf`) is just bytes. A **split** `.gltf` that references external `.bin` buffers and image files needs a `read:` lambda: pass the path plus `read: p => read(p, encoding: none)` and the wrapper walks the JSON, reads every external URI through your lambda, and bundles them for the plugin — you write zero filenames.
-
-```typst
-#render-gltf("assets/scene.gltf", read: p => read(p, encoding: none))
-```
-
-The lambda is required because a Typst package can't reach your project's files on its own — `read()` inside the package resolves against the package's path, not your `.typ`.
+`get-gltf-info(read("tokyo.glb", encoding: none))` returns the triangle count, bounding box and `max_animation_time`: handy for framing the camera or bounding an animation slider.
 
 ## Documentation
 
