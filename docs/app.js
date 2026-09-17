@@ -161,7 +161,8 @@ const SCHEMA = [
         ["ribbon", "ribbon"],
         ["backbone", "backbone"],
         ["surface", "molecular-surface"],
-      ], recompile: "mol" },
+      ], recompile: "mol",
+      onSet: v => { if (v === "surface" && state.mol_quality !== "highest") { state.mol_quality = "highest"; buildForm(); refreshVisibility(); } } },
     // See MOL_ALWAYS_SEND — this value is always forwarded even when it equals our default.
     { k: "mol_color_theme", label: "Color theme", t: "sel", def: "element-symbol",
       opts: [
@@ -944,7 +945,7 @@ function ctl(f, slot, local) {
   // Fields flagged `recompile: "scad" | "mol"` re-run the source-plugin
   // (maquette-scad or molfig) to regenerate the mesh before the maquette
   // render call — otherwise the change wouldn't be visible in the output.
-  const set = (v) => { slot[f.k] = v; onChange(); if (f.recompile) triggerRecompile(f.recompile); };
+  const set = (v) => { slot[f.k] = v; if (f.onSet) f.onSet(v); onChange(); if (f.recompile) triggerRecompile(f.recompile); };
   const cur = slot[f.k];
   let labelEl, sync = null;
 
