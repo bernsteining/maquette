@@ -16,6 +16,7 @@ Three ways in: a **`.scad` file** (the homepage example), the Typst **DSL**, and
 
 <table>
 <tr><th align="left">Code</th><th>Render</th></tr>
+<tr><th colspan="2" align="left">1. OpenSCAD file</th></tr>
 <tr>
 <td>
 
@@ -55,6 +56,7 @@ rotate([0, 90, 0]) rod(hole, len);
 </td>
 <td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-logo.png" width="300" alt="OpenSCAD logo compiled from source" /></a></td>
 </tr>
+<tr><th colspan="2" align="left">2. DSL</th></tr>
 <tr>
 <td>
 
@@ -80,6 +82,7 @@ rotate([0, 90, 0]) rod(hole, len);
 </td>
 <td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-dsl.png" width="300" alt="CSG cube built with the Typst DSL" /></td>
 </tr>
+<tr><th colspan="2" align="left">3. Multiple OpenSCAD files</th></tr>
 <tr>
 <td>
 
@@ -94,7 +97,6 @@ rotate([0, 90, 0]) rod(hole, len);
   azimuth: 35,
   elevation: 20,
   up: (0, 0, 1),
-  zoom: 2,
   background: none,
 )
 ```
