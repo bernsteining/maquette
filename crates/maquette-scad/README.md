@@ -12,7 +12,7 @@ Load `.scad` files, or use the `scadyst` DSL to render them with [maquette](http
 
 ## Usage
 
-Three ways in: a **`.scad` file** (the homepage example), the Typst **DSL**, and a whole **multi-file project** compiled by walking its `use`/`include` graph. The DSL and project rows use the one-call `render-scad` / `render-scad-tree`, which compile and render in one step with no `maquette` import.
+Three ways in: a **`.scad` file** (the homepage example), the Typst **DSL**, and a whole **multi-file project** compiled by walking its `use`/`include` graph. All use the one-call `render-scad` / `render-scad-tree`, which compile and render in a single step with no separate `maquette` import.
 
 <table>
 <tr><th align="left">Code</th><th>Render</th></tr>
@@ -36,19 +36,15 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 ```typst
-#import "@preview/maquette-scad:0.1.0": compile-scad
-#import "@preview/maquette:0.1.3": render-ply
+#import "@preview/maquette-scad:0.1.0": render-scad
 
-#render-ply(
-  compile-scad(read("example.scad"), smooth-normals: 30),
+#render-scad(
+  read("example.scad"),
   azimuth: 219,
   elevation: 33,
   up: (0, 1, 0),
   fov: 40,
   zoom: 1.2,
-  color: "#f9d72c",
-  specular: 0,
-  cull_backface: false,
   background: none,
 )
 ```
