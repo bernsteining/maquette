@@ -42,7 +42,7 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 <td>
 
 ```typst
-// Same scene, camera time changed 
+// Same scene, camera & time changed 
 
 #render-gltf(tokyo, (
   camera: (-714.868, 125.157, 793.581),
@@ -58,11 +58,9 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 </tr>
 </table>
 
-`get-gltf-info(read("tokyo.glb", encoding: none))` returns the triangle count, bounding box and `max_animation_time`: handy for framing the camera or bounding an animation slider.
-
 ## Documentation
 
-[docs/maquette-gltf-documentation.pdf](https://github.com/bernsteining/maquette/blob/master/docs/maquette-gltf-documentation.pdf) walks through the config (camera, IBL, shadows, ground plane, tone mapping, SSAO/FXAA/SSAA) and the full list of supported extensions and texture formats.
+[docs/maquette-gltf-documentation.pdf](https://github.com/bernsteining/maquette/blob/master/docs/maquette-gltf-documentation.pdf)
 
 ## How it's built
 
@@ -79,8 +77,6 @@ What it does piggyback on is parsing and decoding:
 | [`zune-png`](https://crates.io/crates/zune-png), [`zune-jpeg`](https://crates.io/crates/zune-jpeg), [`image-webp`](https://crates.io/crates/image-webp) | texture decoding (PNG / JPEG / `EXT_texture_webp`), shared with the OBJ/MTL path through `maquette-core` |
 | [`wasm-minimal-protocol`](https://github.com/astrale-sharp/wasm-minimal-protocol) | the Typst plugin calling convention |
 | [`serde_json`](https://crates.io/crates/serde_json) | parsing the render config |
-
-Every dependency is pure Rust and wasm-friendly, so the build is a plain `cargo build --target wasm32-unknown-unknown` with no C toolchain (unlike maquette-scad, which links Manifold's C++ kernel).
 
 ## Building from source
 

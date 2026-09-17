@@ -12,7 +12,10 @@ Load `.scad` files, or use the `scadyst` DSL to render them with [maquette](http
 
 ## Usage
 
-Three ways in: a **`.scad` file** (the homepage example), the Typst **DSL**, and a whole **multi-file project** compiled by walking its `use`/`include` graph. All use the one-call `render-scad` / `render-scad-tree`, which compile and render in a single step with no separate `maquette` import.
+Three ways in: 
+* a **`.scad` file**
+* the Typst **DSL**
+* a **multi-file project**
 
 <table>
 <tr><th colspan="2" align="left">1. OpenSCAD file</th></tr>
@@ -114,7 +117,8 @@ For full control, `scadypst`, `compile-scad` and `compile-scad-tree` return the 
 
 ## Documentation
 
-[docs/maquette-scad-documentation.pdf](https://github.com/bernsteining/maquette/blob/master/docs/maquette-scad-documentation.pdf) has examples and the language walkthrough; [`FIDELITY.md`](FIDELITY.md) tracks exact OpenSCAD language coverage 
+* [docs/maquette-scad-documentation.pdf](https://github.com/bernsteining/maquette/blob/master/docs/maquette-scad-documentation.pdf) 
+* [`FIDELITY.md`](FIDELITY.md) tracks exact OpenSCAD language coverage 
 
 ## How it's built
 
@@ -129,7 +133,5 @@ A compile produces triangulated PLY bytes with per-face colours from any `color(
 ## Building from source
 
 ```sh
-make scad-build   # cargo build → wasm-opt -O3 → install into the local Typst package dir
+make scad-build
 ```
-
-The wasm links Manifold's C++ CSG kernel in-crate — zero host imports, runs under Typst's `wasmi` interpreter.
