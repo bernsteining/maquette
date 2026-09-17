@@ -10,6 +10,8 @@ Load `.scad` files, or use the `scadyst` DSL to render them with [maquette](http
 
 **[Try it live →](https://bernsteining.github.io/maquette/?a=__scad__)**  edit SCAD source, orbit the result, tweak the render, and copy the generated Typst code snippet.
 
+> **Download models to try it out on** [Thingiverse](https://www.thingiverse.com/search?q=openscad&page=1).
+
 ## Usage
 
 Three ways in: 

@@ -10,9 +10,12 @@ Render [glTF](https://en.wikipedia.org/wiki/GlTF) assets (`.glb` / `.gltf`) dire
 
 Part of the [maquette](https://github.com/bernsteining/maquette) family (sibling to the STL/OBJ/PLY and OpenSCAD plugins), sharing the same render core.
 
+> **Download models to try it out on** [Khronos glTF sample assets](https://github.com/KhronosGroup/glTF-Sample-Assets).
+
+
 ## Usage
 
-The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-6072d34e02454743a4a0f4d219c2c62c) diorama, twice: `time` scrubs the animation clip, and `camera` / `center` move the eye.
+Model reference: [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-6072d34e02454743a4a0f4d219c2c62c)
 
 <table>
 <tr>
