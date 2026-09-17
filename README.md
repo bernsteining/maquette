@@ -89,7 +89,7 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="examples/readme/scad-logo.png" width="340" alt="OpenSCAD logo compiled from source to a mesh"></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="examples/readme/scad-logo.png?v=2" width="340" alt="OpenSCAD logo compiled from source to a mesh"></a></td>
 </tr>
 <tr><th colspan="2" align="left">maquette-gltf</th></tr>
 <tr>
