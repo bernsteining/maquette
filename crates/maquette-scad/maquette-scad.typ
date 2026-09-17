@@ -158,6 +158,14 @@
 // mesh so it renders smooth-shaded under maquette's smooth shading modes;
 // crease edges sharper than N degrees stay crisp. `none` = faceted.
 // Feed the result to maquette's `render-ply`.
+/// Compile a DSL tree to PLY bytes, to hand to maquette's `render-ply`. Build
+/// the tree from `cube`, `sphere`, `difference`, `translate`, and so on.
+///
+/// 🔗 *Preview geometry and render settings in the live web demo:*
+/// https://bernsteining.github.io/maquette/
+///
+/// - node (dictionary): the tree returned by any DSL helper.
+/// -> bytes
 #let scadypst(node, bin: (:), font: none, fn: 32, smooth-normals: none) = {
   let assets = bin
   if font != none { assets = assets + ("__font__": font) }
@@ -260,6 +268,15 @@
 //   compile-scad(read("main.scad"),
 //     bin: ("part.stl": read("part.stl", encoding: none)),
 //     font: read("Roboto.ttf", encoding: none))
+/// Compile `.scad` source text to PLY bytes, to hand to maquette's `render-ply`.
+///
+/// 🔗 *Preview a `.scad` model and its render in the live web demo:*
+/// https://bernsteining.github.io/maquette/
+///
+/// - src (str): the `.scad` text, usually `read("part.scad")`.
+/// - files (dictionary): `use`/`include` sources, name → contents.
+/// - bin (dictionary): sidecar meshes for `import()`, name → bytes.
+/// -> bytes
 #let compile-scad(src, files: (:), bin: (:), font: none, fn: 32, trace: none, smooth-normals: none) = {
   let assets = bin
   if font != none { assets = assets + ("__font__": font) }
@@ -282,6 +299,16 @@
 // sources are read from your project — required from the published package,
 // since a package's own `read()` can't reach your project directory. Other args
 // match compile-scad.
+/// Compile a multi-file `.scad` project to PLY bytes, following its `use` and
+/// `include` graph from `entry`. Pass a `read:` lambda scoped to your document
+/// so the plugin can open your files.
+///
+/// 🔗 *Live web demo:* https://bernsteining.github.io/maquette/
+///
+/// - entry (str): the top `.scad` file inside `root`.
+/// - root (str): the folder joined onto each discovered path.
+/// - read (function): a reader scoped to your project, `p => read(p)`.
+/// -> bytes
 #let compile-scad-tree(entry, root: "", read: none, bin: (:), font: none, fn: 32, trace: none, smooth-normals: none) = {
   if read == none {
     panic(
@@ -307,6 +334,16 @@
 // compile-scad; every other argument forwards to render-ply (camera, shading,
 // background, …). `render-ply` is imported lazily, so plain `compile-scad`
 // users never pull in the maquette renderer.
+/// Compile a model and render it in one call, without importing `maquette`
+/// yourself. `model` is a DSL tree (from `cube`, `difference`, …) or `.scad`
+/// source text such as `read("part.scad")`.
+///
+/// 🔗 *Build your model and dial in the render visually in the live web demo,
+/// then copy the generated code:* https://bernsteining.github.io/maquette/
+///
+/// - model (dictionary, str, bytes): a DSL node, or `.scad` source text.
+/// - ..args (arguments): forwarded to maquette's `render-ply` (camera, shading, background, …).
+/// -> content
 #let render-scad(model, files: (:), bin: (:), font: none, fn: 32, smooth-normals: 30, ..args) = {
   import "@preview/maquette:0.1.3": render-ply
   // `model` is a DSL node (dict) or `.scad` source text. No `color:` default:
@@ -319,7 +356,17 @@
   render-ply(ply, specular: 0, cull_backface: false, ..args)
 }
 
-/// One-call render for a multi-file project (compile-scad-tree + render-ply).
+/// Compile a whole multi-file `.scad` project and render it in one call
+/// (`compile-scad-tree` + `render-ply`). Pass a `read:` lambda scoped to your
+/// document so the plugin can open the project's files.
+///
+/// 🔗 *Preview and tweak the render in the live web demo:*
+/// https://bernsteining.github.io/maquette/
+///
+/// - entry (str): the top `.scad` file inside `root`.
+/// - read (function): a reader scoped to your project, `p => read(p)`.
+/// - ..args (arguments): forwarded to maquette's `render-ply`.
+/// -> content
 #let render-scad-tree(entry, root: "", read: none, bin: (:), font: none, fn: 32, trace: none, smooth-normals: 30, ..args) = {
   import "@preview/maquette:0.1.3": render-ply
   render-ply(
