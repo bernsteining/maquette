@@ -13,7 +13,7 @@
 
 // A neutral shading preset every example uses so shots don't fight the
 // per-example composition. Accepts either raw PLY bytes (from `scadypst()`)
-// or an unbuilt expression tree (dict from `cube` / `difference` / etc.) —
+// or an unbuilt expression tree (dict from `cube` / `difference` / etc.);
 // the latter gets auto-compiled so example code can skip `scadypst(...)`.
 #let show-part(part, ..args) = {
   let ply = if type(part) == dictionary { scadypst(part) } else { part }
@@ -127,28 +127,27 @@
 
 = Introduction
 
-*maquette-scad* builds 3D models right inside your Typst document — write the geometry, compile, and the render lands in your PDF. No OpenSCAD install, no external tools.
+*maquette-scad* builds 3D models right inside your Typst document. You write the geometry, it compiles, and the render lands in your PDF. There is no OpenSCAD to install and nothing to run on the side.
 
-There are two ways to describe a model:
+There are two ways to describe a model. The first is the DSL: you build the shape from Typst helpers such as `cube`, `sphere`, `difference` and `translate`, and reach for Typst's own `for`, `range` and `calc` whenever the geometry is procedural. The second is to pass the text of an existing `.scad` file, libraries and all.
 
-- *The DSL* — build it from Typst helpers (`cube`, `sphere`, `difference`, `translate`, …), using Typst's own `for`, `range` and `calc` for anything procedural.
-- *A `.scad` file* — pass the text of an existing OpenSCAD file, libraries and all.
+Either way you get a watertight mesh, which the Manifold kernel guarantees, and `maquette` renders it. `render-scad` does both steps in a single call. When a shape is flat, the `-svg` variants skip the rasterizer and write 2D vector output straight out.
 
-Either way you get a watertight mesh — the Manifold kernel guarantees it — which `maquette` renders. `render-scad` does both steps in a single call; and for flat parts the `-svg` variants emit 2D vector output directly, with no rasterizer in the loop.
+You can try all of this in the browser at #link("https://bernsteining.github.io/maquette")[bernsteining.github.io/maquette]. Edit the SCAD, orbit the result, adjust the render, and copy the Typst it generates.
 
-This is the API reference: what each helper takes and returns, and how to hand in sidecar files. Camera, lighting and post-processing live in `maquette` — see its #link("maquette-documentation.pdf")[manual]; for the OpenSCAD language itself, the #link("https://openscad.org/documentation.html")[OpenSCAD Users Manual].
+This document is the API reference: what each helper takes, what the compile calls return, and how to hand in sidecar files. Camera, lighting and post-processing belong to `maquette`, so see its #link("maquette-documentation.pdf")[manual] for those. For the OpenSCAD language itself, see the #link("https://openscad.org/documentation.html")[OpenSCAD Users Manual].
 
 = Where to find sample `.scad` files
 
-The DSL examples in this document build their geometry inline, so no external source is needed. For the `compile-scad(read("..."))` path, `.scad` sources are easy to find:
+The DSL examples in this document build their geometry inline, so you need no external source to follow along. If you want to try the `compile-scad(read("..."))` path, `.scad` files are easy to find:
 
-- #link("https://github.com/openscad/openscad/tree/master/examples")[openscad/openscad `examples/`] — the set that ships with the OpenSCAD editor.
-- #link("https://github.com/BelfrySCAD/BOSL2")[BOSL2] — a large utility library with hundreds of documented fragments.
-- #link("https://www.thingiverse.com/tag:openscad")[Thingiverse (openscad tag)] — community archive; many entries ship the `.scad` alongside the `.stl`.
+- #link("https://github.com/openscad/openscad/tree/master/examples")[openscad/openscad `examples/`] is the set that ships with the OpenSCAD editor.
+- #link("https://github.com/BelfrySCAD/BOSL2")[BOSL2] is a large utility library with hundreds of documented fragments.
+- #link("https://www.thingiverse.com/tag:openscad")[Thingiverse (openscad tag)] is a community archive; many entries ship the `.scad` alongside the `.stl`.
 
 = Quickstart
 
-`render-scad` compiles and renders in one call — pass it a DSL tree or a `.scad` path, plus any of maquette's render options.
+`render-scad` compiles and renders in one call. Pass it a DSL tree or a `.scad` path, followed by any of maquette's render options.
 
 ```typ
 #import "@preview/maquette-scad:0.1.0": cube, difference, render-scad, sphere
@@ -163,7 +162,7 @@ The DSL examples in this document build their geometry inline, so no external so
 )
 ```
 
-`render-scad` also takes source text — same call, a `.scad` file instead of a tree:
+`render-scad` also takes source text. It is the same call, with a `.scad` file in place of a tree:
 
 ```typ
 #import "@preview/maquette-scad:0.1.0": render-scad
@@ -173,11 +172,11 @@ The DSL examples in this document build their geometry inline, so no external so
 
 One call compiles and renders; no `maquette` import. Examples below use a `show-part` wrapper so the code can focus on geometry.
 
-= Building geometry from Typst — `scadypst`
+= Building geometry with `scadypst`
 
-`scadypst(tree)` walks a tree of Typst dicts and returns PLY bytes. Each helper (`cube`, `sphere`, `translate`, …) builds a node; nothing runs until `scadypst` receives the whole tree.
+`scadypst(tree)` walks a tree of Typst dicts and returns PLY bytes. Each helper such as `cube`, `sphere` or `translate` builds a node, and nothing runs until `scadypst` receives the whole tree.
 
-Because the tree is Typst code, iteration and arithmetic come from Typst. A `..for` spread inside `union` places twelve spheres on a ring:
+Because the tree is Typst code, iteration and arithmetic come from Typst. Here a `..for` spread inside `union` places twelve spheres on a ring:
 
 ```example
 // cols: 2 1
@@ -192,61 +191,61 @@ Because the tree is Typst code, iteration and arithmetic come from Typst. A `..f
 #show-part(scadypst(ring))
 ```
 
-Variadic ops (`union`, `difference`, `hull`, `intersection`) accept `..items` — spread a Typst `for` block to feed a computed list.
+The variadic ops (`union`, `difference`, `hull`, `intersection`) accept `..items`, so you can spread a Typst `for` block to feed them a computed list.
 
 == DSL reference
 
-Every helper takes Typst-native named arguments (`cube(20, center: true)`). Signatures below list positional args first, then named. `fn: N` sets the per-primitive segment count.
+Every helper takes Typst-native named arguments, as in `cube(20, center: true)`. The signatures below list positional arguments first, then named ones. `fn: N` sets the segment count for that primitive.
 
 === 3D primitives
 
-- *`cube(size, center: false)`* — `size` is a number (uniform) or a 3-array `(x, y, z)`.
-- *`sphere(r, fn: none)`*
-- *`cylinder(h, r: none, r1: none, r2: none, center: false, fn: none)`* — pass `r` for a straight cylinder, `r1` + `r2` for a cone / frustum.
-- *`polyhedron(points, faces)`* — raw mesh: `points = ((x, y, z), …)`, `faces = ((i, j, k, …), …)`.
+- *`cube(size, center: false)`*: `size` is a number for a uniform box, or a 3-array `(x, y, z)`.
+- *`sphere(r, fn: none)`*: a sphere of radius `r`.
+- *`cylinder(h, r: none, r1: none, r2: none, center: false, fn: none)`*: pass `r` for a straight cylinder, or `r1` and `r2` for a cone or frustum.
+- *`polyhedron(points, faces)`*: a raw mesh, where `points` is `((x, y, z), …)` and `faces` is `((i, j, k, …), …)`.
 
 === 2D primitives (extrusion sources)
 
-- *`square(size, center: false)`*, *`circle(r, fn: none)`*, *`ellipse(w, h, fn: none)`*.
-- *`polygon(points, paths: none)`* — arbitrary 2D shape. `paths` is a list of index-rings into `points`: first ring is the outer boundary, rest are holes.
-- *`ngon(sides, r, fn: none)`* — regular polygon.
-- *`star(points, outer, inner)`* — n-pointed star.
-- *`rounded-square(w, h, r, fn: none)`* — rectangle with radius-`r` corners.
-- *`scad-text(str, size: 10)`* — glyph outlines from the font passed to `scadypst()`'s `font:` param.
-- *`import-mesh(file)`* — reference an STL/OBJ passed via `scadypst()`'s `bin:` dict.
+- *`square(size, center: false)`*, *`circle(r, fn: none)`* and *`ellipse(w, h, fn: none)`* are the basic shapes.
+- *`polygon(points, paths: none)`* is an arbitrary 2D shape. `paths` is a list of index-rings into `points`, where the first ring is the outer boundary and the rest are holes.
+- *`ngon(sides, r, fn: none)`* is a regular polygon.
+- *`star(points, outer, inner)`* is an n-pointed star.
+- *`rounded-square(w, h, r, fn: none)`* is a rectangle with radius-`r` corners.
+- *`scad-text(str, size: 10)`* draws glyph outlines from the font passed to `scadypst()`'s `font:` argument.
+- *`import-mesh(file)`* references an STL or OBJ passed via `scadypst()`'s `bin:` dict.
 
 === 2D → 3D lifting (and 3D → 2D)
 
-- *`linear-extrude(h, child, center: false, twist: 0, scale: 1, slices: none)`* — extrude a 2D shape to a height `h`. `twist` is degrees over the full height; `scale` is a taper factor (0..1) or an `(sx, sy)` pair.
-- *`rotate-extrude(child, angle: 360, fn: none)`* — revolve a 2D profile (living in the +x half-plane) around the z-axis.
-- *`projection(child)`* — flatten a 3D solid to its 2D shadow on the Z=0 plane.
+- *`linear-extrude(h, child, center: false, twist: 0, scale: 1, slices: none)`* extrudes a 2D shape to a height `h`. `twist` is degrees over the full height, and `scale` is a taper factor from 0 to 1 or an `(sx, sy)` pair.
+- *`rotate-extrude(child, angle: 360, fn: none)`* revolves a 2D profile, which lives in the +x half-plane, around the z-axis.
+- *`projection(child)`* flattens a 3D solid to its 2D shadow on the Z=0 plane.
 
 === Transforms (2D or 3D)
 
-- *`translate(v, child)`* — `v` is a 2- or 3-vector.
-- *`rotate(deg, child)`* — Euler degrees, `(x, y, z)` or a single number (2D rotation).
-- *`scale(v, child)`* — per-axis scale.
-- *`mirror(v, child)`* — reflect across a plane whose normal is `v`.
-- *`multmatrix(m, child)`* — 4×4 (or 4×3) affine matrix; escape hatch for anything the named transforms can't do.
-- *`resize(v, child)`* — non-uniform scale to fit a target bounding box.
-- *`offset(d, child)`* — grow (`d > 0`) or shrink (`d < 0`) a 2D shape by `d`.
-- *`color(rgb, child, alpha: none)`* — RGB is a 3-array of 0..1 floats, or a 4-array `(r, g, b, a)`. See the Colours + alpha section below.
+- *`translate(v, child)`*: `v` is a 2- or 3-vector.
+- *`rotate(deg, child)`*: Euler degrees as `(x, y, z)`, or a single number for a 2D rotation.
+- *`scale(v, child)`*: per-axis scale.
+- *`mirror(v, child)`*: reflect across a plane whose normal is `v`.
+- *`multmatrix(m, child)`*: a 4×4 (or 4×3) affine matrix, the escape hatch for anything the named transforms cannot express.
+- *`resize(v, child)`*: non-uniform scale to fit a target bounding box.
+- *`offset(d, child)`*: grow (`d > 0`) or shrink (`d < 0`) a 2D shape by `d`.
+- *`color(rgb, child, alpha: none)`*: `rgb` is a 3-array of 0..1 floats, or a 4-array `(r, g, b, a)`. See the Colours and alpha section below.
 
 === Booleans and hulls
 
-- *`union(..items)`*, *`difference(..items)`* (first minus the rest), *`intersection(..items)`*.
-- *`hull(..items)`* — convex hull of the union (3D).
-- *`hull-pts(points)`* — convex hull from a raw 3D point set (a list of `(x, y, z)` triples). Complements `hull()` when you have coordinates, not geometry, to wrap.
-- *`minkowski(..items)`* — Minkowski sum (3D).
+- *`union(..items)`*, *`difference(..items)`* (the first minus the rest), and *`intersection(..items)`*.
+- *`hull(..items)`* is the convex hull of the union (3D).
+- *`hull-pts(points)`* is the convex hull of a raw 3D point set, a list of `(x, y, z)` triples. It complements `hull()` when you have coordinates rather than geometry to wrap.
+- *`minkowski(..items)`* is the Minkowski sum (3D).
 
-All variadic — use `..` spread with a Typst `for` block to feed a computed list of children.
+These are all variadic, so a `..` spread over a Typst `for` block feeds them a computed list of children.
 
 === Plane operations
 
-- *`slice(child, z: 0)`* — horizontal cross-section of a 3D solid at the given Z. Returns a 2D shape; pipe into `scadypst-svg(..)` for a vector contour, or into further 2D ops. Distinct from `projection(..)`, which unions every horizontal slice.
-- *`trim(child, normal, offset: 0)`* — cut with a plane. Keeps the half where `dot(pos, normal) ≥ offset`. Cheaper and exact vs the "difference() with a giant cube" trick.
-- *`simplify(child, epsilon: 0.01)`* — Douglas-Peucker vertex reduction. Works on both 2D and 3D. See its own section for a before/after count.
-- *`calculate-normals(child, sharp_angle: 60)`* — attach per-vertex normals for smooth shading, with a crease-angle threshold that keeps sharp edges crisp. 3D only. Renders show the effect only under `shading: "smooth"`.
+- *`slice(child, z: 0)`* takes a horizontal cross-section of a 3D solid at the given Z. It returns a 2D shape, which you can pipe into `scadypst-svg(..)` for a vector contour or into further 2D ops. Unlike `projection(..)`, it does not union every horizontal slice.
+- *`trim(child, normal, offset: 0)`* cuts with a plane, keeping the half where `dot(pos, normal) ≥ offset`. It is cheaper and exact compared with the "difference() with a giant cube" trick.
+- *`simplify(child, epsilon: 0.01)`* is a Douglas-Peucker vertex reduction that works on both 2D and 3D. Its own section has a before/after count.
+- *`calculate-normals(child, sharp_angle: 60)`* attaches per-vertex normals for smooth shading, with a crease-angle threshold that keeps sharp edges crisp. It is 3D only, and the effect shows only under `shading: "smooth"`.
 
 ```example
 // cols: 2 1
@@ -278,18 +277,18 @@ color((0.9, 0.35, 0.35), child, alpha: 0.5)       // RGB + separate alpha
 
 Interior geometry shows through translucent subtrees, so a coloured cover can reveal the shape's internal features.
 
-== `scadypst()` — the compile call
+== The `scadypst()` compile call
 
 ```typc
 scadypst(node, bin: (:), font: none, fn: 32)
 ```
 
-- *`node`* — the tree returned by any DSL helper. Usually the top-level `union` / `difference` / a single primitive.
-- *`bin`* — dict of sidecar bytes referenced by `import-mesh(file)`. Keys match the string passed to `import-mesh`, values are `read("path", encoding: none)`.
-- *`font`* — TTF/OTF bytes for `scad-text(...)`. One font per compile.
-- *`fn`* — default `$fn` for the whole compile. Per-primitive `fn:` overrides.
+- *`node`*: the tree returned by any DSL helper, usually a top-level `union` or `difference`, or a single primitive.
+- *`bin`*: a dict of sidecar bytes referenced by `import-mesh(file)`. The keys match the string passed to `import-mesh`, and the values are `read("path", encoding: none)`.
+- *`font`*: TTF or OTF bytes for `scad-text(...)`. One font per compile.
+- *`fn`*: the default `$fn` for the whole compile. A per-primitive `fn:` overrides it.
 
-Returns the same PLY `bytes` that `compile-scad` returns — pass it to `render-ply`.
+It returns the same PLY `bytes` that `compile-scad` returns, ready to pass to `render-ply`.
 
 == Name clashes with Typst built-ins
 
@@ -300,7 +299,7 @@ A glob-import (`#import "..": *`) shadows seven of Typst's own functions:
 Two ways around it:
 
 ```typ
-// Option 1 — namespace the plugin
+// Option 1: namespace the plugin
 #import "@preview/maquette-scad:0.1.0"
 #let part = maquette-scad.scadypst(
   maquette-scad.difference(
@@ -309,13 +308,13 @@ Two ways around it:
   )
 )
 
-// Option 2 — glob-import the plugin's `scad-*` aliases
+// Option 2: glob-import the plugin's `scad-*` aliases
 #import "@preview/maquette-scad:0.1.0": scad-color, scad-scale, scad-rotate, scad-circle, scad-square, scad-ellipse, scad-polygon
 ```
 
 Both leave Typst's own `#text` / `#circle` / … intact. The `scad-*` aliases live alongside the unprefixed names, so you can mix approaches within one document.
 
-= Compiling `.scad` sources — `compile-scad`
+= Compiling `.scad` sources with `compile-scad`
 
 For a standalone `.scad` file, one call is enough:
 
@@ -343,12 +342,12 @@ Real-world `.scad` files rarely stand alone: they `use` / `include` a library, `
 
 Options:
 
-- *`source`* (positional string) — the `.scad` text. Almost always `read("path.scad")`.
-- *`files`* (dict) — resolves every `use <name>` / `include <name>` in the source. Keys are the exact names the `.scad` uses; nested paths like `MCAD/foo.scad` are keys with slashes.
-- *`bin`* (dict) — sidecar mesh files referenced by `import()`. Keys match the `import` argument. Recognised formats: STL and OBJ (DXF, 3MF, and AMF are not).
-- *`font`* (bytes) — a TTF or OTF file used by `text()`. One font per compile.
-- *`fn`* (int) — default `$fn` for this compile. Any per-primitive `fn:` overrides it.
-- *`trace`* (string) — dump the evaluator trace to this path. Handy when a nested `for` or `module` isn't producing what you expected.
+- *`source`* (positional string): the `.scad` text, almost always `read("path.scad")`.
+- *`files`* (dict): resolves every `use <name>` and `include <name>` in the source. The keys are the exact names the `.scad` uses, and nested paths like `MCAD/foo.scad` are keys with slashes.
+- *`bin`* (dict): sidecar mesh files referenced by `import()`. The keys match the `import` argument. STL and OBJ are recognised; DXF, 3MF and AMF are not.
+- *`font`* (bytes): a TTF or OTF file used by `text()`. One font per compile.
+- *`fn`* (int): the default `$fn` for this compile. Any per-primitive `fn:` overrides it.
+- *`trace`* (string): dumps the evaluator trace to this path. It helps when a nested `for` or `module` is not producing what you expected.
 
 = Inspection: `scadypst-info` / `compile-scad-info`
 
@@ -404,12 +403,9 @@ the `.scad`-source variant.
 
 = Vertex reduction: `simplify(child, epsilon)`
 
-Collapses edges shorter than `epsilon` (in the input's units) — a
-Douglas-Peucker style pass that strips micro-detail from booleans or
-slims a mesh before shipping it through PLY / SVG.
+Collapses edges shorter than `epsilon`, measured in the input's units. It is a Douglas-Peucker style pass that strips micro-detail from booleans, or slims a mesh before you ship it through PLY or SVG.
 
-Dimension-agnostic: pass a 2D shape (`CrossSection`) or a 3D solid
-(`Manifold`); the op dispatches on the child.
+It is dimension-agnostic: pass a 2D shape (`CrossSection`) or a 3D solid (`Manifold`), and the op dispatches on the child.
 
 ```example
 // cols: 2 1
@@ -426,15 +422,14 @@ Dimension-agnostic: pass a 2D shape (`CrossSection`) or a 3D solid
 )
 ```
 
-`epsilon` is in model units — tiny for a fine mesh, generous when you
-want to knock a curve down to a coarse polyline.
+`epsilon` is in model units: keep it tiny for a fine mesh, and make it generous when you want to knock a curve down to a coarse polyline.
 
 = Smooth shading: `calculate-normals(child, sharp_angle)`
 
 Attaches per-vertex normals to a 3D solid so maquette can smooth-shade
 curved surfaces while keeping crisp edges. Adjacent faces whose
-dihedral angle exceeds `sharp_angle` (degrees) stay sharp; the rest
-blend. The op must run AFTER final booleans/hulls — those discard any
+dihedral angle exceeds `sharp_angle` (degrees) stay sharp, and the rest
+blend. Run it after the final booleans and hulls, since those discard any
 existing normals.
 
 The effect only shows under smooth shading. `openscad-view` is flat by
@@ -457,9 +452,9 @@ Higher = more edges smoothed (softer curves).
 
 == Two ways to add smooth normals
 
-`calculate-normals` (above) is a *tree op* — it smooths whatever
+`calculate-normals` (above) is a *tree op*: it smooths whatever
 subtree it wraps. Use it when only one region of a bigger model
-should render smooth (say the sphere but not the cube parts).
+should render smooth, say the sphere but not the cube parts.
 
 The end-call helpers `scadypst(..., smooth-normals: 30)` and
 `compile-scad(..., smooth-normals: 30)` are the *whole-scene*
@@ -468,13 +463,13 @@ mesh right before it's serialized. Same output, less typing when
 you want the entire model smoothed:
 
 ```typ
-// tree-op form — smooths just the sphere:
+// tree-op form: smooths just the sphere
 scadypst(union(
   calculate-normals(sphere(10, fn: 24), sharp_angle: 30),
   translate((15, 0, 0), cube(6, center: true)),
 ))
 
-// end-call form — smooths everything:
+// end-call form: smooths everything
 scadypst(my-model, smooth-normals: 30)
 compile-scad(read("part.scad"), smooth-normals: 30)
 ```
@@ -523,7 +518,7 @@ is the `.scad`-source variant.
 
 For sources that resolve to a 2D shape (`circle`, `square`, `polygon`,
 `text`, hulls of 2D things, `offset`, `slice`, `projection`), the plugin
-can emit an SVG document directly — no maquette in the loop, no
+can emit an SVG document directly, with no maquette in the loop and no
 rasterizer. The result is resolution-independent, Inkscape-editable,
 and laser-cutter-ready.
 
@@ -552,7 +547,7 @@ cross-section → vector contour, in one call.
 
 = Multi-file projects: `compile-scad-tree`
 
-A project split across many files with `use <..>` / `include <..>` compiles in one call — `compile-scad-tree` reads the entry file and follows its include graph for you, so there's no file list to maintain:
+A project split across many files with `use <..>` and `include <..>` compiles in one call. `compile-scad-tree` reads the entry file and follows its include graph for you, so there is no file list to maintain:
 
 ```typ
 #import "@preview/maquette-scad:0.1.0": openscad-view, render-scad-tree
@@ -569,7 +564,7 @@ A project split across many files with `use <..>` / `include <..>` compiles in o
 )
 ```
 
-`root` is the source folder joined onto each discovered path; `entry` is the top file inside it. Pass a `read:` lambda scoped to your document — `read: p => read(p)` — so the sources are read from *your* project (a package's own `read()` can't reach your files). The whole Cyclone-PCB-Factory below — 69 files — comes from that single call:
+`root` is the source folder joined onto each discovered path, and `entry` is the top file inside it. Pass a `read:` lambda scoped to your document, `read: p => read(p)`, so the sources are read from *your* project; a package's own `read()` cannot reach your files. The whole Cyclone-PCB-Factory below, all 69 files, comes from that single call:
 
 #figure(
   image("cyclone-example.png", width: 88%),
@@ -580,7 +575,7 @@ Need the files as a dict instead (to edit one before compiling)? `scad-collect(e
 
 = What `compile-scad` accepts
 
-If your `.scad` source works in the OpenSCAD editor, it should work here — the evaluator covers everything a typical file uses. Known gaps: `surface()` (heightmap import), `import()` of DXF, `$vpr` / `$vpt` / `$vpd` / `$vpf` viewport variables, and adaptive tessellation from `$fa` / `$fs` (we use `$fn` or the per-primitive `fn:` instead). Any external STL / OBJ mesh referenced by `import()` must be routed through the `bin:` argument since the plugin has no filesystem access.
+If your `.scad` source works in the OpenSCAD editor, it should work here; the evaluator covers everything a typical file uses. The known gaps are `surface()` (heightmap import), `import()` of DXF, the `$vpr` / `$vpt` / `$vpd` / `$vpf` viewport variables, and adaptive tessellation from `$fa` / `$fs` (we use `$fn` or the per-primitive `fn:` instead). Any external STL or OBJ mesh referenced by `import()` must be routed through the `bin:` argument, since the plugin has no filesystem access.
 
 The exhaustive per-feature tracker lives at `crates/maquette-scad/FIDELITY.md`.
 
