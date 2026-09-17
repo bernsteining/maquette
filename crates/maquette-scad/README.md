@@ -8,7 +8,7 @@ Render OpenSCAD files in Typst with `maquette-scad`.
 
 Load `.scad` files, or use the `scadyst` DSL to render them with [maquette](https://github.com/bernsteining/maquette). 
 
-**[Try it live →](https://bernsteining.github.io/maquette/)**  edit SCAD source, orbit the result, tweak the render, and copy the generated Typst code snippet.
+**[Try it live →](https://bernsteining.github.io/maquette/?a=__scad__)**  edit SCAD source, orbit the result, tweak the render, and copy the generated Typst code snippet.
 
 ## Usage
 
@@ -54,7 +54,7 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-logo.png" width="300" alt="OpenSCAD logo compiled from source" /></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-logo.png?v=3" width="300" alt="OpenSCAD logo compiled from source" /></a></td>
 </tr>
 <tr><th colspan="2" align="left">2. DSL</th></tr>
 <tr>
