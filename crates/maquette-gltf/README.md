@@ -36,7 +36,7 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-71.915%2C159.083%2C1026.801%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C0.989%2C-0.145%5D&auto_center=false&auto_fit=false&background=%22%23182028%22&shadows=true&time=5.4" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo.png?v=2" width="340" alt="Little Tokyo diorama, front view" /></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-71.915%2C159.083%2C1026.801%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C0.989%2C-0.145%5D&auto_center=false&auto_fit=false&background=%22%23182028%22&shadows=true&time=5.4" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo.png?v=3" width="340" alt="Little Tokyo diorama, front view" /></a></td>
 </tr>
 <tr>
 <td>
@@ -54,7 +54,7 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-714.868%2C125.157%2C793.581%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0.02%2C0.991%2C-0.13%5D&background=%22%23182028%22&shadows=true" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo-camera.png?v=4" width="340" alt="Little Tokyo diorama from a side three-quarter angle" /></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-714.868%2C125.157%2C793.581%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0.02%2C0.991%2C-0.13%5D&background=%22%23182028%22&shadows=true" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo-camera.png?v=5" width="340" alt="Little Tokyo diorama from a side three-quarter angle" /></a></td>
 </tr>
 </table>
 

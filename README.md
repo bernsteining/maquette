@@ -53,7 +53,7 @@
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D&antialias=4&background=%22none%22" title="Open in the live demo"><img src="examples/readme/maquette-sss.png?v=2" width="340" alt="Subsurface-scattering Stanford bunny backlit by a red light"></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D&antialias=4&background=%22none%22" title="Open in the live demo"><img src="examples/readme/maquette-sss.png?v=3" width="340" alt="Subsurface-scattering Stanford bunny backlit by a red light"></a></td>
 </tr>
 <tr><th colspan="2" align="left">maquette-scad</th></tr>
 <tr>
@@ -89,7 +89,7 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="examples/readme/scad-logo.png?v=3" width="340" alt="OpenSCAD logo compiled from source to a mesh"></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="examples/readme/scad-logo.png?v=4" width="340" alt="OpenSCAD logo compiled from source to a mesh"></a></td>
 </tr>
 <tr><th colspan="2" align="left">maquette-gltf</th></tr>
 <tr>
@@ -111,7 +111,7 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-71.915%2C159.083%2C1026.801%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C0.989%2C-0.145%5D&auto_center=false&auto_fit=false&background=%22%23182028%22&shadows=true&time=5.4" title="Open in the live demo"><img src="examples/readme/gltf-tokyo.png?v=2" width="340" alt="glTF Little Tokyo diorama rendered with PBR"></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-71.915%2C159.083%2C1026.801%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0%2C0.989%2C-0.145%5D&auto_center=false&auto_fit=false&background=%22%23182028%22&shadows=true&time=5.4" title="Open in the live demo"><img src="examples/readme/gltf-tokyo.png?v=3" width="340" alt="glTF Little Tokyo diorama rendered with PBR"></a></td>
 </tr>
 </table>
 
