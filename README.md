@@ -9,7 +9,7 @@
 
 **maquette is a set of Typst plugins for embedding 3D renders directly in your documents.** Change a parameter, recompile the `.typ`, and the render lands in your PDF, no external tools, no manual re-exports, no separate asset pipeline.
 
-**[Try it live →](https://bernsteining.github.io/maquette/)** — a browser demo runs the exact same WebAssembly the plugins ship. Drag to orbit, tweak every setting, copy the generated Typst source. The demo runs the wasm through a browser JIT rather than Typst's interpreter, so it iterates ~10× faster than a document rebuild.
+**[Try it live →](https://bernsteining.github.io/maquette/)** a browser demo runs the exact same WebAssembly the plugins ship. Drag to orbit, tweak every setting, copy the generated Typst source. The demo runs the wasm through a browser JIT rather than Typst's interpreter, so it iterates ~10× faster than a document rebuild.
 
 ## The plugins
 
@@ -48,12 +48,13 @@
     power: 3.5,
     distortion: 0.2,
   ),
+  antialias: 4,
   background: none,
 )
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D&background=%22none%22" title="Open in the live demo"><img src="examples/readme/maquette-sss.png" width="340" alt="Subsurface-scattering Stanford bunny backlit by a red light"></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D&antialias=4&background=%22none%22" title="Open in the live demo"><img src="examples/readme/maquette-sss.png?v=2" width="340" alt="Subsurface-scattering Stanford bunny backlit by a red light"></a></td>
 </tr>
 <tr><th colspan="2" align="left">maquette-scad</th></tr>
 <tr>
