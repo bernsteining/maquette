@@ -171,6 +171,9 @@
 
 /// Render a glTF or GLB model to a raster image.
 ///
+/// 🔗 *Frame the camera, lighting and animation visually in the live web demo,
+/// then copy the generated code:* https://bernsteining.github.io/maquette/
+///
 /// `model` accepts either a path string or bytes:
 ///   - `"assets/scene.gltf"` (with `read: p => read(p, encoding: none)`) —
 ///     the wrapper reads the file, discovers external `.bin`/image sidecars
@@ -201,6 +204,9 @@
 /// Return scene metadata (triangle count, bounding box, center, radius,
 /// `max_animation_time`) as a dictionary. Useful for computing camera
 /// framing or driving an animation slider.
+///
+/// 🔗 *Explore models interactively in the live web demo:*
+/// https://bernsteining.github.io/maquette/
 ///
 /// Same `model` polymorphism and `read:` handshake as `render-gltf`.
 /// -> dictionary
