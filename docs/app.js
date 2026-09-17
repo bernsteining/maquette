@@ -1474,6 +1474,22 @@ function syncFmtToggleForKind(name) {
 // rewrites its `t`/`min`/`max`/`step` in place when the loaded asset has
 // animations. Caching skips an O(sections × fields) search on every ingest.
 const GLTF_TIME_FIELD = GLTF_SCHEMA.flatMap(s => s.fields).find(f => f.k === "time");
+const GLTF_CAMERA_FIELD = GLTF_SCHEMA.flatMap(s => s.fields).find(f => f.k === "camera_name");
+function gltfCameraNames(bytes) {
+  if (!bytes || bytes.length < 20) return [];
+  try {
+    let jsonText;
+    if (bytes[0] === 0x67 && bytes[1] === 0x6C && bytes[2] === 0x54 && bytes[3] === 0x46) {
+      const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      jsonText = DEC.decode(bytes.subarray(20, 20 + dv.getUint32(12, true)));
+    } else {
+      jsonText = DEC.decode(bytes);
+    }
+    return (JSON.parse(jsonText).cameras || [])
+      .map(c => (c && typeof c.name === "string") ? c.name : "")
+      .filter(n => n);
+  } catch { return []; }
+}
 function applyModelDefaults(name) {
   const TF = topFields();
   for (const k of DEFAULTS_KEYS) {   // reset to the field's starting value (init, else def)
@@ -1570,6 +1586,16 @@ async function syncGltfInfo() {
       state.camera = [cx + d, cy + d * 0.75, cz + d];
       state.up     = [0, 1, 0];
       state.fov    = 40;
+    }
+    const camNames = gltfCameraNames(model.bytes);
+    if (GLTF_CAMERA_FIELD) {
+      if (camNames.length) {
+        GLTF_CAMERA_FIELD.t = "sel";
+        GLTF_CAMERA_FIELD.opts = [["", "(auto)"], ...camNames.map(n => [n, n])];
+        if (state.camera_name && !camNames.includes(state.camera_name)) state.camera_name = "";
+      } else {
+        GLTF_CAMERA_FIELD.t = "txt"; delete GLTF_CAMERA_FIELD.opts;
+      }
     }
     buildForm(); refreshVisibility();
     onChange();
@@ -2378,10 +2404,14 @@ $("btn-share").onclick = async () => {
 
 $("btn-reset").onclick = () => {
   resetState();
+  applyModelDefaults(model.scad ? ($("preset").value || "__scad__") : model.name);
   renderOverride = null;
   history.replaceState(null, "", location.pathname);
   $("search").value = "";
-  rebuildForm(); measure(); onChange();
+  if (model._gltf) { syncGltfInfo(); measure(); }
+  else { rebuildForm(); measure(); onChange(); }
+  if (model.scad) triggerRecompile("scad");
+  else if (model._mol) triggerRecompile("mol");
 };
 
 // The first manual edit of any control drops the deep-link override, so from
