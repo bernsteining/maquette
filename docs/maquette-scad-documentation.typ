@@ -178,7 +178,8 @@ One call compiles and renders; no `maquette` import. Examples below use a `show-
 
 #text(size: 9pt, raw(block: true, lang: "json", "{ // ── Compile options (maquette-scad) ───────────────────────────────
   \"fn\": 32,                                        // Default $fn segment count; a per-primitive fn: overrides it
-  \"smooth-normals\": 30,                            // Crease angle (deg) for smooth vertex normals; none = faceted
+  \"smooth-normals\": 30,                            // Whole-mesh crease/sharp angle (deg) for smooth normals; none = faceted
+                                                    //   (same threshold as the calculate-normals tree-op's sharp_angle)
   \"files\": {},                                     // Multi-file .scad parts: { \"path\": bytes } (or pass a read: lambda)
   \"bin\": {},                                       // Binary meshes for import(): { \"name\": bytes }
   \"font\": null                                     // TTF/OTF bytes for text(); null = bundled DejaVu Sans
