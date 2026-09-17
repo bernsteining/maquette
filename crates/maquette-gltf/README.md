@@ -4,7 +4,7 @@
 [![Live demo](https://img.shields.io/badge/demo-live-4f46e5)](https://bernsteining.github.io/maquette/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-Render **glTF 2.0** assets (`.glb` / `.gltf`) directly inside your Typst documents with `maquette-gltf`. 
+Render [glTF](https://en.wikipedia.org/wiki/GlTF) assets (`.glb` / `.gltf`) directly inside your Typst documents with `maquette-gltf`. 
 
 **[Try it live →](https://bernsteining.github.io/maquette/?a=tokyo.glb)** load a glTF, orbit, scrub the animation, tweak every setting, and copy the generated Typst snippet.
 
