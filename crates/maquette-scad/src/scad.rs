@@ -12,13 +12,14 @@
 //! `minkowski`, extrudes (`linear_extrude` incl. twist/scale, `rotate_extrude`,
 //! `projection`), control flow (`for`/`intersection_for`/`if`), list
 //! comprehensions, user modules & functions (+ closures + `children()`),
-//! `use`/`include` and `import`(stl/obj)/`text` via Typst-passed bytes, and the
-//! expression language + builtin library. Not yet: `surface`, `import` dxf/svg,
-//! `$fa`/`$fs`, matrix·matrix, `!` root modifier.
+//! `use`/`include` and `import`(stl/obj)/`text` via Typst-passed bytes, `$fa`/
+//! `$fs` adaptive tessellation, the `!` root modifier, and the expression
+//! language + builtin library. Not yet: `surface`, `import` dxf/svg, matrix·matrix.
 
 use crate::json::Json;
 use openscad_rs::ast::{Argument, BinaryOp, Expr, ExprKind, Parameter, Statement, UnaryOp};
 use rustc_hash::{FxBuildHasher, FxHashMap};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -94,6 +95,8 @@ struct Env {
     cur_dir: String,
     /// Guards against `use`/`include` cycles / runaway nesting.
     include_depth: usize,
+    /// First `!obj` root modifier seen, shared across cloned scopes.
+    root: Rc<RefCell<Option<Json>>>,
 }
 
 // Manual Debug: the Fx `BuildHasher` in `Vars` isn't `Debug`, and a full var dump
@@ -120,6 +123,7 @@ impl Env {
             files: Rc::new(HashMap::new()),
             cur_dir: String::new(),
             include_depth: 0,
+            root: Rc::new(RefCell::new(None)),
         }
     }
     fn def_module(&mut self, name: String, params: Vec<Parameter>, body: Vec<Statement>) {
@@ -212,6 +216,9 @@ pub fn scad_to_dsl(src: &str, files: HashMap<String, String>) -> Result<Json, St
     env.vars.insert_mut("$fa".into(), Value::Num(12.0));
     env.vars.insert_mut("$fs".into(), Value::Num(2.0));
     let nodes = eval_body(&sf.statements, &mut env)?;
+    if let Some(r) = env.root.borrow().clone() {
+        return Ok(r);
+    }
     group(nodes).ok_or_else(|| "scad: no geometry produced".into())
 }
 
@@ -367,6 +374,9 @@ fn eval_body(stmts: &[Statement], env: &mut Env) -> Result<Vec<Json>, String> {
                     } else {
                         node
                     };
+                    if modifiers.root && env.root.borrow().is_none() {
+                        *env.root.borrow_mut() = Some(node.clone());
+                    }
                     out.push(node);
                 }
             }
@@ -489,11 +499,22 @@ fn seg_arg(a: &Args, env: &Env) -> Option<f64> {
         .filter(|n| *n >= 3.0)
         .or_else(|| env.fn_default())
 }
-/// Attach a `fn` key if a facet count is resolvable.
+fn tess_arg(a: &Args, env: &Env, name: &str, default: f64) -> f64 {
+    a.named
+        .get(name)
+        .and_then(|v| v.as_num().ok())
+        .or_else(|| env.vars.get(name).and_then(|v| v.as_num().ok()))
+        .filter(|n| *n > 0.0)
+        .unwrap_or(default)
+}
+/// Attach `fn`, `fa` and `fs` so the builder can resolve tessellation the way
+/// OpenSCAD does (`$fn` wins; otherwise `$fa`/`$fs` drive the facet count).
 fn with_fn(mut entries: Vec<(&str, Json)>, a: &Args, env: &Env) -> Json {
     if let Some(f) = seg_arg(a, env) {
         entries.push(("fn", jnum(f)));
     }
+    entries.push(("fa", jnum(tess_arg(a, env, "$fa", 12.0))));
+    entries.push(("fs", jnum(tess_arg(a, env, "$fs", 2.0))));
     obj_owned(entries)
 }
 

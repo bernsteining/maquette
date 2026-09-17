@@ -216,6 +216,27 @@ fn seg_of(node: &Json, d: &Defaults) -> usize {
 fn seg_i32(node: &Json, d: &Defaults) -> i32 {
     seg_of(node, d) as i32
 }
+/// OpenSCAD's `get_fragments_from_r`, radius-aware. An explicit `$fn` (>= 3)
+/// wins. At OpenSCAD's stock `$fa`/`$fs` (12 / 2) we keep the caller's `seg`
+/// default so existing renders are byte-identical; a customised `$fa`/`$fs`
+/// switches to the real formula.
+fn frags(node: &Json, d: &Defaults, r: f64) -> i32 {
+    if let Some(f) = num(node, "fn") {
+        if f >= 3.0 {
+            return f as i32;
+        }
+    }
+    let fa = num(node, "fa").filter(|x| *x > 0.0).unwrap_or(12.0);
+    let fs = num(node, "fs").filter(|x| *x > 0.0).unwrap_or(2.0);
+    if (fa - 12.0).abs() < 1e-9 && (fs - 2.0).abs() < 1e-9 {
+        return seg_of(node, d) as i32;
+    }
+    if !r.is_finite() || r < 1e-2 {
+        return 3;
+    }
+    let n = (360.0 / fa).min(r * 2.0 * std::f64::consts::PI / fs);
+    (n.ceil().max(5.0) as i32).max(3)
+}
 fn children(node: &Json) -> Result<&[Json], String> {
     node.get("children")
         .and_then(Json::as_arr)
@@ -253,6 +274,16 @@ fn finite_all(v: &[f64], ctx: &str) -> Result<(), String> {
         Err(format!("{ctx}: vector has a non-finite (NaN/inf) component"))
     }
 }
+/// Largest coordinate magnitude Clipper2/Manifold handle before a native abort
+/// traps the whole wasm module. Reject out-of-range input as an error instead.
+const MAX_COORD: f64 = 1e7;
+fn bounded_all(v: &[f64], ctx: &str) -> Result<(), String> {
+    finite_all(v, ctx)?;
+    if v.iter().any(|x| x.abs() > MAX_COORD) {
+        return Err(format!("{ctx}: coordinate magnitude exceeds {MAX_COORD:e}"));
+    }
+    Ok(())
+}
 /// Read a `points: [[x,y],…]` list, validating finiteness and a >=3 count.
 fn polygon_points(node: &Json, ctx: &str) -> Result<Vec<[f64; 2]>, String> {
     let pts_j = node
@@ -265,7 +296,7 @@ fn polygon_points(node: &Json, ctx: &str) -> Result<Vec<[f64; 2]>, String> {
             .as_arr()
             .and_then(|a| Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?]))
             .ok_or_else(|| format!("{ctx}: each point needs [x, y]"))?;
-        finite_all(&a, ctx)?;
+        bounded_all(&a, ctx)?;
         pts.push(a);
     }
     if pts.len() < 3 {
@@ -350,14 +381,13 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             if r < 1e-9 {
                 return Ok(Geo::D3(Manifold::empty()));
             }
-            Ok(Geo::D3(register(Manifold::sphere(r, seg_i32(node, d)), &color)))
+            Ok(Geo::D3(register(Manifold::sphere(r, frags(node, d, r)), &color)))
         }
         "cylinder" => {
             // OpenSCAD tolerates negative h (spans -z) and treats degenerate as
             // empty; radii are taken as |r|. r1=bottom, r2=top (cone/frustum).
             let h = req(node, "h", "cylinder")?;
             let ah = h.abs();
-            let seg = seg_i32(node, d);
             if ah < 1e-9 {
                 return Ok(Geo::D3(Manifold::empty()));
             }
@@ -370,6 +400,7 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             if r1 + r2 < 1e-9 {
                 return Ok(Geo::D3(Manifold::empty()));
             }
+            let seg = frags(node, d, r1.max(r2));
             let m = Manifold::cylinder(ah, r1, r2, seg, false); // sits 0..ah on Z
             let centered = node.get("center").and_then(Json::as_bool).unwrap_or(false);
             let m = if centered {
@@ -423,7 +454,7 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             if r < 1e-9 {
                 return Ok(Geo::D2(CrossSection::empty(), color));
             }
-            Ok(Geo::D2(CrossSection::circle(r, seg_i32(node, d)), color))
+            Ok(Geo::D2(CrossSection::circle(r, frags(node, d, r)), color))
         }
         "ellipse" => {
             let w = req_pos(node, "w", "ellipse")?;
@@ -597,8 +628,9 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             if !angle.is_finite() || angle == 0.0 {
                 return Err("rotate_extrude: angle must be a non-zero finite number".into());
             }
-            let seg = seg_i32(node, d);
             let cs = build_revolve_profile(child_of(node)?, color.clone(), d)?;
+            let radius = cs.bounds().max()[0].abs();
+            let seg = frags(node, d, radius);
             // Manifold's revolve already matches OpenSCAD: the +x half of the XY
             // profile is spun around the Z axis (profile Y → height Z).
             let m = Manifold::revolve(&cs, seg, angle);
@@ -781,6 +813,7 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
         }
         "offset" => {
             let dist = num(node, "d").ok_or("offset: d")?;
+            bounded_all(&[dist], "offset")?;
             let (cs, col) = build(child_of(node)?, color, d)?.into_cross("offset")?;
             // OpenSCAD offset(r=..) uses rounded joins; approximate with Round.
             Ok(Geo::D2(cs.offset(dist, JoinType::Round, 2.0, seg_i32(node, d)), col))

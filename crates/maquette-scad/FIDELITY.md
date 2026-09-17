@@ -18,13 +18,13 @@ this crate emits is now watertight (verified 0 open edges on the full Cyclone).
 | Variable assignment (last-wins scope) | ✅ | |
 | `let()` expression | ✅ | |
 | Member access `.x/.y/.z` (`.r/.g/.b`) | ✅ | |
-| Index `v[i]`, string index `s[i]` | ✅ | slicing ❌ |
+| Index `v[i]`, string index `s[i]` | ✅ | `s[range]` → `undef`, matching OpenSCAD (which has no slice syntax) |
 
 ## Special variables
 | Feature | Status | Notes |
 |---|---|---|
 | `$fn`, `$t`, `$preview`, `$children` | ✅ | |
-| `$fa`, `$fs` | 🟡 | defined with OpenSCAD defaults ($fa=12, $fs=2, $fn=0) so libraries that read them (e.g. dotSCAD's `__frags()`) work; our own primitive builder still tessellates from `$fn`/the caller default, not adaptively |
+| `$fa`, `$fs` | ✅ | adaptive tessellation via OpenSCAD's `get_fragments_from_r` (`$fn` wins; else `ceil(max(min(360/$fa, r·2π/$fs), 5))`). At the stock defaults ($fa=12, $fs=2) the caller/web-demo facet default is kept so existing renders are unchanged; a customised `$fa`/`$fs` refines by radius. Applies to `sphere`, `cylinder`, `circle`, `rotate_extrude` |
 | `$vpr/$vpt/$vpd/$vpf` | ❌ | viewport vars — n/a |
 
 ## Operators
@@ -94,7 +94,7 @@ this crate emits is now watertight (verified 0 open edges on the full Cyclone).
 | Feature | Status | Notes |
 |---|---|---|
 | `*` disable, `%` background, `#` highlight | ✅ | `%`/`#` → per-part alpha |
-| `!` root (show only this) | ❌ | |
+| `!` root (show only this) | ✅ | first `!`-marked subtree wins; all siblings discarded |
 
 ## Built-in functions
 | Feature | Status | Notes |
@@ -118,10 +118,12 @@ this crate emits is now watertight (verified 0 open edges on the full Cyclone).
 - **`fill`** (2D) — not implemented; experimental **`object()`** — not implemented.
 - **`polyhedron` strictness** — Manifold requires a valid 2-manifold; OpenSCAD renders
   some non-manifold "soups" loosely (we return an error/skip instead).
-- **C++-abort hardening** — Manifold/Clipper2 throw (→ native abort / wasm trap) on
-  extreme 2D coordinates; needs input validation to prevent the trap.
-- **Minor:** `$fa`/`$fs` *adaptive* primitive tessellation (defined but our builder
-  uses `$fn`), `!` root modifier, string slicing.
+- **C++-abort hardening** — polygon points and `offset` deltas are now bounded
+  (`|coord| ≤ 1e7`) before reaching Manifold/Clipper2, turning what was a native
+  abort / wasm trap on extreme 2D coordinates into a clean compile error. Other
+  entry points may still need the same guard as they surface.
+- **Minor:** string slicing (`s[a:b]`) — OpenSCAD itself has no slicing, so `s[i]`
+  is the only indexing form and `s[range]` → `undef`, which already matches.
 
 ## Compliance benchmark (OpenSCAD's own `tests/data/scad` corpus)
 - **Parse: 98.9%** (520/526); the 6 misses are intentionally-malformed error tests
