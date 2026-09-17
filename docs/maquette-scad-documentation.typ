@@ -9,6 +9,7 @@
   align(right, text(size: 7.5pt, fill: luma(120), counter(page).display())),
 ))
 #set par(justify: true)
+#show heading: set block(sticky: true)
 #show: zebraw.with(lang: false, numbering: false)
 
 // A neutral shading preset every example uses so shots don't fight the
@@ -26,6 +27,16 @@
     ..args,
   )
 }
+
+#let dsl-table(rows) = table(
+  columns: (auto, 1fr),
+  align: (left + horizon, left + horizon),
+  inset: (x: 7pt, y: 5pt),
+  stroke: none,
+  fill: (_, y) => if y == 0 { luma(230) } else if calc.even(y) { luma(249) },
+  table.header([*Signature*], [*Description*]),
+  ..rows.map(((s, d)) => (text(size: 8.5pt, raw(s)), text(size: 9.5pt, d))).flatten(),
+)
 
 // Scope shared with the `example` show rule so eval() sees the SCAD DSL +
 // render helper without re-importing per example.
@@ -103,7 +114,9 @@
   #text(size: 14pt, fill: gray)[Parametric CAD in Typst, via OpenSCAD + Manifold]
   #v(1.2em)
   #text(size: 12pt, blue)[
-    #link("https://github.com/bernsteining/maquette")[github.com/bernsteining/maquette] · #link("https://bernsteining.github.io/maquette")[bernsteining.github.io/maquette]
+    #link("https://typst.app/universe/package/maquette-scad")[typst.app/universe/package/maquette-scad] \
+    #link("https://github.com/bernsteining/maquette")[github.com/bernsteining/maquette] \
+    #link("https://bernsteining.github.io/maquette")[bernsteining.github.io/maquette]
   ]
   #v(0.6em)
   #text(size: 10pt, fill: luma(150))[Version 0.1.0 #h(0.4em)·#h(0.4em) #datetime.today().display("[month repr:long] [day], [year]")]
@@ -187,8 +200,6 @@ One call compiles and renders; no `maquette` import. Examples below use a `show-
 
 Every other argument forwards to maquette's `render-ply`: `camera`, `azimuth`, `elevation`, `up`, `fov`, `zoom`, `background`, `color`, `shading`, `lights`, `shadows`, `ssao`, and the rest. See the #link("maquette-documentation.pdf")[maquette manual] for that full option surface. `render-scad` overrides two of its defaults to suit CAD facets: `specular: 0` and `cull_backface: false` (matte and two-sided).
 
-#pagebreak(weak: true)
-
 = Building geometry with `scadypst`
 
 `scadypst(tree)` walks a tree of Typst dicts and returns PLY bytes. Each helper such as `cube`, `sphere` or `translate` builds a node, and nothing runs until `scadypst` receives the whole tree.
@@ -216,53 +227,69 @@ Every helper takes Typst-native named arguments, as in `cube(20, center: true)`.
 
 === 3D primitives
 
-- *`cube(size, center: false)`*: `size` is a number for a uniform box, or a 3-array `(x, y, z)`.
-- *`sphere(r, fn: none)`*: a sphere of radius `r`.
-- *`cylinder(h, r: none, r1: none, r2: none, center: false, fn: none)`*: pass `r` for a straight cylinder, or `r1` and `r2` for a cone or frustum.
-- *`polyhedron(points, faces)`*: a raw mesh, where `points` is `((x, y, z), …)` and `faces` is `((i, j, k, …), …)`.
+#dsl-table((
+  ("cube(size, center: false)", [`size` is a number for a uniform box, or a 3-array `(x, y, z)`.]),
+  ("sphere(r, fn: none)", [A sphere of radius `r`.]),
+  ("cylinder(h, r: none, r1: none, r2: none, center: false, fn: none)", [Pass `r` for a straight cylinder, or `r1` and `r2` for a cone or frustum.]),
+  ("polyhedron(points, faces)", [A raw mesh: `points` is `((x, y, z), …)`, `faces` is `((i, j, k, …), …)`.]),
+))
 
 === 2D primitives (extrusion sources)
 
-- *`square(size, center: false)`*, *`circle(r, fn: none)`* and *`ellipse(w, h, fn: none)`* are the basic shapes.
-- *`polygon(points, paths: none)`* is an arbitrary 2D shape. `paths` is a list of index-rings into `points`, where the first ring is the outer boundary and the rest are holes.
-- *`ngon(sides, r, fn: none)`* is a regular polygon.
-- *`star(points, outer, inner)`* is an n-pointed star.
-- *`rounded-square(w, h, r, fn: none)`* is a rectangle with radius-`r` corners.
-- *`scad-text(str, size: 10)`* draws glyph outlines from the font passed to `scadypst()`'s `font:` argument.
-- *`import-mesh(file)`* references an STL or OBJ passed via `scadypst()`'s `bin:` dict.
+#dsl-table((
+  ("square(size, center: false)", [A rectangle; `size` is a number or `(w, h)`.]),
+  ("circle(r, fn: none)", [A circle of radius `r`.]),
+  ("ellipse(w, h, fn: none)", [An ellipse of width `w` and height `h`.]),
+  ("polygon(points, paths: none)", [An arbitrary 2D shape. `paths` lists index-rings into `points`; the first ring is the outer boundary, the rest are holes.]),
+  ("ngon(sides, r, fn: none)", [A regular polygon.]),
+  ("star(points, outer, inner)", [An n-pointed star.]),
+  ("rounded-square(w, h, r, fn: none)", [A rectangle with radius-`r` corners.]),
+  ("scad-text(str, size: 10)", [Glyph outlines from the font passed to `scadypst()`'s `font:` argument.]),
+  ("import-mesh(file)", [References an STL or OBJ passed via `scadypst()`'s `bin:` dict.]),
+))
 
 === 2D → 3D lifting (and 3D → 2D)
 
-- *`linear-extrude(h, child, center: false, twist: 0, scale: 1, slices: none)`* extrudes a 2D shape to a height `h`. `twist` is degrees over the full height, and `scale` is a taper factor from 0 to 1 or an `(sx, sy)` pair.
-- *`rotate-extrude(child, angle: 360, fn: none)`* revolves a 2D profile, which lives in the +x half-plane, around the z-axis.
-- *`projection(child)`* flattens a 3D solid to its 2D shadow on the Z=0 plane.
+#dsl-table((
+  ("linear-extrude(h, child, center: false, twist: 0, scale: 1, slices: none)", [Extrudes a 2D shape to height `h`. `twist` is degrees over the full height; `scale` is a taper from 0 to 1, or an `(sx, sy)` pair.]),
+  ("rotate-extrude(child, angle: 360, fn: none)", [Revolves a 2D profile (living in the +x half-plane) around the z-axis.]),
+  ("projection(child)", [Flattens a 3D solid to its 2D shadow on the Z=0 plane.]),
+))
 
 === Transforms (2D or 3D)
 
-- *`translate(v, child)`*: `v` is a 2- or 3-vector.
-- *`rotate(deg, child)`*: Euler degrees as `(x, y, z)`, or a single number for a 2D rotation.
-- *`scale(v, child)`*: per-axis scale.
-- *`mirror(v, child)`*: reflect across a plane whose normal is `v`.
-- *`multmatrix(m, child)`*: a 4×4 (or 4×3) affine matrix, the escape hatch for anything the named transforms cannot express.
-- *`resize(v, child)`*: non-uniform scale to fit a target bounding box.
-- *`offset(d, child)`*: grow (`d > 0`) or shrink (`d < 0`) a 2D shape by `d`.
-- *`color(rgb, child, alpha: none)`*: `rgb` is a 3-array of 0..1 floats, or a 4-array `(r, g, b, a)`. See the Colours and alpha section below.
+#dsl-table((
+  ("translate(v, child)", [`v` is a 2- or 3-vector.]),
+  ("rotate(deg, child)", [Euler degrees `(x, y, z)`, or a single number for a 2D rotation.]),
+  ("scale(v, child)", [Per-axis scale.]),
+  ("mirror(v, child)", [Reflect across a plane whose normal is `v`.]),
+  ("multmatrix(m, child)", [A 4×4 (or 4×3) affine matrix — the escape hatch for anything the named transforms cannot express.]),
+  ("resize(v, child)", [Non-uniform scale to fit a target bounding box.]),
+  ("offset(d, child)", [Grow (`d > 0`) or shrink (`d < 0`) a 2D shape by `d`.]),
+  ("color(rgb, child, alpha: none)", [`rgb` is a 3-array of 0–1 floats, or a 4-array `(r, g, b, a)`. See _Colours and alpha_ below.]),
+))
 
 === Booleans and hulls
 
-- *`union(..items)`*, *`difference(..items)`* (the first minus the rest), and *`intersection(..items)`*.
-- *`hull(..items)`* is the convex hull of the union (3D).
-- *`hull-pts(points)`* is the convex hull of a raw 3D point set, a list of `(x, y, z)` triples. It complements `hull()` when you have coordinates rather than geometry to wrap.
-- *`minkowski(..items)`* is the Minkowski sum (3D).
+#dsl-table((
+  ("union(..items)", [Combine every child into one solid.]),
+  ("difference(..items)", [The first child minus all the rest.]),
+  ("intersection(..items)", [Keep only the region shared by every child.]),
+  ("hull(..items)", [Convex hull of the union (3D).]),
+  ("hull-pts(points)", [Convex hull of a raw 3D point set — a list of `(x, y, z)` triples — when you have coordinates rather than geometry to wrap.]),
+  ("minkowski(..items)", [Minkowski sum (3D).]),
+))
 
 These are all variadic, so a `..` spread over a Typst `for` block feeds them a computed list of children.
 
 === Plane operations
 
-- *`slice(child, z: 0)`* takes a horizontal cross-section of a 3D solid at the given Z. It returns a 2D shape, which you can pipe into `scadypst-svg(..)` for a vector contour or into further 2D ops. Unlike `projection(..)`, it does not union every horizontal slice.
-- *`trim(child, normal, offset: 0)`* cuts with a plane, keeping the half where `dot(pos, normal) ≥ offset`. It is cheaper and exact compared with the "difference() with a giant cube" trick.
-- *`simplify(child, epsilon: 0.01)`* is a Douglas-Peucker vertex reduction that works on both 2D and 3D. Its own section has a before/after count.
-- *`calculate-normals(child, sharp_angle: 60)`* attaches per-vertex normals for smooth shading, with a crease-angle threshold that keeps sharp edges crisp. It is 3D only, and the effect shows only under `shading: "smooth"`.
+#dsl-table((
+  ("slice(child, z: 0)", [A horizontal cross-section of a 3D solid at the given Z, returned as a 2D shape (pipe into `scadypst-svg(..)`). Unlike `projection(..)`, it does not union every slice.]),
+  ("trim(child, normal, offset: 0)", [Cuts with a plane, keeping the half where `dot(pos, normal) ≥ offset`. Exact, and cheaper than the "difference() with a giant cube" trick.]),
+  ("simplify(child, epsilon: 0.01)", [Douglas–Peucker vertex reduction for 2D and 3D. Its own section has a before/after count.]),
+  ("calculate-normals(child, sharp_angle: 60)", [Attaches per-vertex normals for smooth shading; the crease-angle threshold keeps sharp edges crisp. 3D only, and visible only under `shading: "smooth"`.]),
+))
 
 ```example
 // cols: 2 1
