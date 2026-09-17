@@ -504,7 +504,7 @@ const GLTF_SCHEMA = [
 function getSchema() { return model._gltf ? GLTF_SCHEMA : SCHEMA; }
 
 function triggerRecompile(kind) {
-  if (kind === "scad" && $("preset") && $("preset").value === "__scad__") compileScad();
+  if (kind === "scad" && currentPluginId === "scad") compileScad();
   else if (kind === "mol" && model._mol) compileMol();
 }
 
@@ -1215,12 +1215,12 @@ let t = null;
 // static URL persists until the user picks a real model again.
 let urlT = null;
 function scheduleUrlSync() {
-  if (model && model.scad) return;
   clearTimeout(urlT);
   urlT = setTimeout(async () => {
     try {
-      const u = await bestUrl(shareConfig());
-      history.replaceState(null, "", u);
+      const cfg = shareConfig();
+      if (model && model.scad && "scad_src" in cfg) return;
+      history.replaceState(null, "", await bestUrl(cfg));
     } catch { /* URL sync is best-effort */ }
   }, 400);
 }
@@ -1417,6 +1417,7 @@ const modelsReady = fetch("models.json").then(r => r.json()).then(j => {
 // bytes the user may never look at.
 const SCAD_DEFAULT_URL = "openscad-logo.scad";
 let _scadDefault = null;
+const scadCanonicalSrc = {};
 async function loadScadDefault() {
   if (_scadDefault !== null) return _scadDefault;
   try {
@@ -1631,8 +1632,11 @@ function fillPresetDropdown(pluginId) {
   }
 }
 async function loadScadPreset(name) {
-  try { const src = await (await fetch(name)).text(); await enterScadMode(src, name); }
-  catch (e) { showErr("failed to load " + name + ": " + e.message); }
+  try {
+    const src = await (await fetch(name)).text();
+    scadCanonicalSrc[name] = src;
+    await enterScadMode(src, name);
+  } catch (e) { showErr("failed to load " + name + ": " + e.message); }
 }
 function loadPresetByName(name, opts = {}) {
   if (!name) return;
@@ -2218,12 +2222,19 @@ async function inflate(bytes) {
 }
 
 function shareConfig() {                       // model + config diff vs the preset's baseline
+  let modelName = model.name, scadSrc = null;
+  if (model.scad) {
+    modelName = $("preset").value || "__scad__";
+    const src = $("scad-src").value;
+    const canon = modelName === "__scad__" ? _scadDefault : scadCanonicalSrc[modelName];
+    if (canon == null || src !== canon) { scadSrc = src; modelName = "__scad__"; }
+  }
   // Baseline = schema init + the preset's MODEL_DEFAULTS overlay (same shape
   // as applyModelDefaults applies at load). Diffing against this — instead of
   // raw schema defaults — keeps `?a=lsd` short: everything the preset
   // sets doesn't need to appear in the URL.
   const base = initState();
-  const ov = MODEL_DEFAULTS[model.name];
+  const ov = MODEL_DEFAULTS[modelName];
   if (ov) for (const k in ov) {
     const v = structuredClone(ov[k]);
     const cur = base[k];
@@ -2231,13 +2242,14 @@ function shareConfig() {                       // model + config diff vs the pre
              && cur && typeof cur === "object" && !Array.isArray(cur))
       ? { ...cur, ...v } : v;
   }
-  const cfg = { model: model.name };
+  const cfg = { model: modelName };
   for (const k in state) {
     // molfig regenerates `materials` on every load from the source — no point
     // shipping the (identical) dict in the URL.
     if (model._mol && k === "materials") continue;
     if (!eq(state[k], base[k])) cfg[k] = state[k];
   }
+  if (scadSrc != null) cfg.scad_src = scadSrc;
   return cfg;
 }
 const baseUrl = () => location.origin + location.pathname;
@@ -2260,14 +2272,15 @@ async function bestUrl(cfg) {                  // shortest of readable / compact
 // present, and the raw config (for the exact-render override + address shortening).
 async function applyStateFromUrl() {
   const p = new URLSearchParams(location.search);
-  let raw = null, name = null, hadConfig = false;
+  let raw = null, name = null, hadConfig = false, scadSrc = null;
   const blob = p.get("_");
   if (blob) {
     try {
       const bytes = b64uToBytes(blob.slice(1));
       const obj = unaliasKeys(JSON.parse(blob[0] === "1" ? await inflate(bytes) : DEC.decode(bytes)));
       if (obj.model != null) name = obj.model;
-      delete obj.model;
+      if (obj.scad_src != null) scadSrc = obj.scad_src;
+      delete obj.model; delete obj.scad_src;
       raw = obj; hadConfig = Object.keys(obj).length > 0;
     } catch (e) { console.warn("ignoring malformed compact link", e); }
   }
@@ -2277,6 +2290,7 @@ async function applyStateFromUrl() {
       if (k === "_") continue;
       const key = KEY_UNALIAS[k] ?? k;    // aliased code → field; old full-name links pass through
       if (key === "model") { name = v; continue; }
+      if (key === "scad_src") { scadSrc = v; continue; }
       hadConfig = true;
       let val; try { val = JSON.parse(v); } catch { val = v; }   // "-119"→-119, "x-ray"→"x-ray"
       raw[key] = val;
@@ -2300,7 +2314,7 @@ async function applyStateFromUrl() {
   }
   applyConfig(raw);
   renderOverride = hadConfig ? structuredClone(raw) : null;   // exact render, until first edit
-  return { name, hadConfig, raw };
+  return { name, hadConfig, raw, scadSrc };
 }
 // An enabled toggle-group filled from a field's defaults.
 const groupBase = (field) => ({ __on: true, ...structuredClone(field.def) });
@@ -2411,7 +2425,7 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
 
 // ─────────────────────────────────── boot ─────────────────────────────────
 (async function boot() {
-  const { name: urlModel, hadConfig, raw } = await applyStateFromUrl();  // shared model + config, if any
+  const { name: urlModel, hadConfig, raw, scadSrc } = await applyStateFromUrl();  // shared model + config, if any
   buildForm(); refreshVisibility();
   // First-load UX: the wasm compile below can take a couple of seconds
   // (cold IDB, iOS Safari). Show the busy indicator immediately so the
@@ -2426,10 +2440,16 @@ document.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; i
     // Load the model named in the URL (any file present in the demo dir — not
     // just picker built-ins, so documentation deep-links resolve), else bunny.
     const wanted = urlModel || "bunny.obj";
-    if (MOLECULES[wanted] || ext(wanted) === "scad") {
+    if (MOLECULES[wanted] || kindOf(wanted) === "scad") {
       setStageBusy(false);
-      await loadPresetByName(wanted, { applyDefaults: !hadConfig });
-      if (hadConfig) bestUrl({ model: wanted, ...raw }).then(u => history.replaceState(null, "", u));
+      const isScad = scadSrc != null || kindOf(wanted) === "scad";
+      if (scadSrc != null) await enterScadMode(scadSrc, "__scad__");
+      else await loadPresetByName(wanted, { applyDefaults: !hadConfig });
+      if (isScad && hadConfig) { applyConfig(raw); buildForm(); refreshVisibility(); triggerRecompile("scad"); }
+      if (hadConfig || scadSrc != null) {
+        const cfg = scadSrc != null ? { model: "__scad__", ...raw, scad_src: scadSrc } : { model: wanted, ...raw };
+        bestUrl(cfg).then(u => history.replaceState(null, "", u));
+      }
       preloadDemoModels(wanted);
       return;
     }
