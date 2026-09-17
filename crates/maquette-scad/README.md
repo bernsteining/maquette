@@ -71,12 +71,13 @@ rotate([0, 90, 0]) rod(hole, len);
   elevation: 24,
   up: (0, 1, 0),
   specular: 0.35,
+  antialias: 4,
   background: none,
 )
 ```
 
 </td>
-<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-dsl.png" width="300" alt="CSG cube built with the Typst DSL" /></td>
+<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-dsl.png?v=2" width="300" alt="CSG cube built with the Typst DSL" /></td>
 </tr>
 <tr><th colspan="2" align="left">3. Multiple OpenSCAD files</th></tr>
 <tr>
