@@ -190,6 +190,52 @@ One glTF-only option: *`camera_auto_use`*. If the asset ships an authored camera
 
 #pagebreak(weak: true)
 
+= Config Reference
+
+All parameters are optional; pass them as named arguments or a single dictionary. Defaults are shown below. `null` (JSON) or the string `"none"` clears an optional or disables a feature; for `background` that means transparent.
+
+#text(size: 9pt, raw(block: true, lang: "json", "{ // ── Viewport ──────────────────────────────────────────────────────
+  \"width\": 500,                                    // Output width in pixels
+  \"height\": 500,                                   // Output height in pixels
+  \"background\": \"#f0f0f0\",                          // Hex color; none, \"none\" or \"\" = transparent
+  // ── Camera ────────────────────────────────────────────────────────
+  \"camera\": null,                                  // Eye position [x, y, z]; null = orbit around the model
+  \"center\": [0, 0, 0],                             // Look-at target (overridden by auto_center)
+  \"up\": [0, 1, 0],                                 // Up direction (glTF is Y-up)
+  \"azimuth\": 30,                                   // Orbit horizontal angle (degrees)
+  \"elevation\": 20,                                 // Orbit vertical angle (degrees)
+  \"distance\": null,                                // Orbit distance from center; null = auto-fit
+  \"fov\": 45,                                       // Vertical field of view in degrees (1-179)
+  \"auto_center\": true,                             // Auto-center on the scene bounding box
+  \"auto_fit\": true,                                // Scale the model to fill the viewport
+  \"camera_name\": null,                             // Use an authored glTF camera by name
+  \"camera_index\": null,                            // Use an authored glTF camera by index
+  \"camera_auto_use\": true,                         // Auto-use the asset's first camera when present
+  \"scene_index\": null,                             // glTF scene selector; null = default scene
+  \"animation_index\": null,                         // Animation clip index; null = all clips stacked
+  // ── Shading & lighting ────────────────────────────────────────────
+  \"light_dir\": [1, 2, 3],                          // Key directional light vector
+  \"ambient\": 0.2,                                  // Constant ambient (0-1); ignored when ibl is set
+  \"cull_backface\": true,                           // Back-face culling
+  \"ibl\": null,                                     // Image-based lighting: true, or {sky, ground, intensity, rotation, hdr}
+  \"shadows\": null,                                 // Shadow maps: true, or {resolution, softness, bias, normal_bias, slope_bias, pcss_light_size}
+  \"ground\": null,                                  // Shadow-catcher plane: true, or {color, size_scale, y, roughness}
+  // ── Post-processing ───────────────────────────────────────────────
+  \"ssao\": null,                                    // Ambient occlusion: true, or {samples, radius, bias, strength}
+  \"antialias\": 1,                                  // Supersampling factor: 1 = off, 2, 3, 4
+  \"fxaa\": false,                                   // FXAA edge anti-aliasing
+  \"tone_mapping\": \"\",                              // \"\", \"reinhard\", or \"aces\"
+  \"exposure\": 1.0,                                 // Exposure multiplier for tone mapping
+  // ── Textures ──────────────────────────────────────────────────────
+  \"no_textures\": false,                            // Skip texture decode (fast draft mode)
+  \"texture_max_size\": null,                        // Cap decoded texture side in pixels; null = source size
+  // ── Animation & materials ─────────────────────────────────────────
+  \"time\": 0.0,                                     // Animation playback time, in seconds
+  \"material_variant\": 0                            // KHR_materials_variants index
+}"))
+
+#pagebreak(weak: true)
+
 = Image-Based Lighting
 
 `ibl:` enables environment lighting. Without an `hdr` payload it uses a procedural sky/ground gradient.

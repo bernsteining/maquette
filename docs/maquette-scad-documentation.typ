@@ -172,6 +172,22 @@ The DSL examples in this document build their geometry inline, so you need no ex
 
 One call compiles and renders; no `maquette` import. Examples below use a `show-part` wrapper so the code can focus on geometry.
 
+= Config Reference
+
+`render-scad` takes a few compile options, then forwards every other named argument to maquette's `render-ply`. All are optional; defaults are shown.
+
+#text(size: 9pt, raw(block: true, lang: "json", "{ // ── Compile options (maquette-scad) ───────────────────────────────
+  \"fn\": 32,                                        // Default $fn segment count; a per-primitive fn: overrides it
+  \"smooth-normals\": 30,                            // Crease angle (deg) for smooth vertex normals; none = faceted
+  \"files\": {},                                     // Multi-file .scad parts: { \"path\": bytes } (or pass a read: lambda)
+  \"bin\": {},                                       // Binary meshes for import(): { \"name\": bytes }
+  \"font\": null                                     // TTF/OTF bytes for text(); null = bundled DejaVu Sans
+}"))
+
+Every other argument forwards to maquette's `render-ply`: `camera`, `azimuth`, `elevation`, `up`, `fov`, `zoom`, `background`, `color`, `shading`, `lights`, `shadows`, `ssao`, and the rest. See the #link("maquette-documentation.pdf")[maquette manual] for that full option surface. `render-scad` overrides two of its defaults to suit CAD facets: `specular: 0` and `cull_backface: false` (matte and two-sided).
+
+#pagebreak(weak: true)
+
 = Building geometry with `scadypst`
 
 `scadypst(tree)` walks a tree of Typst dicts and returns PLY bytes. Each helper such as `cube`, `sphere` or `translate` builds a node, and nothing runs until `scadypst` receives the whole tree.
