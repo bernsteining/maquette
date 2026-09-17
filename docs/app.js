@@ -811,7 +811,7 @@ function buildTypst() {
     const cfgLines = P.filter(l => !l.startsWith("materials:"));
     const cfgBlock = cfgLines.length ? `  config: (\n    ${cfgLines.join(",\n    ")},\n  )` : "";
     const allArgs = [...molArgs, ...(cfgBlock ? [cfgBlock] : [])];
-    return `#import "@preview/molfig:0.1.4"\n\n`
+    return `#import "@preview/molfig:0.1.5"\n\n`
       + `#let data = read("${model._molSrcPath}", encoding: none)\n\n`
       + `#molfig.render(\n  data,\n${allArgs.join(",\n")},\n)`;
   }

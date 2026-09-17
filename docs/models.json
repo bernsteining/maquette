@@ -31,7 +31,7 @@
     ]},
     { "id": "molfig", "label": "molfig", "hint": "Accepts .pdb .cif .mmcif .bcif .xyz",
       "formats": [".pdb", ".cif", ".mmcif", ".bcif", ".xyz"],
-      "docs": "https://github.com/rice8y/molfig/blob/v0.1.4/package/docs/documentation.pdf",
+      "docs": "https://github.com/rice8y/molfig/blob/v0.1.5/package/docs/documentation.pdf",
       "typst": "https://typst.app/universe/package/molfig",
       "github": "https://github.com/rice8y/molfig",
       "models": [
