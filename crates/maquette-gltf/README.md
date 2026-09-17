@@ -22,8 +22,9 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 ```typst
 #import "@preview/maquette-gltf:0.1.0": render-gltf
 
-// `time` scrubs the glTF animation (seconds).
-#render-gltf(read("tokyo.glb", encoding: none), (
+#let tokyo = read("tokyo.glb", encoding: none)
+
+#render-gltf(tokyo, (
   camera: (290, 464, 774),
   center: (-86, 5, -25),
   up: (0, 1, 0),
@@ -41,7 +42,8 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 
 ```typst
 // Same scene — move the camera and aim.
-#render-gltf(read("tokyo.glb", encoding: none), (
+
+#render-gltf(tokyo, (
   camera: (350, 200, 620),
   center: (-86, 5, -25),
   up: (0, 1, 0),
@@ -61,6 +63,22 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 ## Documentation
 
 [docs/maquette-gltf-documentation.pdf](https://github.com/bernsteining/maquette/blob/master/docs/maquette-gltf-documentation.pdf) walks through the config (camera, IBL, shadows, ground plane, tone mapping, SSAO/FXAA/SSAA) and the full list of supported extensions and texture formats.
+
+## How it's built
+
+maquette-gltf is a single pure-Rust crate compiled to `wasm32-unknown-unknown` (about 1.6 MB after `wasm-opt`) with zero host imports: Typst hands it the asset bytes and gets back an RGBA image. The renderer itself lives in [`maquette-core`](https://github.com/bernsteining/maquette) and is written from scratch (matrix math, triangle rasterizer, Cook-Torrance PBR, image-based lighting, shadow maps, SSAA/SSAO/FXAA, HDR loader) with no third-party rendering dependencies. What it does piggyback on is parsing and decoding:
+
+| Crate | What it does |
+|---|---|
+| [`gltf`](https://github.com/gltf-rs/gltf) | glTF 2.0 parsing plus 20+ KHR/EXT extensions (PBR variants, punctual lights, transmission, clearcoat, sheen, animation pointer, …). Pinned to a git rev because the crates.io release predates clearcoat/sheen. |
+| [`meshopt-rs`](https://crates.io/crates/meshopt-rs) | `EXT_meshopt_compression` decoding |
+| [`draco-oxide-decoder`](https://crates.io/crates/draco-oxide-decoder) | `KHR_draco_mesh_compression` decoding (decode-only, so the encoder never links) |
+| [`mikktspace`](https://crates.io/crates/mikktspace) | consistent per-vertex tangents when an asset omits the `TANGENT` attribute |
+| [`zune-png`](https://crates.io/crates/zune-png), [`zune-jpeg`](https://crates.io/crates/zune-jpeg), [`image-webp`](https://crates.io/crates/image-webp) | texture decoding (PNG / JPEG / `EXT_texture_webp`), shared with the OBJ/MTL path through `maquette-core` |
+| [`wasm-minimal-protocol`](https://github.com/astrale-sharp/wasm-minimal-protocol) | the Typst plugin calling convention |
+| [`serde_json`](https://crates.io/crates/serde_json) | parsing the render config |
+
+Every dependency is pure Rust and wasm-friendly, so the build is a plain `cargo build --target wasm32-unknown-unknown` with no C toolchain (unlike maquette-scad, which links Manifold's C++ kernel).
 
 ## Building from source
 
