@@ -164,32 +164,30 @@ The DSL examples in this document build their geometry inline, so no external so
 
 = Quickstart
 
-Both entry points return PLY bytes; pass them to `render-ply` with the usual maquette configuration.
+`render-scad` compiles and renders in one call — pass it a DSL tree or a `.scad` path, plus any of maquette's render options.
 
 ```typ
-#import "@preview/maquette-scad:0.1.0": scadypst, cube, sphere, difference
-#import "@preview/maquette:0.1.3": render-ply
+#import "@preview/maquette-scad:0.1.0": cube, difference, render-scad, sphere
 
-#let part = scadypst(
+#render-scad(
   difference(
     cube(20, center: true),
     sphere(12, fn: 48),
-  )
+  ),
+  camera: (40, 40, 40),
+  up: (0, 0, 1),
 )
-#render-ply(part, camera: (40, 40, 40), up: (0, 0, 1))
 ```
 
-`compile-scad` has the same shape but takes source text:
+`render-scad` also takes source text — same call, a `.scad` file instead of a tree:
 
 ```typ
-#import "@preview/maquette-scad:0.1.0": compile-scad
-#import "@preview/maquette:0.1.3": render-ply
+#import "@preview/maquette-scad:0.1.0": render-scad
 
-#let part = compile-scad(read("model.scad"))
-#render-ply(part)
+#render-scad(read("model.scad"))
 ```
 
-Examples below use a `show-part` wrapper so the code can focus on geometry; in real documents you would inline the `render-ply(bytes, ...)` call.
+One call compiles and renders; no `maquette` import. Examples below use a `show-part` wrapper so the code can focus on geometry.
 
 #pagebreak(weak: true)
 
@@ -350,8 +348,7 @@ Both leave Typst's own `#text` / `#circle` / … intact. The `scad-*` aliases li
 For a standalone `.scad` file, one call is enough:
 
 ```typ
-#let part = compile-scad(read("part.scad"))
-#render-ply(part)
+#render-scad(read("part.scad"))
 ```
 
 Real-world `.scad` files rarely stand alone: they `use` / `include` a library, `import` an STL or OBJ for a fastener, or ship a font for embossed text. The wasm sandbox has no filesystem, so every sidecar is passed explicitly as bytes:
@@ -600,12 +597,18 @@ cross-section → vector contour, in one call.
 A project split across many files with `use <..>` / `include <..>` compiles in one call — `compile-scad-tree` reads the entry file and follows its include graph for you, so there's no file list to maintain:
 
 ```typ
-#import "@preview/maquette-scad:0.1.0": compile-scad-tree, openscad-view
-#import "@preview/maquette:0.1.3": render-ply
+#import "@preview/maquette-scad:0.1.0": openscad-view, render-scad-tree
 
-#let machine = compile-scad-tree("Cyclone.scad",
-  root: "cyclone-src/", read: p => read(p), fn: 8)
-#render-ply(machine, ..openscad-view, azimuth: 35, elevation: 20, up: (0, 0, 1))
+#render-scad-tree(
+  "Cyclone.scad",
+  root: "cyclone-src/",
+  read: p => read(p),
+  fn: 8,
+  ..openscad-view,
+  azimuth: 35,
+  elevation: 20,
+  up: (0, 0, 1),
+)
 ```
 
 `root` is the source folder joined onto each discovered path; `entry` is the top file inside it. Pass a `read:` lambda scoped to your document — `read: p => read(p)` — so the sources are read from *your* project (a package's own `read()` can't reach your files). The whole Cyclone-PCB-Factory below — 69 files — comes from that single call:
