@@ -42,22 +42,19 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 <td>
 
 ```typst
-// Same scene, camera and aim moved.
+// Same scene, camera time changed 
 
 #render-gltf(tokyo, (
-  camera: (-404.494, 348.337, 960.992),
+  camera: (-714.868, 125.157, 793.581),
   center: (-86, 5, -25),
-  up: (0.052, 0.948, -0.314),
-  auto_center: false,
-  auto_fit: false,
+  up: (0.02, 0.991, -0.13),
   background: "#182028",
   shadows: true,
-  time: 0.55,
 ))
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-404.494%2C348.337%2C960.992%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0.052%2C0.948%2C-0.314%5D&auto_center=false&auto_fit=false&background=%22%23182028%22&shadows=true&time=0.55" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo-camera.png?v=2" width="340" alt="Little Tokyo diorama from a high three-quarter angle" /></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-714.868%2C125.157%2C793.581%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0.02%2C0.991%2C-0.13%5D&background=%22%23182028%22&shadows=true" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo-camera.png?v=3" width="340" alt="Little Tokyo diorama from a side three-quarter angle" /></a></td>
 </tr>
 </table>
 
