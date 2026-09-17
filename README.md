@@ -23,6 +23,7 @@
 
 <table>
 <tr><th align="left">Code</th><th>Render</th></tr>
+<tr><th colspan="2" align="left">maquette</th></tr>
 <tr>
 <td>
 
@@ -54,6 +55,7 @@
 </td>
 <td><a href="https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D&background=%22none%22" title="Open in the live demo"><img src="examples/readme/maquette-sss.png" width="340" alt="Subsurface-scattering Stanford bunny backlit by a red light"></a></td>
 </tr>
+<tr><th colspan="2" align="left">maquette-scad</th></tr>
 <tr>
 <td>
 
@@ -73,19 +75,15 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 ```typst
-#import "@preview/maquette-scad:0.1.0": compile-scad
-#import "@preview/maquette:0.1.3": render-ply
+#import "@preview/maquette-scad:0.1.0": render-scad
 
-#render-ply(
-  compile-scad(read("example.scad"), smooth-normals: 30),
+#render-scad(
+  read("example.scad"),
   azimuth: 219,
   elevation: 33,
   up: (0, 1, 0),
   fov: 40,
   zoom: 1.2,
-  color: "#f9d72c",
-  specular: 0,
-  cull_backface: false,
   background: none,
 )
 ```
@@ -93,6 +91,7 @@ rotate([0, 90, 0]) rod(hole, len);
 </td>
 <td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="examples/readme/scad-logo.png" width="340" alt="OpenSCAD logo compiled from source to a mesh"></a></td>
 </tr>
+<tr><th colspan="2" align="left">maquette-gltf</th></tr>
 <tr>
 <td>
 
