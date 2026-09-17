@@ -54,7 +54,7 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-714.868%2C125.157%2C793.581%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0.02%2C0.991%2C-0.13%5D&background=%22%23182028%22&shadows=true" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo-camera.png?v=3" width="340" alt="Little Tokyo diorama from a side three-quarter angle" /></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=tokyo.glb&camera=%5B-714.868%2C125.157%2C793.581%5D&center=%5B-86%2C5%2C-25%5D&up=%5B0.02%2C0.991%2C-0.13%5D&background=%22%23182028%22&shadows=true" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/gltf-tokyo-camera.png?v=4" width="340" alt="Little Tokyo diorama from a side three-quarter angle" /></a></td>
 </tr>
 </table>
 
@@ -85,5 +85,5 @@ Every dependency is pure Rust and wasm-friendly, so the build is a plain `cargo 
 ## Building from source
 
 ```sh
-make gltf-build   # cargo build → wasm-opt -O3 → install into the local Typst package dir
+make gltf-build
 ```
