@@ -22,7 +22,6 @@
 # Usage
 
 <table>
-<tr><th align="left">Code</th><th>Render</th></tr>
 <tr><th colspan="2" align="left">maquette</th></tr>
 <tr>
 <td>
@@ -126,11 +125,11 @@ Documentation contains many examples showcasing all the features, with each exam
 ## Building
 
 ```sh
-make build       # compile maquette (STL/OBJ/PLY) wasm
-make gltf-build  # same for maquette-gltf
-make scad-build  # same for maquette-scad
-make demo        # assemble the browser demo — three wasm modules + assets in docs/
-make docs        # compile docs/maquette-documentation.pdf + -gltf-doc + -scad-doc
+make build       
+make gltf-build  
+make scad-build  
+make demo        
+make docs        
 ```
 
 Requires `cargo`, the `wasm32-unknown-unknown` target, and `wasm-opt` from [binaryen](https://github.com/WebAssembly/binaryen).

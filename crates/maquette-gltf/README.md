@@ -4,18 +4,17 @@
 [![Live demo](https://img.shields.io/badge/demo-live-4f46e5)](https://bernsteining.github.io/maquette/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-maquette-gltf renders **glTF 2.0** assets (`.glb` / `.gltf`) directly inside your Typst documents — full Cook-Torrance PBR, image-based lighting, animation, skinning and 20+ KHR/EXT extensions — as a single WebAssembly module. 
+Render **glTF 2.0** assets (`.glb` / `.gltf`) directly inside your Typst documents with `maquette-gltf`. 
+
+**[Try it live →](https://bernsteining.github.io/maquette/?a=tokyo.glb)** load a glTF, orbit, scrub the animation, tweak every setting, and copy the generated Typst snippet.
 
 Part of the [maquette](https://github.com/bernsteining/maquette) family (sibling to the STL/OBJ/PLY and OpenSCAD plugins), sharing the same render core.
-
-**[Try it live →](https://bernsteining.github.io/maquette/)** — load a glTF, orbit, scrub the animation, tweak every setting, and copy the generated Typst snippet.
 
 ## Usage
 
 The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-6072d34e02454743a4a0f4d219c2c62c) diorama, twice: `time` scrubs the animation clip, and `camera` / `center` move the eye.
 
 <table>
-<tr><th align="left">Code</th><th>Render</th></tr>
 <tr>
 <td>
 
@@ -66,7 +65,9 @@ The same [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-607
 
 ## How it's built
 
-maquette-gltf is a single pure-Rust crate compiled to `wasm32-unknown-unknown` (about 1.6 MB after `wasm-opt`) with zero host imports: Typst hands it the asset bytes and gets back an RGBA image. The renderer itself lives in [`maquette-core`](https://github.com/bernsteining/maquette) and is written from scratch (matrix math, triangle rasterizer, Cook-Torrance PBR, image-based lighting, shadow maps, SSAA/SSAO/FXAA, HDR loader) with no third-party rendering dependencies. What it does piggyback on is parsing and decoding:
+maquette-gltf is a single pure-Rust crate compiled to `wasm32-unknown-unknown` ~ 1.6MB. The renderer itself lives in [`maquette-core`](https://github.com/bernsteining/maquette) and is written from scratch (matrix math, triangle rasterizer, Cook-Torrance PBR, image-based lighting, shadow maps, SSAA/SSAO/FXAA, HDR loader) with no third-party rendering dependencies. 
+
+What it does piggyback on is parsing and decoding:
 
 | Crate | What it does |
 |---|---|

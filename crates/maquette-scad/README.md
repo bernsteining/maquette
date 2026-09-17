@@ -15,7 +15,6 @@ Load `.scad` files, or use the `scadyst` DSL to render them with [maquette](http
 Three ways in: a **`.scad` file** (the homepage example), the Typst **DSL**, and a whole **multi-file project** compiled by walking its `use`/`include` graph. All use the one-call `render-scad` / `render-scad-tree`, which compile and render in a single step with no separate `maquette` import.
 
 <table>
-<tr><th align="left">Code</th><th>Render</th></tr>
 <tr><th colspan="2" align="left">1. OpenSCAD file</th></tr>
 <tr>
 <td>
