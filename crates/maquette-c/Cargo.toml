@@ -1,0 +1,26 @@
+[package]
+name = "maquette-c"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "C ABI for maquette — a headless CPU 3D renderer (STL/OBJ/PLY, glTF PBR, OpenSCAD). Bind it from any FFI-capable language."
+repository = "https://github.com/bernsteining/maquette"
+
+# Own workspace: panic=unwind (a Rust panic must unwind to the FFI boundary, not
+# abort the host), unlike the root's panic=abort.
+[workspace]
+
+[lib]
+name = "maquette"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+maquette = { path = "../maquette" }
+maquette-gltf = { path = "../maquette-gltf" }
+maquette-scad = { path = "../maquette-scad" }
+png = "0.18"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
