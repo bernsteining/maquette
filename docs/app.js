@@ -672,7 +672,22 @@ function group(f, mode) {
 let renderOverride = null;
 function renderConfig() {
   const c = buildConfig();
-  return renderOverride ? { ...c, ...renderOverride } : c;
+  const cfg = renderOverride ? { ...c, ...renderOverride } : c;
+  // Remember the intended (full) output size; the paint step pins the canvas's
+  // CSS width to it so a reduced-resolution interactive render still fills the
+  // stage (the browser upscales the smaller backing store) instead of shrinking.
+  displayDims = { w: cfg.width || 700, h: cfg.height || 700 };
+  lastRenderReduced = reduceNow();
+  if (lastRenderReduced) {
+    return {
+      ...cfg,
+      width: Math.max(DRAG_MIN, Math.round(displayDims.w * DRAG_SCALE)),
+      height: Math.max(DRAG_MIN, Math.round(displayDims.h * DRAG_SCALE)),
+      antialias: model._gltf ? 1 : 0,   // "off": maquette=0, gltf=1
+      fxaa: false,
+    };
+  }
+  return cfg;
 }
 // Rich highlight per-group appearance ↔ demo state. Normalize a loaded value
 // (plain "#color" or {color, stroke, stroke_width, opacity}) to a full object for
@@ -1237,6 +1252,39 @@ function onChange() {
 // after the current render completes if any trigger came in mid-flight.
 let renderRunning = false;
 let renderDirty = false;
+// While the camera moves, if full frames are slow, render at reduced resolution
+// with antialiasing off, then settle to full quality after motion stops.
+let interacting = false;
+let settleTimer = null;
+let displayDims = null;   // { w, h } of the intended full output, set by renderConfig
+let lastFullMs = 0;       // duration of the last full-resolution render
+let lastRenderReduced = false;
+const DRAG_SCALE = 0.5;
+const DRAG_MIN = 96;
+const SETTLE_MS = 200;
+const REDUCE_MS = 150;
+// Gate on the last FULL time, not the current frame, so a cheap reduced frame
+// doesn't flip us back to full mid-drag (which would oscillate).
+function reduceNow() {
+  return interacting && outputFormat !== "svg" && lastFullMs > REDUCE_MS;
+}
+function markInteracting() {
+  interacting = true;
+  if (settleTimer) clearTimeout(settleTimer);
+  settleTimer = setTimeout(settleRender, SETTLE_MS);
+}
+function settleRender() {
+  if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+  interacting = false;
+  safeRender();
+}
+// Pin the CSS width to the full size (height:auto keeps aspect) so a reduced
+// backing store upscales to fill the stage instead of shrinking.
+function sizeCanvasDisplay() {
+  if (!displayDims) return;
+  elOutc.style.width = displayDims.w + "px";
+  elOutc.style.height = "auto";
+}
 // UX: flag the stage as busy while a render is in flight — flips a CSS
 // class that shows a small spinner + "rendering…" caption, and sets
 // aria-busy so screen readers announce it. Delayed 150 ms so cheap
@@ -1296,6 +1344,7 @@ async function render() {
         const h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
         const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, w * h * 4);
         elOutc.width = w; elOutc.height = h;
+        sizeCanvasDisplay();
         elOutc.getContext("2d").putImageData(new ImageData(px, w, h), 0, 0);
         elOutc.style.display = ""; elOut.style.display = "none";
         lastRender = { kind: "raw" };
@@ -1329,6 +1378,7 @@ async function render() {
       if (token !== renderToken) return;
       paint(fullOut);
       const ms = performance.now() - t0;
+      if (!lastRenderReduced) lastFullMs = ms;
       elRtime.textContent = `rendered in ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
       elRtime.classList.add("show");
       showErr(null);
@@ -1343,6 +1393,7 @@ async function render() {
     const out = await maquettePlugin.callWithModel(fn, ENC.encode(JSON.stringify(renderConfig())));
     if (token !== renderToken) return;   // superseded while awaiting the worker
     const ms = performance.now() - t0;
+    if (!lastRenderReduced) lastFullMs = ms;
     // Raster output is raw RGBA ([0x00][w][h][rgba8…]); grid / turntable / debug /
     // annotations add a transparent vector overlay ([0x02][w][h][rgba8 w*h*4][svg…]).
     // Vector mode returns SVG (0x3C).
@@ -1353,6 +1404,7 @@ async function render() {
       const n = w * h * 4;
       const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, n);
       elOutc.width = w; elOutc.height = h;
+      sizeCanvasDisplay();
       const ctx = elOutc.getContext("2d");
       ctx.putImageData(new ImageData(px, w, h), 0, 0);
       elOutc.style.display = ""; elOut.style.display = "none";
@@ -1959,6 +2011,7 @@ async function measure() {
 // rAF-throttled update for the interactive (orbit/zoom) hot path — coalesces the
 // code re-highlight and the WASM render to one per frame instead of per event.
 function scheduleRender() {
+  markInteracting();
   if (rafPending) return;
   rafPending = true;
   requestAnimationFrame(async () => {
@@ -2143,7 +2196,13 @@ function ensureSpherical() {
   const end = (e) => {
     if (!pts.delete(e.pointerId)) return;
     pd = 0;                                                 // re-seed below if a pinch continues
-    if (pts.size === 0) { stage.classList.remove("grabbing"); renderCode(); render(); }
+    if (pts.size === 0) {
+      stage.classList.remove("grabbing");
+      if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
+      interacting = false;   // full-quality render now, no settle wait
+      renderCode();
+      render();
+    }
     else if (pts.size === 2) seedPinch();
   };
   stage.addEventListener("pointerup", end);
