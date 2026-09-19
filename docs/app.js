@@ -679,7 +679,7 @@ function renderConfig() {
   // The paint step pins the canvas to this, so a reduced-resolution interactive
   // frame upscales to fill the stage (rather than shrinking).
   displayDims = fitBox(rw, rh);
-  const div = dragDivisor();
+  const div = (interacting && outputFormat !== "svg") ? dragDiv : 1;
   lastRenderReduced = div > 1;
   if (lastRenderReduced) {
     let dw = rw / div, dh = rh / div;
@@ -1286,30 +1286,31 @@ function onChange() {
 // after the current render completes if any trigger came in mid-flight.
 let renderRunning = false;
 let renderDirty = false;
-// While the camera moves, if full frames are slow, render at reduced resolution
-// with antialiasing off, then settle to full quality after motion stops.
+// While the camera moves, shrink the render (per axis, 1/2/4/8/16) for
+// smoothness. The divisor ratchets up per drag (never down mid-drag) so a still-
+// slow frame degrades further and holds; it's seeded from the last full frame.
 let interacting = false;
 let settleTimer = null;
 let displayDims = null;   // { w, h } of the intended full output, set by renderConfig
 let lastFullMs = 0;       // duration of the last full-resolution render
 let lastRenderReduced = false;
+let dragDiv = 1;          // current per-axis downscale for the ongoing drag (ratchets up)
 const DRAG_MIN = 96;       // floor per axis (aspect-preserving) while dragging
 const DRAG_MAX_DIV = 16;   // most we ever shrink each axis by
 const SETTLE_MS = 200;
-const REDUCE_MS = 150;     // no reduction under this; each doubling past it halves resolution again
-// How much to divide each axis by while the camera moves: 1 (none), 2, 4, 8, 16.
-// Keyed to the last FULL-frame time (not the current frame) so a cheap reduced
-// frame can't flip the tier mid-drag and oscillate — heavier models degrade
-// harder (÷150ms=2, ÷300ms=4, ÷600ms=8, ÷1200ms=16), lighter ones stay crisp.
-function dragDivisor() {
-  if (!interacting || outputFormat === "svg" || lastFullMs <= REDUCE_MS) return 1;
-  const steps = Math.floor(Math.log2(lastFullMs / REDUCE_MS)) + 1;
-  return Math.min(DRAG_MAX_DIV, 1 << steps);
+const REDUCE_MS = 150;     // seed threshold: full frames under this need no downscale
+const SMOOTH_MS = 60;      // target drag-frame budget; a slower frame ratchets the divisor up
+function tierFromMs(ms) {
+  if (ms <= REDUCE_MS) return 1;
+  return Math.min(DRAG_MAX_DIV, 1 << (Math.floor(Math.log2(ms / REDUCE_MS)) + 1));
 }
 function markInteracting() {
-  interacting = true;
+  if (!interacting) { interacting = true; dragDiv = tierFromMs(lastFullMs); }  // seed at drag start
   if (settleTimer) clearTimeout(settleTimer);
   settleTimer = setTimeout(settleRender, SETTLE_MS);
+}
+function ratchetDrag(ms) {
+  if (interacting && ms > SMOOTH_MS && dragDiv < DRAG_MAX_DIV) dragDiv = Math.min(DRAG_MAX_DIV, dragDiv * 2);
 }
 function settleRender() {
   if (settleTimer) { clearTimeout(settleTimer); settleTimer = null; }
@@ -1439,6 +1440,7 @@ async function render() {
       paintRaster(fullOut, token);
       const ms = performance.now() - t0;
       if (!lastRenderReduced) lastFullMs = ms;
+      ratchetDrag(ms);
       elRtime.textContent = `rendered in ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
       elRtime.classList.add("show");
       showErr(null);
@@ -1454,6 +1456,7 @@ async function render() {
     if (token !== renderToken) return;   // superseded while awaiting the worker
     const ms = performance.now() - t0;
     if (!lastRenderReduced) lastFullMs = ms;
+    ratchetDrag(ms);
     // Raster output is raw RGBA ([0x00][w][h][rgba8…]); grid / turntable / debug /
     // annotations add a transparent vector overlay ([0x02][…][svg…]) — both come
     // back as a bitmap or bytes and go through paintRaster. Vector mode returns
