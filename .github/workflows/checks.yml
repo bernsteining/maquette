@@ -1,0 +1,46 @@
+name: Checks
+
+# Mirrors `make check` (the local pre-commit gate): clippy -D warnings for the
+# wasm crates + native clippy/tests for scad. Runs in the prebuilt toolchain
+# image so scad's native Manifold C++ build is available.
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - "Makefile"
+      - ".github/workflows/checks.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: ghcr.io/${{ github.repository }}-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Ensure clippy component
+        run: rustup component add clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: checks
+      - name: make check (clippy -D warnings + tests)
+        run: make check

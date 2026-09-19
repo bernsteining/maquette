@@ -29,6 +29,7 @@ jobs:
   changes:
     name: detect changes
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
       any: ${{ steps.set.outputs.any }}
@@ -86,6 +87,7 @@ jobs:
       matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     container:
       image: ghcr.io/${{ github.repository }}-ci:latest
       credentials:
@@ -115,6 +117,9 @@ jobs:
             exit 1
           fi
           echo "no path leaks ✓"
+
+      - name: Wasm invariants (protocol-only imports + size budget)
+        run: .github/scripts/wasm-invariants.sh ${{ matrix.wasm_path }}
 
       - name: Build harness (for functional drift check)
         run: cargo build --release --manifest-path harness/Cargo.toml
@@ -176,6 +181,7 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

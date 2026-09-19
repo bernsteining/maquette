@@ -42,6 +42,7 @@ env:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       maquette: ${{ steps.filter.outputs.maquette }}
       gltf: ${{ steps.filter.outputs.gltf }}
@@ -73,6 +74,7 @@ jobs:
   build:
     needs: changes
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container:
       image: ghcr.io/${{ github.repository }}-ci:latest
       credentials:
@@ -126,6 +128,12 @@ jobs:
           if [ "$BUILD_SCAD" = "true" ]; then leak docs/maquette-scad.wasm; fi
           echo "path-leak check done ✓"
 
+      - name: Wasm invariants (protocol-only imports + size budget)
+        run: |
+          for w in maquette maquette-gltf maquette-scad; do
+            .github/scripts/wasm-invariants.sh "docs/$w.wasm"
+          done
+
       - name: Stage demo assets + stamp build commit
         shell: bash
         run: |
@@ -142,6 +150,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
