@@ -34,6 +34,14 @@ Until step 1, the publish job no-ops/fails harmlessly and you still get download
 
 The repo can also **dogfood** it by pointing `.github/workflows/render-diff.yml` at `uses: ./.github/actions/render-diff` (removes the duplicated script).
 
+## npm → JavaScript/wasm
+
+`packages/maquette-js` (`maquette-render` — `maquette` on npm is an unrelated vdom lib) packages the plugin wasm + a JS loader (the same protocol the demo worker uses). `npm run build` stages the wasm into `wasm/`; `npm publish` ships it. A CI job could `npm publish --provenance` on a `v*` tag with an `NPM_TOKEN`. No native build needed — it reuses the wasm.
+
+## C ABI → other-language bindings
+
+`crates/maquette-c` builds `libmaquette.{so,dylib,dll,a}` + `include/maquette.h` — the universal binding layer (C, C++, Ruby, Julia, Go/cgo, C#, R…). There is no single registry for C libraries; ship the built libs + header via a GitHub Release (they could ride the dist release), or let downstreams vendor the crate.
+
 ## crates.io — not a target (blocked)
 
 `cargo publish` does **not** work for this family: the plugins carry a **git** dependency (`gltf` pinned to a rev) and a **path** dependency (the vendored `manifold-csg-sys`), both of which crates.io rejects. `maquette-cli` / `maquette-py` transitively depend on those, so they can't publish either. Distribution goes through Typst Universe (plugins), GitHub Releases (CLI), and PyPI (Python) instead. Publishing to crates.io would require upstreaming a `gltf` release and a `manifold-csg-sys` release first.

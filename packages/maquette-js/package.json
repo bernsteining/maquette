@@ -1,0 +1,30 @@
+{
+  "name": "maquette-render",
+  "version": "0.1.0",
+  "description": "3D rendering (STL/OBJ/PLY, glTF PBR, OpenSCAD) in JavaScript/WASM — headless, deterministic, no WebGL. Runs in Node and the browser.",
+  "type": "module",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "files": ["src", "wasm", "index.d.ts", "README.md"],
+  "scripts": {
+    "build": "node scripts/copy-wasm.mjs",
+    "prepack": "node scripts/copy-wasm.mjs",
+    "test": "node scripts/test.mjs"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bernsteining/maquette.git"
+  },
+  "keywords": ["3d", "rendering", "wasm", "stl", "obj", "ply", "gltf", "openscad", "pbr", "headless", "raster"],
+  "engines": {
+    "node": ">=18"
+  }
+}

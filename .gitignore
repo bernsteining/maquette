@@ -17,3 +17,6 @@ notes.md
 
 # render-diff Action local output
 render-diff-out/
+
+# npm package: wasm staged from the build
+packages/maquette-js/wasm/
