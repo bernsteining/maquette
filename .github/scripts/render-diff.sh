@@ -47,7 +47,6 @@ for f in "${files[@]}"; do
   safe="$(echo "$f" | tr '/. ' '___')"
   before="$OUT/$safe.before.png"
   after="$OUT/$safe.after.png"
-  side="$OUT/$safe.side.png"
   ok_before=0; ok_after=0
 
   render "$f" "$after" && ok_after=1 || true
@@ -60,12 +59,14 @@ for f in "${files[@]}"; do
 
   echo "**\`$f\`**" >> "$COMMENT"
   if [ "$ok_before" = 1 ] && [ "$ok_after" = 1 ]; then
-    montage -label 'before' "$before" -label 'after' "$after" \
-      -tile 2x1 -geometry +8+8 -background '#f0f0f0' -fill '#333333' -pointsize 16 "$side"
-    echo "![render diff](%%IMGBASE%%/$safe.side.png)" >> "$COMMENT"
+    {
+      echo "| before | after |"
+      echo "|---|---|"
+      echo "| ![before](%%IMGBASE%%/$safe.before.png) | ![after](%%IMGBASE%%/$safe.after.png) |"
+    } >> "$COMMENT"
   elif [ "$ok_after" = 1 ]; then
-    cp "$after" "$side"
-    echo "_new file_ · ![render](%%IMGBASE%%/$safe.side.png)" >> "$COMMENT"
+    echo "_new file_" >> "$COMMENT"
+    echo "![render](%%IMGBASE%%/$safe.after.png)" >> "$COMMENT"
   else
     echo "⚠️ render failed" >> "$COMMENT"
   fi

@@ -33,11 +33,12 @@ jobs:
           fetch-depth: 0
 
       - name: System deps (cmake for Manifold's C++)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake imagemagick
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
 
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: render-diff
+          cache-on-failure: true
 
       - name: Build the maquette CLI
         run: cargo build --release -p maquette-cli
@@ -54,7 +55,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          imgs=(render-diff-out/*.side.png)
+          imgs=(render-diff-out/*.png)
           if [ ${#imgs[@]} -eq 0 ]; then echo "has_images=false" >> "$GITHUB_OUTPUT"; exit 0; fi
           BR=render-diff-assets
           DIR="pr-${{ github.event.pull_request.number }}/${{ github.event.pull_request.head.sha }}"
@@ -68,7 +69,7 @@ jobs:
             git -C "$tmp" rm -rfq . 2>/dev/null || true
           fi
           mkdir -p "$tmp/$DIR"
-          cp render-diff-out/*.side.png "$tmp/$DIR/"
+          cp render-diff-out/*.png "$tmp/$DIR/"
           git -C "$tmp" config user.name "render-diff[bot]"
           git -C "$tmp" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git -C "$tmp" add -A
