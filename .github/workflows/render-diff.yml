@@ -1,0 +1,94 @@
+name: 3D render diff
+
+# On a PR that changes 3D model files, render each one before (base) and after
+# (head) with the native maquette CLI and post the side-by-side images as a
+# sticky PR comment. Images are hosted on a `render-diff-assets` branch.
+# Same-repo PRs only (fork PRs get a read-only token — can't host/comment).
+
+on:
+  pull_request:
+    paths:
+      - "**.scad"
+      - "**.stl"
+      - "**.obj"
+      - "**.ply"
+      - "**.glb"
+      - "**.gltf"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: render-diff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  render-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: System deps (cmake for Manifold's C++)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake imagemagick
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: render-diff
+
+      - name: Build the maquette CLI
+        run: cargo build --release -p maquette-cli
+
+      - name: Render before/after for the changed models
+        env:
+          MAQUETTE_BIN: target/release/maquette
+        run: .github/scripts/render-diff.sh "${{ github.event.pull_request.base.sha }}" render-diff-out
+
+      - name: Publish images to the render-diff-assets branch
+        id: host
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          imgs=(render-diff-out/*.side.png)
+          if [ ${#imgs[@]} -eq 0 ]; then echo "has_images=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          BR=render-diff-assets
+          DIR="pr-${{ github.event.pull_request.number }}/${{ github.event.pull_request.head.sha }}"
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          tmp="$(mktemp -d)"
+          if git clone --depth 1 --branch "$BR" "$url" "$tmp" 2>/dev/null; then
+            :
+          else
+            git clone --depth 1 "$url" "$tmp"
+            git -C "$tmp" checkout --orphan "$BR"
+            git -C "$tmp" rm -rfq . 2>/dev/null || true
+          fi
+          mkdir -p "$tmp/$DIR"
+          cp render-diff-out/*.side.png "$tmp/$DIR/"
+          git -C "$tmp" config user.name "render-diff[bot]"
+          git -C "$tmp" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$tmp" add -A
+          git -C "$tmp" commit -qm "render-diff for PR #${{ github.event.pull_request.number }} @ ${{ github.event.pull_request.head.sha }}" || true
+          git -C "$tmp" push -q origin "$BR"
+          echo "base=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${BR}/${DIR}" >> "$GITHUB_OUTPUT"
+          echo "has_images=true" >> "$GITHUB_OUTPUT"
+
+      - name: Post / update the PR comment
+        if: steps.host.outputs.has_images == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          sed "s|%%IMGBASE%%|${{ steps.host.outputs.base }}|g" render-diff-out/comment.md > body.md
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+            --jq '.[] | select(.body | test("maquette-render-diff")) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@body.md >/dev/null
+          else
+            gh pr comment "$PR" --body-file body.md
+          fi
+          echo "comment updated"

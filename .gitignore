@@ -14,3 +14,6 @@ docs/*.glb
 docs/*.blg
 idea.md
 notes.md
+
+# render-diff Action local output
+render-diff-out/
