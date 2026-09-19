@@ -36,6 +36,11 @@ debug = false
 debug-assertions = false
 overflow-checks = false
 
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
 # clippy runs with -D warnings (see `make lint`). The lints below are the
 # renderer's deliberate style — many-argument shader/setup fns, index loops in
 # hot paths, compact doc formatting — allowed so the gate catches real defects

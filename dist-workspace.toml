@@ -1,0 +1,29 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.33.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "powershell"]
+# Target platforms — only ones that build on a NATIVE runner: the CLI links
+# Manifold's C++ (via cmake) which we don't cross-compile. aarch64-linux is
+# omitted for that reason (would need a cross C++ toolchain / ARM runner).
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+# System deps installed on the build runners: Manifold's CSG kernel is built
+# from source with cmake (+ the platform's native C++ compiler, already present).
+[dist.dependencies.apt]
+cmake = '*'
+[dist.dependencies.homebrew]
+cmake = '*'
+[dist.dependencies.chocolatey]
+cmake = '*'

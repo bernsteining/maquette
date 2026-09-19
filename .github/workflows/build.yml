@@ -181,7 +181,7 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: write
     steps:
@@ -194,14 +194,22 @@ jobs:
           mkdir -p release
           find artifacts -name '*.wasm' -exec cp {} release/ \;
           ls -la release/
-          (cd release && sha256sum *.wasm > SHA256SUMS)
+          (cd release && sha256sum *.wasm > wasm.sha256.sum)
 
-      - name: Create GitHub Release with wasm assets
+      - name: Attach wasm to the dist-created GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            release/*.wasm release/SHA256SUMS \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes \
-            --repo "$GITHUB_REPOSITORY"
+          # dist's Release workflow owns the GitHub Release for this tag (CLI
+          # binaries + installers). Wait for it, then attach the plugin wasm.
+          for i in $(seq 1 60); do
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" release/*.wasm release/wasm.sha256.sum --clobber --repo "$GITHUB_REPOSITORY"
+              echo "attached wasm to release $GITHUB_REF_NAME"
+              exit 0
+            fi
+            echo "waiting for dist release $GITHUB_REF_NAME to exist ($i/60)…"
+            sleep 15
+          done
+          echo "::error::dist release $GITHUB_REF_NAME never appeared"
+          exit 1
