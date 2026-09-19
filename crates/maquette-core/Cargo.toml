@@ -16,3 +16,6 @@ description = "Format-agnostic render primitives shared by the maquette plugin f
 zune-jpeg = { version = "0.5", default-features = false, features = ["std"] }
 zune-png  = { version = "0.5", default-features = false, features = ["std"] }
 image-webp = "0.2"
+
+[lints]
+workspace = true

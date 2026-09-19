@@ -1664,7 +1664,7 @@ fn simd_exp2_grazing(x: v128) -> v128 {
     let pow_int = i32x4_shl(biased, 23);   // v128 layout matches f32x4
     // 2^fx via Horner on the fractional part in [0, 1].
     let c0 = f32x4_splat(1.0);
-    let c1 = f32x4_splat(0.693_147_2);
+    let c1 = f32x4_splat(std::f32::consts::LN_2);
     let c2 = f32x4_splat(0.240_226_5);
     let c3 = f32x4_splat(0.055_504_1);
     let c4 = f32x4_splat(0.009_681_2);

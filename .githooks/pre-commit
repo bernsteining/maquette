@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs the same gate as CI: clippy -D warnings (wasm + scad) + native tests.
+# Bypass a single commit with: git commit --no-verify
+exec make check

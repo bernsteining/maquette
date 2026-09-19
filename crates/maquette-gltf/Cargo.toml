@@ -78,3 +78,6 @@ features = [
     # crate — parsed from the raw extensions map via the `extensions` feature
     # above.
 ]
+
+[lints]
+workspace = true

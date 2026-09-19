@@ -35,3 +35,40 @@ panic = 'abort'
 debug = false
 debug-assertions = false
 overflow-checks = false
+
+# clippy runs with -D warnings (see `make lint`). The lints below are the
+# renderer's deliberate style — many-argument shader/setup fns, index loops in
+# hot paths, compact doc formatting — allowed so the gate catches real defects
+# (correctness lints stay denied) rather than churning hand-tuned code. Trim
+# this list to progressively tighten.
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+needless_borrow = "allow"
+needless_range_loop = "allow"
+empty_line_after_doc_comments = "allow"
+doc_lazy_continuation = "allow"
+type_complexity = "allow"
+unnecessary_map_or = "allow"
+manual_clamp = "allow"
+should_implement_trait = "allow"
+manual_div_ceil = "allow"
+manual_is_multiple_of = "allow"
+needless_lifetimes = "allow"
+ptr_arg = "allow"
+get_first = "allow"
+derivable_impls = "allow"
+unnecessary_cast = "allow"
+manual_range_contains = "allow"
+large_enum_variant = "allow"
+implicit_saturating_sub = "allow"
+for_kv_map = "allow"
+collapsible_if = "allow"
+if_same_then_else = "allow"
+identity_op = "allow"
+disallowed_names = "allow"
+bind_instead_of_map = "allow"
+unnecessary_first_then_check = "allow"
+single_match = "allow"
+manual_contains = "allow"
+field_reassign_with_default = "allow"
+wrong_self_convention = "allow"

@@ -1056,7 +1056,6 @@ fn eval_expr(expr: &Expr, env: &Env) -> Result<Value, String> {
             Some(b) => eval_expr(b, env),
             None => Ok(Value::Undef),
         },
-        other => Err(format!("scad: unsupported expression {other:?}")),
     }
 }
 

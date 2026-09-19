@@ -163,4 +163,20 @@ scad-build: scad-wasm
 	cp $(SCAD_WASM_OUT) $(SCAD_WASM_PKG)
 	cp crates/maquette-scad/maquette-scad.typ crates/maquette-scad/typst.toml $(dir $(SCAD_WASM_PKG))
 
-.PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build
+# --- local quality gates (mirrored by the pre-commit hook and CI) ---
+# The wasm-only crates are linted for the wasm target (their SIMD code only
+# compiles there); scad builds natively, so it and the tests run native.
+lint:
+	cargo clippy --target wasm32-unknown-unknown -p maquette-core -p maquette -p maquette-gltf -- -D warnings
+	cargo clippy -p maquette-scad --all-targets -- -D warnings
+
+test:
+	cargo test -p maquette-scad
+
+check: lint test
+
+install-hooks:
+	git config core.hooksPath .githooks
+	@echo "git hooks path set to .githooks — pre-commit active (skip with git commit --no-verify)"
+
+.PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint test check install-hooks
