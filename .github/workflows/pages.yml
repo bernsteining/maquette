@@ -1,12 +1,13 @@
 name: Deploy demo (GitHub Pages)
 
-# Rebuilds all three plugin wasms (maquette, maquette-gltf, maquette-scad)
-# from source and deploys docs/ to Pages, so the live demo's WASM always
-# matches the plugin source — no manual copy, no drift between plugins.
+# The single build + deploy pipeline for master. It rebuilds only the plugin
+# wasms whose sources (or the shared core/build inputs) changed on this push,
+# and reuses the last-deployed wasm from the live site for the rest — so an
+# unchanged plugin is never recompiled, and a core change rebuilds all three.
+# docs/ is then deployed to Pages, keeping the live demo in sync with source.
 #
-# The build runs inside a pinned rust:1.94.1 container (matching local rustc)
-# and uses binaryen v128 (matching local wasm-opt), so CI tooling == local.
-# Scad additionally needs cmake + clang + emsdk (Manifold C++ CSG kernel).
+# Runs inside the prebuilt ghcr toolchain image (see .github/docker/Dockerfile
+# + ci-image.yml): cmake/clang/libc++, emsdk and binaryen are baked in.
 
 on:
   push:
@@ -26,117 +27,121 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  packages: read
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Never cancel a deploy in flight: each run reuses the live site as the
+  # baseline for unchanged plugins, so runs must complete in order for the
+  # demo to always end on the latest pushed wasm.
+  cancel-in-progress: false
 
 env:
-  BINARYEN_VERSION: version_128 # matches local wasm-opt v128
-  EMSDK_VERSION: 6.0.8          # matches local emsdk (scad LTO recipe)
+  LIVE_BASE: https://bernsteining.github.io/maquette
 
 jobs:
-  build:
+  changes:
     runs-on: ubuntu-latest
-    # Steps execute inside this pinned image (rustc 1.94.1 baked in). Debian-based
-    # (glibc) so GitHub's injected Node runs the JS actions below — do NOT use an
-    # Alpine/musl image here, it breaks actions/checkout & upload-pages-artifact.
-    container: rust:1.94.1-slim-bookworm
+    outputs:
+      maquette: ${{ steps.filter.outputs.maquette }}
+      gltf: ${{ steps.filter.outputs.gltf }}
+      scad: ${{ steps.filter.outputs.scad }}
     steps:
-      - name: System deps (git, curl, make; cmake+clang for scad)
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            git curl ca-certificates make \
-            cmake clang lld libc++-dev libc++abi-dev python3 xz-utils
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            core: &core
+              - 'crates/maquette-core/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - 'Makefile'
+              - '.github/workflows/pages.yml'
+            maquette:
+              - *core
+              - 'crates/maquette/**'
+            gltf:
+              - *core
+              - 'crates/maquette-gltf/**'
+            scad:
+              - *core
+              - 'crates/maquette-scad/**'
 
+  build:
+    needs: changes
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      BUILD_MAQUETTE: ${{ needs.changes.outputs.maquette }}
+      BUILD_GLTF: ${{ needs.changes.outputs.gltf }}
+      BUILD_SCAD: ${{ needs.changes.outputs.scad }}
+    steps:
       - uses: actions/checkout@v7
 
-      - name: Ensure wasm target
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Cache cargo & target
-        uses: actions/cache@v6
+      - name: Cargo & C++ build cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            target
-          key: ${{ runner.os }}-pages-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-pages-
+          shared-key: pages
 
-      - name: Install binaryen ${{ env.BINARYEN_VERSION }} (match local wasm-opt)
-        # `--retry-all-errors` eats transient DNS/connection blips on
-        # release-assets.githubusercontent.com (GH runners occasionally
-        # can't resolve their own CDN).
+      - name: Build changed wasms; reuse last-deployed for the rest
+        shell: bash
         run: |
-          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
-            "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" \
-            | tar -xz
-          echo "$PWD/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
-
-      # Emsdk provides LLVM 22+/clang++/wasm-ld for scad's LTO recipe (see
-      # Makefile scad-wasm target). Pinned + cached so we don't re-download
-      # ~400 MB every deploy.
-      - name: Cache emsdk (scad LTO)
-        id: cache-emsdk
-        uses: actions/cache@v6
-        with:
-          path: ~/emsdk
-          key: emsdk-${{ env.EMSDK_VERSION }}
-
-      - name: Install emsdk (scad LTO)
-        if: steps.cache-emsdk.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
-          ~/emsdk/emsdk install "$EMSDK_VERSION"
-          ~/emsdk/emsdk activate "$EMSDK_VERSION"
-
-      - name: Versions (should match local)
-        run: rustc --version && wasm-opt --version
-
-      - name: Build all plugin wasms (via Makefile — identical build to local)
-        shell: bash   # ${GITHUB_SHA::7} below is a bash substring; container default shell is sh
-        # `make wasm gltf-wasm scad-wasm` is the single source of truth for the
-        # cargo + wasm-opt flags. REMAP overrides the Makefile's default ($HOME)
-        # so nothing (registry, toolchain, workspace) leaks into the artifacts.
-        # EMSDK env-var contract matches local dev — enables the scad LTO recipe.
-        run: |
-          export EMSDK=$HOME/emsdk
+          export EMSDK="${EMSDK:-/opt/emsdk}"
           REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
-          make wasm      REMAP="$REMAP"
-          make gltf-wasm REMAP="$REMAP"
-          make scad-wasm REMAP="$REMAP"
-          cp crates/maquette/maquette.wasm            docs/maquette.wasm
-          cp crates/maquette-gltf/maquette-gltf.wasm  docs/maquette-gltf.wasm
-          cp crates/maquette-scad/maquette-scad.wasm  docs/maquette-scad.wasm
-          ls -la docs/maquette.wasm docs/maquette-gltf.wasm docs/maquette-scad.wasm
-          # Demo models aren't committed under docs/ (canonical copies live in
-          # examples/data/); stage them into the artifact the same way as the wasm.
+          # $1 changed-flag  $2 make-target  $3 built-path  $4 dst-name
+          resolve() {
+            if [ "$1" = "true" ]; then
+              echo "build $4 (changed)"
+              make "$2" REMAP="$REMAP"
+              cp "$3" "docs/$4"
+            elif curl -fsSL --retry 3 --retry-delay 3 --retry-all-errors "$LIVE_BASE/$4" -o "docs/$4" && [ -s "docs/$4" ]; then
+              echo "reuse $4 from live deploy"
+            else
+              echo "$4 not on live site — building"
+              make "$2" REMAP="$REMAP"
+              cp "$3" "docs/$4"
+            fi
+          }
+          resolve "$BUILD_MAQUETTE" wasm      crates/maquette/maquette.wasm            maquette.wasm
+          resolve "$BUILD_GLTF"     gltf-wasm crates/maquette-gltf/maquette-gltf.wasm  maquette-gltf.wasm
+          resolve "$BUILD_SCAD"     scad-wasm crates/maquette-scad/maquette-scad.wasm  maquette-scad.wasm
+          for w in maquette maquette-gltf maquette-scad; do
+            [ -s "docs/$w.wasm" ] || { echo "::error::missing docs/$w.wasm"; exit 1; }
+          done
+          ls -la docs/*.wasm
+
+      - name: Verify no build paths leaked into freshly built wasm
+        shell: bash
+        run: |
+          leak() { if grep -aE '/(home|root|Users)/[A-Za-z0-9._-]' "$1"; then echo "::error::build path leaked into $1"; exit 1; fi; }
+          if [ "$BUILD_MAQUETTE" = "true" ]; then leak docs/maquette.wasm; fi
+          if [ "$BUILD_GLTF" = "true" ]; then leak docs/maquette-gltf.wasm; fi
+          if [ "$BUILD_SCAD" = "true" ]; then leak docs/maquette-scad.wasm; fi
+          echo "path-leak check done ✓"
+
+      - name: Stage demo assets + stamp build commit
+        shell: bash
+        run: |
           make demo-assets
           ls -la docs/*.obj docs/*.ply
-          # Stamp the deployed commit into the demo's build pill (hover / tap to see it).
           sed -i "s/__BUILD_COMMIT__/${GITHUB_SHA::7}/g" docs/index.html
           echo "stamped build ${GITHUB_SHA::7}"
 
-      - name: Verify no build paths leaked
-        run: |
-          for w in docs/maquette.wasm docs/maquette-gltf.wasm docs/maquette-scad.wasm; do
-            if grep -aE '/(home|root|Users)/[A-Za-z0-9._-]' "$w"; then
-              echo "::error::build path leaked into $w"; exit 1
-            fi
-          done
-          echo "no path leaks ✓"
-
       - uses: actions/configure-pages@v6
-
       - uses: actions/upload-pages-artifact@v5
         with:
           path: docs
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest # deploy runs on the plain runner (needs OIDC token; no container)
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

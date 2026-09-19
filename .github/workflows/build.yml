@@ -1,167 +1,135 @@
 name: Build plugins
 
-# Verifies all three Typst plugins compile from source on every push + PR.
-# One matrix job per plugin, each running the Makefile target that is the
-# single source of truth for the local build. Artifacts are uploaded so
-# maintainers can inspect the wasm shipped by CI (byte-diff vs the copy
-# committed at docs/ catches drift between local + CI).
+# Validates the plugins compile from source and (on a v* tag) publishes the
+# wasms as release assets. Master pushes are handled by the pages workflow,
+# which is the single build+deploy pipeline for the demo — so this no longer
+# runs on master, and the two workflows never double-build the same wasm.
 #
-# The scad plugin has extra dependencies (cmake + LLVM + emsdk) because
-# manifold-csg-sys builds the Manifold C++ CSG kernel from source via the
-# wasm-cxx-shim helper. See the scad job for details.
+# On a pull request only the plugins whose sources (or the shared core/build
+# inputs) changed are built. Tags and manual runs build all three.
+#
+# Runs inside the prebuilt ghcr toolchain image (see .github/docker/Dockerfile
+# + ci-image.yml): cmake/clang/libc++, emsdk and binaryen are baked in.
 
 on:
-  push:
-    branches: [master]
-    tags: ['v*']  # v0.1.3, v0.2.0, etc. — kicks off the release job below
   pull_request:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  BINARYEN_VERSION: version_128 # matches local wasm-opt v128
+permissions:
+  contents: read
+  packages: read
 
 jobs:
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      any: ${{ steps.set.outputs.any }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            core: &core
+              - 'crates/maquette-core/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - 'Makefile'
+              - 'harness/**'
+              - '.github/workflows/build.yml'
+            maquette:
+              - *core
+              - 'crates/maquette/**'
+            gltf:
+              - *core
+              - 'crates/maquette-gltf/**'
+            scad:
+              - *core
+              - 'crates/maquette-scad/**'
+      - id: set
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          M: ${{ steps.filter.outputs.maquette }}
+          G: ${{ steps.filter.outputs.gltf }}
+          S: ${{ steps.filter.outputs.scad }}
+        run: |
+          all=false
+          case "$REF" in refs/tags/*) all=true ;; esac
+          [ "$EVENT" = "workflow_dispatch" ] && all=true
+          inc=()
+          add() { inc+=("{\"name\":\"$1\",\"make_target\":\"$2\",\"wasm_path\":\"$3\"}"); }
+          { [ "$all" = true ] || [ "$M" = true ]; } && add maquette      wasm      crates/maquette/maquette.wasm
+          { [ "$all" = true ] || [ "$G" = true ]; } && add maquette-gltf gltf-wasm crates/maquette-gltf/maquette-gltf.wasm
+          { [ "$all" = true ] || [ "$S" = true ]; } && add maquette-scad scad-wasm crates/maquette-scad/maquette-scad.wasm
+          json=$(printf '%s\n' "${inc[@]}" | paste -sd, -)
+          echo "matrix={\"include\":[$json]}" >> "$GITHUB_OUTPUT"
+          if [ ${#inc[@]} -gt 0 ]; then echo "any=true" >> "$GITHUB_OUTPUT"; else echo "any=false" >> "$GITHUB_OUTPUT"; fi
+          echo "building: ${inc[*]:-none}"
+
   build:
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
     strategy:
       fail-fast: false
-      matrix:
-        plugin:
-          - name: maquette
-            make_target: wasm
-            wasm_path: crates/maquette/maquette.wasm
-          - name: maquette-gltf
-            make_target: gltf-wasm
-            wasm_path: crates/maquette-gltf/maquette-gltf.wasm
-          - name: maquette-scad
-            make_target: scad-wasm
-            wasm_path: crates/maquette-scad/maquette-scad.wasm
-
-    name: ${{ matrix.plugin.name }}
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    container: rust:1.94.1-slim-bookworm
-
+    container:
+      image: ghcr.io/${{ github.repository }}-ci:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: System deps (git, curl, make; scad also needs cmake+clang+libc++)
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git curl ca-certificates make
-          if [ "${{ matrix.plugin.name }}" = "maquette-scad" ]; then
-            # cmake fetches Manifold+Clipper2 sources; clang/lld/libc++ back
-            # the wasm-cxx-shim toolchain for the wasm32-unknown-unknown build.
-            # System clang here is LLVM 19 on bookworm — used for the fallback
-            # (non-LTO) build path. Emsdk (installed below) provides LLVM 23
-            # for the LTO path via the Makefile's EMSDK_WASMLD switch.
-            apt-get install -y --no-install-recommends \
-              cmake clang lld libc++-dev libc++abi-dev python3 xz-utils
-          fi
-
       - uses: actions/checkout@v7
 
-      - name: Ensure wasm target
-        run: rustup target add wasm32-unknown-unknown
-
-      - name: Cache cargo & target
-        uses: actions/cache@v6
+      - name: Cargo & C++ build cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.plugin.name }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-${{ matrix.plugin.name }}-
+          shared-key: ${{ matrix.name }}
+          workspaces: |
+            . -> target
+            harness -> target
 
-      - name: Install binaryen ${{ env.BINARYEN_VERSION }}
-        # `--retry-all-errors` eats transient DNS/connection blips on
-        # release-assets.githubusercontent.com (GH runners occasionally
-        # can't resolve their own CDN).
-        run: |
-          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
-            "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" \
-            | tar -xz
-          echo "$PWD/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
-
-      # Emsdk provides LLVM 22+/clang++/wasm-ld for scad's LTO recipe (see
-      # Makefile scad-wasm target). Pinned + cached so we don't re-download
-      # ~400 MB every job.
-      - name: Cache emsdk (scad LTO)
-        if: matrix.plugin.name == 'maquette-scad'
-        id: cache-emsdk
-        uses: actions/cache@v6
-        with:
-          path: ~/emsdk
-          key: emsdk-${{ env.EMSDK_VERSION }}
-        env:
-          EMSDK_VERSION: 6.0.8
-
-      - name: Install emsdk (scad LTO)
-        if: matrix.plugin.name == 'maquette-scad' && steps.cache-emsdk.outputs.cache-hit != 'true'
-        env:
-          EMSDK_VERSION: 6.0.8
-        run: |
-          git clone --depth 1 https://github.com/emscripten-core/emsdk.git ~/emsdk
-          ~/emsdk/emsdk install "$EMSDK_VERSION"
-          ~/emsdk/emsdk activate "$EMSDK_VERSION"
-
-      - name: Versions
+      - name: Build (Makefile — single source of truth for flags)
         shell: bash
         run: |
-          rustc --version
-          wasm-opt --version
-          if [ "${{ matrix.plugin.name }}" = "maquette-scad" ]; then
-            cmake --version | head -1
-            clang++ --version | head -1
-            [ -d ~/emsdk ] && echo "emsdk: $(cat ~/emsdk/.emscripten_version 2>/dev/null || echo present)"
-          fi
-
-      - name: Build (via Makefile — single source of truth for flags)
-        shell: bash
-        run: |
-          # For scad: point EMSDK at the emsdk root so the wasm-cxx-shim
-          # toolchain probes $EMSDK/upstream/bin for clang++/wasm-ld, and
-          # the Makefile's EMSDK_WASMLD switch enables the LTO recipe.
-          # Same env-var contract as local dev — no CI-specific logic.
-          if [ "${{ matrix.plugin.name }}" = "maquette-scad" ] && [ -d ~/emsdk ]; then
-            export EMSDK=$HOME/emsdk
-          fi
-          # Path remaps: strip container-specific prefixes so nothing leaks into the wasm.
-          make ${{ matrix.plugin.make_target }} REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
+          export EMSDK="${EMSDK:-/opt/emsdk}"
+          make ${{ matrix.make_target }} REMAP="--remap-path-prefix=$PWD=. --remap-path-prefix=$CARGO_HOME=/cargo --remap-path-prefix=$RUSTUP_HOME=/rustup --remap-path-prefix=$HOME=~"
 
       - name: Verify no build paths leaked into wasm
         run: |
-          if grep -aE '/(home|root|Users)/[A-Za-z0-9._-]' ${{ matrix.plugin.wasm_path }}; then
-            echo "::error::build path leaked into ${{ matrix.plugin.wasm_path }}"
+          if grep -aE '/(home|root|Users)/[A-Za-z0-9._-]' ${{ matrix.wasm_path }}; then
+            echo "::error::build path leaked into ${{ matrix.wasm_path }}"
             exit 1
           fi
           echo "no path leaks ✓"
 
-      # Functional drift check. Byte-identical wasms across machines are
-      # impractical (LLVM patch-version drift, temp-path hashes, non-
-      # deterministic optimization passes) — so instead we run BOTH the
-      # CI-built wasm and the committed docs/ copy through the harness on
-      # a canonical asset and compare their outputs. Same output bytes ⇒
-      # functionally equivalent, even if the wasm binaries differ. This
-      # catches real regressions (algorithm changes) while ignoring cosmetic
-      # ones (compiler-generated symbol names, .rodata ordering).
       - name: Build harness (for functional drift check)
         run: cargo build --release --manifest-path harness/Cargo.toml
+
       - name: Functional drift check vs committed copy
         shell: bash
         env:
-          PLUGIN: ${{ matrix.plugin.name }}
-          WASM: ${{ matrix.plugin.wasm_path }}
+          PLUGIN: ${{ matrix.name }}
+          WASM: ${{ matrix.wasm_path }}
         run: |
-          committed="docs/$(basename $WASM)"
+          committed="docs/$(basename "$WASM")"
           if [ ! -f "$committed" ]; then
             echo "no committed copy at $committed — skipping drift check"
             exit 0
           fi
-          # Per-plugin canonical smoke input (small, fast, deterministic).
-          # If we get bit-identical output on this input from both wasms,
-          # they're functionally the same — regardless of binary drift.
           case "$PLUGIN" in
             maquette)
               cfg=$(mktemp); echo '{"width":128,"height":128,"azimuth":0,"elevation":0,"background":"#f0f0f0","antialias":1}' > "$cfg"
@@ -179,8 +147,8 @@ jobs:
               ;;
           esac
           ci_out=$(mktemp); co_out=$(mktemp)
-          harness/target/release/harness "$WASM"       "${args[@]}" > "$ci_out"
-          harness/target/release/harness "$committed"  "${args[@]}" > "$co_out"
+          harness/target/release/harness "$WASM"      "${args[@]}" > "$ci_out"
+          harness/target/release/harness "$committed" "${args[@]}" > "$co_out"
           ci_sha=$(sha1sum "$ci_out" | cut -c1-12)
           co_sha=$(sha1sum "$co_out" | cut -c1-12)
           if [ "$ci_sha" = "$co_sha" ]; then
@@ -192,28 +160,24 @@ jobs:
 
       - name: Report size + sha
         run: |
-          echo "### ${{ matrix.plugin.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "### ${{ matrix.name }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          ls -la ${{ matrix.plugin.wasm_path }} >> $GITHUB_STEP_SUMMARY
-          sha1sum ${{ matrix.plugin.wasm_path }} >> $GITHUB_STEP_SUMMARY
+          ls -la ${{ matrix.wasm_path }} >> $GITHUB_STEP_SUMMARY
+          sha1sum ${{ matrix.wasm_path }} >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.plugin.name }}-wasm
-          path: ${{ matrix.plugin.wasm_path }}
+          name: ${{ matrix.name }}-wasm
+          path: ${{ matrix.wasm_path }}
           retention-days: 14
 
-  # Attach the three wasms to a GitHub Release when a `v*` tag is pushed.
-  # No auto-publish to Typst's @preview registry — that's a manual review
-  # queue by the Typst team. This just makes it trivial to pin a specific
-  # version's wasm: `gh release download v0.1.3 -R bernsteining/maquette`.
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # needed to create the Release + upload assets
+      contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -222,9 +186,6 @@ jobs:
       - name: Stage flat wasm layout for release assets
         run: |
           mkdir -p release
-          # Each artifact is downloaded to artifacts/<artifact-name>/ preserving
-          # the workspace-relative path. Flatten so release assets are named
-          # maquette.wasm / maquette-gltf.wasm / maquette-scad.wasm.
           find artifacts -name '*.wasm' -exec cp {} release/ \;
           ls -la release/
           (cd release && sha256sum *.wasm > SHA256SUMS)
