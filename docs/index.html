@@ -69,6 +69,13 @@
     overflow-y: auto; background: var(--panel); scrollbar-width: thin;
   }
   @media (max-width: 840px) { #panel { width: auto; border-right: none; border-bottom: 1px solid var(--line); max-height: 50vh; } }
+  /* Landscape phones: height is the scarce dimension, so never stack — keep the
+     panel beside the stage and cap its WIDTH so the canvas always has room. */
+  @media (max-height: 500px) and (orientation: landscape) {
+    main { flex-direction: row; }
+    #panel { width: clamp(240px, 38vw, 360px); max-height: none;
+             border-right: 1px solid var(--line); border-bottom: none; }
+  }
 
   .panel-head { position: sticky; top: 0; background: var(--panel); z-index: 3; border-bottom: 1px solid var(--line); }
   .file-row {
