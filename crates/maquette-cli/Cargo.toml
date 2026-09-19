@@ -1,0 +1,21 @@
+[package]
+name = "maquette-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Native command-line renderer for the maquette family (STL/OBJ/PLY, glTF, OpenSCAD) to PNG/SVG."
+
+[[bin]]
+name = "maquette"
+path = "src/main.rs"
+
+[dependencies]
+maquette = { path = "../maquette" }
+maquette-gltf = { path = "../maquette-gltf" }
+maquette-scad = { path = "../maquette-scad" }
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+png = "0.18"
+
+[lints]
+workspace = true

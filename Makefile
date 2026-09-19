@@ -169,14 +169,24 @@ scad-build: scad-wasm
 lint:
 	cargo clippy --target wasm32-unknown-unknown -p maquette-core -p maquette -p maquette-gltf -- -D warnings
 	cargo clippy -p maquette-scad --all-targets -- -D warnings
+	cargo clippy -p maquette-cli --all-targets -- -D warnings
 
 test:
 	cargo test -p maquette-scad
 
 check: lint test
 
+# Native CLI: a real ELF/PE/Mach-O `maquette` binary (STL/OBJ/PLY, glTF, scad
+# → PNG/SVG). Uses the same renderer as the wasm plugins via a native SIMD shim.
+cli:
+	cargo build --release -p maquette-cli
+	@echo "built target/release/maquette"
+
+cli-install:
+	cargo install --path crates/maquette-cli --force
+
 install-hooks:
 	git config core.hooksPath .githooks
 	@echo "git hooks path set to .githooks — pre-commit active (skip with git commit --no-verify)"
 
-.PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint test check install-hooks
+.PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint test check install-hooks cli cli-install

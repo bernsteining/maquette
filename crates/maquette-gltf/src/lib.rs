@@ -217,3 +217,30 @@ impl<T: ::core::convert::AsRef<[u8]>, E: ::core::fmt::Display> __ToResult
     type Err = E;
     fn to_result(self) -> Self { self }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native {
+    use super::*;
+
+    pub fn render_gltf(gltf_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        render_impl(gltf_data, config_json, &[], &[])
+    }
+
+    pub fn render_gltf_hdr(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8]) -> Result<Vec<u8>, String> {
+        render_impl(gltf_data, config_json, hdr_data, &[])
+    }
+
+    pub fn render_gltf_split(gltf_data: &[u8], config_json: &[u8], sidecars_bundle: &[u8]) -> Result<Vec<u8>, String> {
+        render_impl(gltf_data, config_json, &[], sidecars_bundle)
+    }
+
+    pub fn get_gltf_info(gltf_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let _ = config_json;
+        info_impl(gltf_data, &[])
+    }
+
+    pub fn get_gltf_info_split(gltf_data: &[u8], config_json: &[u8], sidecars_bundle: &[u8]) -> Result<Vec<u8>, String> {
+        let _ = config_json;
+        info_impl(gltf_data, sidecars_bundle)
+    }
+}

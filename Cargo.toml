@@ -13,7 +13,7 @@
 # `maquette` is not yet migrated onto maquette-core (its rasterizer/shader
 # have their own set of features and the merge needs a visual-regression pass).
 resolver = "2"
-members = ["crates/maquette", "crates/maquette-core", "crates/maquette-gltf", "crates/maquette-scad"]
+members = ["crates/maquette", "crates/maquette-core", "crates/maquette-gltf", "crates/maquette-scad", "crates/maquette-cli"]
 exclude = ["crates/vendored"]
 
 # Local fork of manifold-csg-sys with MANIFOLD_WASM_CXX_FLAGS env-var

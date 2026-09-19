@@ -345,3 +345,91 @@ impl<T: ::core::convert::AsRef<[u8]>, E: ::core::fmt::Display> __ToResult
     type Err = E;
     fn to_result(self) -> Self { self }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod native {
+    use super::*;
+
+    pub fn render_stl(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let triangles = cached_stl(stl_data)?;
+        let empty = HashMap::new();
+        let key = cache::hash(stl_data);
+        let svg = render::render(triangles, &config, &empty, Some(key), Some(key));
+        Ok(svg.into_bytes())
+    }
+
+    pub fn render_obj(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let obj = cached_obj(obj_data, &config)?;
+        let key = cache::hash(obj_data);
+        let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
+        let svg = render::render(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key);
+        Ok(svg.into_bytes())
+    }
+
+    pub fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let triangles = cached_ply(ply_data, &config)?;
+        let empty = HashMap::new();
+        Ok(render::render(&triangles, &config, &empty, None, None).into_bytes())
+    }
+
+    pub fn render_stl_png(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let triangles = cached_stl(stl_data)?;
+        let empty = HashMap::new();
+        let key = cache::hash(stl_data);
+        render::render_raster(triangles, &config, &empty, Some(key), Some(key), &[])
+    }
+
+    pub fn render_obj_png(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let obj = cached_obj(obj_data, &config)?;
+        let key = cache::hash(obj_data);
+        let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
+        render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[])
+    }
+
+    pub fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let triangles = cached_ply(ply_data, &config)?;
+        let empty = HashMap::new();
+        render::render_raster(&triangles, &config, &empty, None, None, &[])
+    }
+
+    pub fn render_obj_png_tex(obj_data: &[u8], config_json: &[u8], tex_bundle: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let (textures, tex_index) = build_obj_textures(&config, tex_bundle)?;
+        if textures.is_empty() {
+            let obj = cached_obj(obj_data, &config)?;
+            let key = cache::hash(obj_data);
+            let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
+            return render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[]);
+        }
+        let mut merged = obj_parser::parse_mtl(&config.mtl);
+        for (k, v) in &config.materials { merged.insert(k.clone(), v.clone()); }
+        let (triangles, group_styles) =
+            obj_parser::parse_obj(obj_data, &merged, &config.highlight, &tex_index)?;
+        let key = cache::hash(obj_data);
+        render::render_raster(&triangles, &config, &group_styles, Some(key), None, &textures)
+    }
+
+    pub fn get_stl_info(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let triangles = cached_stl(stl_data)?;
+        Ok(render::get_info(triangles, &config).into_bytes())
+    }
+
+    pub fn get_obj_info(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let obj = cached_obj(obj_data, &config)?;
+        Ok(render::get_info(obj.triangles(), &config).into_bytes())
+    }
+
+    pub fn get_ply_info(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+        let config = parse_config(config_json)?;
+        let triangles = cached_ply(ply_data, &config)?;
+        Ok(render::get_info(&triangles, &config).into_bytes())
+    }
+}

@@ -128,6 +128,22 @@ Documentation contains many examples showcasing all the features, with each exam
 
 * [molfig](https://github.com/rice8y/molfig): Render molecular data (PDB, mmCIF, BinaryCIF, XYZ) in Typst. [Try it Live](https://bernsteining.github.io/maquette/?a=lsd)
 
+## Command line (native)
+
+The same renderer also ships as a native `maquette` binary — no Typst, no wasm runtime, just an ELF/PE/Mach-O executable that reads a model and writes a PNG or SVG. The wasm plugins are untouched: the renderer's wasm SIMD is swapped, per architecture, for a [`wide`](https://crates.io/crates/wide)-backed native SIMD path via conditional compilation (so the shipped wasm stays byte-identical).
+
+```sh
+make cli                      # builds target/release/maquette
+# or: cargo install --path crates/maquette-cli
+
+maquette bunny.obj  -o bunny.png  --set width=800 --set height=600
+maquette model.stl  -o model.svg
+maquette part.scad  -o part.png   --fn 64
+maquette scene.glb  -o scene.png  --plugin gltf --config camera.json
+```
+
+`--config file.json` supplies the same render-config dict the plugins accept; `--set key=value` overrides individual keys (value parsed as JSON). The output format follows the `-o` extension (`.png` / `.svg`). Note: native and wasm renders are visually equivalent but not bit-identical (floating-point evaluation differs).
+
 ## Building
 
 ```sh
