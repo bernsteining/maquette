@@ -70,7 +70,7 @@ module gear (
 	clearance       = 0.0,  //gap between top of a tooth on one gear and bottom of valley on a meshing gear (in millimeters)
 	backlash        = 0.0,   //gap between two meshing teeth, in the direction along the circumference of the pitch circle
     center = false,   // center gear by z axis
-    $fn = 20   // number of fragments to draw hole cylinder
+    $fn = 24   // number of fragments to draw hole cylinder
 ) {
 	p  = mm_per_tooth * number_of_teeth / PI / 2;  //radius of pitch circle
 	c  = p + mm_per_tooth / PI - clearance;        //radius of outer circle
