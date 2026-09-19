@@ -1,0 +1,83 @@
+name: "maquette 3D render diff"
+description: "Render changed 3D models (STL/OBJ/PLY, glTF, OpenSCAD) before/after and post them as a PR comment."
+author: "bernsteining"
+branding:
+  icon: "box"
+  color: "purple"
+
+inputs:
+  github-token:
+    description: "Token with contents:write (host images) + pull-requests:write (comment)."
+    required: true
+    default: ${{ github.token }}
+  config:
+    description: "Path to a render-config JSON (flat dict, or {default, overrides}). Optional."
+    required: false
+    default: ".github/render-diff.json"
+  args:
+    description: "Extra maquette flags applied on top of the config (e.g. '--set antialias=2')."
+    required: false
+    default: ""
+  jobs:
+    description: "Parallel render jobs."
+    required: false
+    default: "4"
+  cli-version:
+    description: "Prebuilt maquette CLI release tag to download (e.g. v0.1.4). Empty = build from source."
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Get the maquette CLI
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.cli-version }}" ] && \
+           curl -fsSL "https://github.com/bernsteining/maquette/releases/download/${{ inputs.cli-version }}/maquette-cli-installer.sh" | sh; then
+          echo "MAQUETTE_BIN=$HOME/.cargo/bin/maquette" >> "$GITHUB_ENV"
+        else
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
+          cargo build --profile ci -p maquette-cli 2>/dev/null || cargo build --release -p maquette-cli
+          test -x target/ci/maquette && echo "MAQUETTE_BIN=target/ci/maquette" >> "$GITHUB_ENV" || echo "MAQUETTE_BIN=target/release/maquette" >> "$GITHUB_ENV"
+        fi
+
+    - name: Render before/after for the changed models
+      shell: bash
+      env:
+        JOBS: ${{ inputs.jobs }}
+        MAQUETTE_ARGS: ${{ inputs.args }}
+        RENDER_DIFF_CONFIG: ${{ inputs.config }}
+      run: ${{ github.action_path }}/render-diff.sh "HEAD^1" render-diff-out
+
+    - name: Publish images + post the PR comment
+      if: github.event.pull_request.head.repo.full_name == github.repository
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        shopt -s nullglob
+        imgs=(render-diff-out/*.png)
+        [ ${#imgs[@]} -eq 0 ] && exit 0
+        BR=render-diff-assets
+        DIR="pr-${PR}/${{ github.event.pull_request.head.sha }}"
+        url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        tmp="$(mktemp -d)"
+        if git clone --depth 1 --branch "$BR" "$url" "$tmp" 2>/dev/null; then :; else
+          git clone --depth 1 "$url" "$tmp"; git -C "$tmp" checkout --orphan "$BR"; git -C "$tmp" rm -rfq . 2>/dev/null || true
+        fi
+        mkdir -p "$tmp/$DIR"; cp render-diff-out/*.png "$tmp/$DIR/"
+        git -C "$tmp" config user.name "render-diff[bot]"
+        git -C "$tmp" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git -C "$tmp" add -A
+        git -C "$tmp" commit -qm "render-diff PR #${PR}" || true
+        git -C "$tmp" push -q origin "$BR"
+        base="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${BR}/${DIR}"
+        sed "s|%%IMGBASE%%|$base|g" render-diff-out/comment.md > body.md
+        existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" --jq '.[] | select(.body|test("maquette-render-diff")) | .id' | head -1)
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -F body=@body.md >/dev/null
+        else
+          gh pr comment "$PR" --body-file body.md
+        fi
