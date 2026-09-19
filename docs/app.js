@@ -2105,11 +2105,12 @@ function ensureSpherical() {
 (function setupOrbit() {
   const stage = $("stage");
   const pts = new Map();          // active pointers: id → {x, y}
-  let pd = 0, pcx = 0, pcy = 0;   // last two-finger distance + centroid while pinching
+  let pd = 0, pcx = 0, pcy = 0, pa = 0;   // last two-finger distance / centroid / angle while pinching
   const two = () => [...pts.values()];
   const twoDist = () => { const [a, b] = two(); return Math.hypot(a.x - b.x, a.y - b.y); };
   const twoCent = () => { const [a, b] = two(); return [(a.x + b.x) / 2, (a.y + b.y) / 2]; };
-  const seedPinch = () => { pd = twoDist(); [pcx, pcy] = twoCent(); };
+  const twoAngle = () => { const [a, b] = two(); return Math.atan2(b.y - a.y, b.x - a.x); };
+  const seedPinch = () => { pd = twoDist(); [pcx, pcy] = twoCent(); pa = twoAngle(); };
   // Trackball orbit. Azimuth/elevation cameras have a pole singularity: with a
   // fixed `up`, the screen orientation snaps 180° as the view crosses straight
   // up/down. To make VERTICAL orbit continuous *without* that snap, we carry the
@@ -2208,6 +2209,37 @@ function ensureSpherical() {
     state.azimuth = Math.round(Math.atan2(_dot(t.dir, b2.f), _dot(t.dir, b2.r)) * 180 / Math.PI * 10) / 10;
     controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation); controlRefs.up?.(state.up);
   };
+  // Two-finger twist → roll: spin the view about the axis pointing at the camera
+  // (dir), leaving the view direction fixed so the scene rotates in the screen
+  // plane. `up` is invariant under the same trackball encoding used by orbit, so
+  // we just rotate it about dir. `dTheta` is the finger-twist angle (radians).
+  const rollBy = (dTheta) => {
+    renderOverride = null;
+    if (model._gltf) {
+      const c = state.center || [0, 0, 0];
+      let dir = _nrm(_sub(state.camera, c));
+      let up = _nrm(state.up || [0, 1, 0]);
+      let sUp = _sub(up, _scl(dir, _dot(up, dir)));
+      if (Math.hypot(sUp[0], sUp[1], sUp[2]) < 1e-4) sUp = _basis(dir).r;
+      state.up = _nrm(_rot(_nrm(sUp), dir, dTheta)).map(round3);
+      controlRefs.up?.(state.up);
+      return;
+    }
+    const upW = _nrm(state.up || [0, 0, 1]);
+    const { r, f } = _basis(upW);
+    const az = state.azimuth * Math.PI / 180, el = state.elevation * Math.PI / 180;
+    const dir = _nrm(_add(_add(_scl(r, Math.cos(el) * Math.cos(az)),
+                               _scl(f, Math.cos(el) * Math.sin(az))),
+                          _scl(upW, Math.sin(el))));
+    let sUp = _sub(upW, _scl(dir, _dot(upW, dir)));
+    if (Math.hypot(sUp[0], sUp[1], sUp[2]) < 1e-4) sUp = _basis(dir).r;
+    sUp = _nrm(_rot(_nrm(sUp), dir, dTheta));
+    const b2 = _basis(sUp);
+    state.up = sUp.map(round3);
+    state.elevation = 0;
+    state.azimuth = Math.round(Math.atan2(_dot(dir, b2.f), _dot(dir, b2.r)) * 180 / Math.PI * 10) / 10;
+    controlRefs.azimuth?.(state.azimuth); controlRefs.elevation?.(state.elevation); controlRefs.up?.(state.up);
+  };
 
   stage.addEventListener("pointerdown", (e) => {
     if (e.target.closest("#tools")) return;                 // ignore toolbar clicks
@@ -2224,12 +2256,15 @@ function ensureSpherical() {
   stage.addEventListener("pointermove", (e) => {
     const p = pts.get(e.pointerId);
     if (!p) return;
-    if (pts.size >= 2) {                                    // two fingers → orbit + zoom together
+    if (pts.size >= 2) {                                    // two fingers → orbit + zoom + roll
       p.x = e.clientX; p.y = e.clientY;
-      const d = twoDist(), [cx, cy] = twoCent();
+      const d = twoDist(), [cx, cy] = twoCent(), ang = twoAngle();
       if (pd > 0 && d > 0) setZoom(d / pd);                 // pinch → zoom
+      let dA = ang - pa;                                    // twist → roll (about the view axis)
+      if (dA > Math.PI) dA -= 2 * Math.PI; else if (dA < -Math.PI) dA += 2 * Math.PI;
+      if (Math.abs(dA) > 1e-4) rollBy(dA);
       orbitBy(cx - pcx, cy - pcy, e.pointerType);           // drag centroid → orbit
-      pd = d; pcx = cx; pcy = cy;
+      pd = d; pcx = cx; pcy = cy; pa = ang;
     } else {                                                // one pointer → orbit
       orbitBy(e.clientX - p.x, e.clientY - p.y, e.pointerType);
       p.x = e.clientX; p.y = e.clientY;
