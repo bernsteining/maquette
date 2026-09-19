@@ -22,15 +22,18 @@ const _wPending = new Map();
 worker.onmessage = (e) => {
   const { id, ok, result, error } = e.data;
   const p = _wPending.get(id); if (!p) return; _wPending.delete(id);
-  ok ? p.resolve(result) : p.reject(new Error(error));
+  if (!ok) return p.reject(new Error(error));
+  // Raster render calls resolve with the whole payload ({bitmap,w,h,svg} or
+  // {result}); every other call resolves with just the result bytes.
+  p.resolve(p.raster ? e.data : result);
 };
 // wReq(msg) posts an id-tagged copy of `msg` to the worker and returns a
 // Promise that resolves with the worker's response. `msg` must include at
 // least { kind, plugin }; { fn, args, key } are per-kind (see worker.js).
-function wReq(msg) {
+function wReq(msg, raster) {
   return new Promise((resolve, reject) => {
     const id = ++_wReqId;
-    _wPending.set(id, { resolve, reject });
+    _wPending.set(id, { resolve, reject, raster });
     worker.postMessage({ id, ...msg });
   });
 }
@@ -65,6 +68,12 @@ function makeWorkerPlugin(plugin) {
     async call(fn, ...args) { return await wReq({ kind: "call", plugin, fn, args }); },
     async callWithModel(fn, ...extraArgs) {
       return await wReq({ kind: "callWithModel", plugin, fn, args: extraArgs });
+    },
+    // Render variant: the worker decodes raster output into a transferable
+    // ImageBitmap (painted off the main thread), falling back to raw bytes.
+    // Resolves the full payload — { bitmap, w, h, svg } or { result }.
+    async renderWithModel(fn, ...extraArgs) {
+      return await wReq({ kind: "callWithModel", plugin, fn, args: extraArgs, raster: true }, true);
     },
   };
   return p;
@@ -221,8 +230,8 @@ const SCHEMA = [
     { k: "auto_fit", label: "Auto-fit to viewport", t: "bool", def: true },
     { k: "background", label: "Background", t: "col", def: "#f0f0f0" },
     { k: "_bgNone", label: "Transparent background", t: "bool", def: false },
-    { k: "width", label: "Render width px", t: "num", def: 700, noExport: true },
-    { k: "height", label: "Render height px", t: "num", def: 700, noExport: true },
+    { k: "width", label: "Render width px", t: "num", def: 0, noExport: true },
+    { k: "height", label: "Render height px", t: "num", def: 0, noExport: true },
   ]},
 
   { s: "Material", fields: [
@@ -416,8 +425,8 @@ const GLTF_SCHEMA = [
     { k: "scene_index",  label: "Scene index (-1 = default)", t: "num", def: -1, omitIf: v => v === -1 },
     { k: "cull_backface", label: "Back-face culling", t: "bool", def: true },
     { k: "background", label: "Background", t: "col", def: "#181820" },
-    { k: "width",      label: "Render width px",  t: "num", def: 700, noExport: true },
-    { k: "height",     label: "Render height px", t: "num", def: 700, noExport: true },
+    { k: "width",      label: "Render width px",  t: "num", def: 0, noExport: true },
+    { k: "height",     label: "Render height px", t: "num", def: 0, noExport: true },
   ]},
 
   { s: "Direct lighting", fields: [
@@ -522,7 +531,7 @@ const HELP = {
   scene_index: "Pick a scene by index. -1 uses the asset's authored default scene (typically scene 0).",
   animation_index: "Pick a single animation clip by index (0-based). -1 plays every clip stacked.",
   _bgNone: "Render on a transparent background instead of a color.",
-  width: "Render resolution width in pixels.", height: "Render resolution height in pixels.",
+  width: "Render width in pixels (0 = fit to view).", height: "Render height in pixels (0 = fit to view).",
   color: "Base model fill color.", opacity: "Whole-model opacity (0 = invisible, 1 = opaque).",
   specular: "Specular highlight intensity.", shininess: "Specular exponent — higher = tighter highlight.",
   smooth: "Gouraud smooth shading (best with PNG).", gamma_correction: "Light in linear sRGB for accurate midtones.",
@@ -599,22 +608,6 @@ function initState() {
   }
   return st;
 }
-// Pick a render size that fits the viewport instead of always defaulting
-// to 700 × 700. On a phone CSS caps it to the stage anyway; on a wide
-// desktop we bump the render up so the canvas fills more of the stage
-// space instead of floating small in the middle. Runs once at module
-// load; the picked default is baked into every relevant schema field's
-// `def` so `applyModelDefaults` and Reset both respect it.
-(function pickDefaultRenderSize() {
-  const w = Math.max(320, Math.min(1200, (window.innerWidth  || 900) - 380));
-  const h = Math.max(320, Math.min(1200, (window.innerHeight || 800) - 180));
-  const s = Math.max(360, Math.min(w, h));   // square, no bigger than viewport allows
-  for (const sch of [SCHEMA, GLTF_SCHEMA]) {
-    for (const sec of sch) for (const f of sec.fields) {
-      if (f.k === "width" || f.k === "height") f.def = s;
-    }
-  }
-})();
 const state = initState();
 
 // ─────────────────────── Typst / config value helpers ─────────────────────
@@ -673,21 +666,57 @@ let renderOverride = null;
 function renderConfig() {
   const c = buildConfig();
   const cfg = renderOverride ? { ...c, ...renderOverride } : c;
-  // Remember the intended (full) output size; the paint step pins the canvas's
-  // CSS width to it so a reduced-resolution interactive render still fills the
-  // stage (the browser upscales the smaller backing store) instead of shrinking.
-  displayDims = { w: cfg.width || 700, h: cfg.height || 700 };
+  // Render size. width/height are preview-only (never exported): 0 (the default)
+  // means "fit to view" — fill the stage at the device pixel ratio (capped) so
+  // the canvas is sharp without rendering more pixels than it shows. A non-zero
+  // value is an explicit override (e.g. for a high-res download).
+  let rw = cfg.width, rh = cfg.height;
+  if (!rw || !rh) { const a = stageAvail(), dpr = renderDpr();
+    ({ w: rw, h: rh } = clampPair(Math.round((a.w || 700) * dpr), Math.round((a.h || 700) * dpr))); }
+  else ({ w: rw, h: rh } = clampPair(rw, rh, 8192));
+  cfg.width = rw; cfg.height = rh;
+  // Display box: the largest box of the render's aspect that fits the stage.
+  // The paint step pins the canvas to this, so a reduced-resolution interactive
+  // frame upscales to fill the stage (rather than shrinking).
+  displayDims = fitBox(rw, rh);
   lastRenderReduced = reduceNow();
   if (lastRenderReduced) {
     return {
       ...cfg,
-      width: Math.max(DRAG_MIN, Math.round(displayDims.w * DRAG_SCALE)),
-      height: Math.max(DRAG_MIN, Math.round(displayDims.h * DRAG_SCALE)),
+      width: Math.max(DRAG_MIN, Math.round(rw * DRAG_SCALE)),
+      height: Math.max(DRAG_MIN, Math.round(rh * DRAG_SCALE)),
       antialias: model._gltf ? 1 : 0,   // "off": maquette=0, gltf=1
       fxaa: false,
     };
   }
   return cfg;
+}
+// ── render-size helpers (fit to view) ──────────────────────────────────────
+const DPR_CAP = 2;            // don't render past 2× — diminishing returns, big cost
+const RENDER_MAXDIM = 2048;   // hard ceiling per axis for the auto-fit path
+const renderDpr = () => Math.min(Math.max(window.devicePixelRatio || 1, 1), DPR_CAP);
+// The stage's content box (client size minus padding) in CSS pixels.
+function stageAvail() {
+  const stage = $("stage");
+  if (!stage) return { w: 700, h: 700 };
+  const cs = getComputedStyle(stage);
+  const w = stage.clientWidth  - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const h = stage.clientHeight - parseFloat(cs.paddingTop)  - parseFloat(cs.paddingBottom);
+  return { w: Math.max(0, Math.floor(w)), h: Math.max(0, Math.floor(h)) };
+}
+// Largest box of aspect w:h that fits the stage content area (CSS px).
+function fitBox(w, h) {
+  const a = stageAvail();
+  if (a.w < 1 || a.h < 1 || !w || !h) return { w: w || 700, h: h || 700 };
+  const s = Math.min(a.w / w, a.h / h);
+  return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) };
+}
+// Scale a size down (preserving aspect) so neither axis exceeds `max`.
+function clampPair(w, h, max = RENDER_MAXDIM) {
+  w = Math.max(1, w); h = Math.max(1, h);
+  const m = Math.max(w, h);
+  if (m > max) { const k = max / m; return { w: Math.round(w * k), h: Math.round(h * k) }; }
+  return { w, h };
 }
 // Rich highlight per-group appearance ↔ demo state. Normalize a loaded value
 // (plain "#color" or {color, stroke, stroke_width, opacity}) to a full object for
@@ -1278,12 +1307,13 @@ function settleRender() {
   interacting = false;
   safeRender();
 }
-// Pin the CSS width to the full size (height:auto keeps aspect) so a reduced
-// backing store upscales to fill the stage instead of shrinking.
+// Pin the canvas CSS box to the fitted display size so its backing store (which
+// varies with dpr and the interactive reduced-res path) always scales to fill
+// the same on-screen box instead of shrinking.
 function sizeCanvasDisplay() {
   if (!displayDims) return;
   elOutc.style.width = displayDims.w + "px";
-  elOutc.style.height = "auto";
+  elOutc.style.height = displayDims.h + "px";
 }
 // UX: flag the stage as busy while a render is in flight — flips a CSS
 // class that shows a small spinner + "rendering…" caption, and sets
@@ -1329,6 +1359,39 @@ let outputFormat = "png";   // "png" | "svg" — chosen via the stage toolbar to
 let lastGltfBytes = null;
 const RFN_PNG = { obj: "render_obj_png", stl: "render_stl_png", ply: "render_ply_png" };
 const RFN_SVG = { obj: "render_obj", stl: "render_stl", ply: "render_ply" };
+// Paint a raster render response to the canvas. `resp` is either the worker's
+// ImageBitmap payload { bitmap, w, h, svg } (decoded off the main thread) or a
+// raw-bytes payload { result } ([0x00|0x02][w][h][rgba8][svg?]). `token` guards
+// the async SVG-overlay draw against a newer render superseding this one.
+function paintRaster(resp, token) {
+  let w, h, svgBytes = null;
+  const ctx = elOutc.getContext("2d");
+  if (resp.bitmap) {
+    w = resp.w; h = resp.h;
+    elOutc.width = w; elOutc.height = h; sizeCanvasDisplay();
+    ctx.drawImage(resp.bitmap, 0, 0);
+    if (resp.bitmap.close) resp.bitmap.close();
+    svgBytes = resp.svg;
+  } else {
+    const out = resp.result;
+    w = out[1] | out[2] << 8 | out[3] << 16 | out[4] << 24;
+    h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
+    const n = w * h * 4;
+    const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, n);
+    elOutc.width = w; elOutc.height = h; sizeCanvasDisplay();
+    ctx.putImageData(new ImageData(px, w, h), 0, 0);
+    if (out[0] === 0x02) svgBytes = out.subarray(9 + n);
+  }
+  elOutc.style.display = ""; elOut.style.display = "none";
+  lastRender = { kind: "raw" };
+  if (svgBytes && svgBytes.length) {
+    // Layer the transparent SVG overlay (labels, grid, annotations) on top.
+    const url = URL.createObjectURL(new Blob([svgBytes], { type: "image/svg+xml" }));
+    const svgImg = new Image();
+    svgImg.onload = () => { if (token === renderToken) ctx.drawImage(svgImg, 0, 0, w, h); URL.revokeObjectURL(url); };
+    svgImg.src = url;
+  }
+}
 async function render() {
   if (!maquettePlugin.ready || !model.bytes) return;
   // glTF assets take a separate code path — different plugin (lazily loaded),
@@ -1337,18 +1400,6 @@ async function render() {
   if (model._gltf) {
     try {
       await gltfPlugin.ensure();
-      // Paint a decoded RGBA blob straight to the canvas.
-      const paint = (out) => {
-        if (out[0] !== 0x00) throw new Error("unexpected glTF plugin output header");
-        const w = out[1] | out[2] << 8 | out[3] << 16 | out[4] << 24;
-        const h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
-        const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, w * h * 4);
-        elOutc.width = w; elOutc.height = h;
-        sizeCanvasDisplay();
-        elOutc.getContext("2d").putImageData(new ImageData(px, w, h), 0, 0);
-        elOutc.style.display = ""; elOut.style.display = "none";
-        lastRender = { kind: "raw" };
-      };
       // "Progressive" glTF: on a cold render (new model, or a model whose
       // textures the plugin's cache hasn't seen yet) do a fast preview
       // pass with `no_textures: true` and no SSAA. That skips ~4 s of
@@ -1365,18 +1416,18 @@ async function render() {
       if (cold) {
         try {
           const preview = { ...cfg, no_textures: true, antialias: 1, fxaa: false, ssao: undefined };
-          const previewOut = await gltfPlugin.callWithModel("render_gltf", ENC.encode(JSON.stringify(preview)));
+          const previewOut = await gltfPlugin.renderWithModel("render_gltf", ENC.encode(JSON.stringify(preview)));
           if (token !== renderToken) return;   // superseded by a newer render while awaiting the worker
-          paint(previewOut);
+          paintRaster(previewOut, token);
           // Yield to the browser so the preview actually paints before we
           // start the (multi-second) full render.
           await new Promise(r => requestAnimationFrame(r));
           if (token !== renderToken) return;
         } catch (e) { /* preview failure isn't fatal — try full pass anyway */ }
       }
-      const fullOut = await gltfPlugin.callWithModel("render_gltf", ENC.encode(JSON.stringify(cfg)));
+      const fullOut = await gltfPlugin.renderWithModel("render_gltf", ENC.encode(JSON.stringify(cfg)));
       if (token !== renderToken) return;
-      paint(fullOut);
+      paintRaster(fullOut, token);
       const ms = performance.now() - t0;
       if (!lastRenderReduced) lastFullMs = ms;
       elRtime.textContent = `rendered in ${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
@@ -1390,34 +1441,18 @@ async function render() {
   try {
     const token = ++renderToken;
     const t0 = performance.now();
-    const out = await maquettePlugin.callWithModel(fn, ENC.encode(JSON.stringify(renderConfig())));
+    const resp = await maquettePlugin.renderWithModel(fn, ENC.encode(JSON.stringify(renderConfig())));
     if (token !== renderToken) return;   // superseded while awaiting the worker
     const ms = performance.now() - t0;
     if (!lastRenderReduced) lastFullMs = ms;
     // Raster output is raw RGBA ([0x00][w][h][rgba8…]); grid / turntable / debug /
-    // annotations add a transparent vector overlay ([0x02][w][h][rgba8 w*h*4][svg…]).
-    // Vector mode returns SVG (0x3C).
-    if (out[0] === 0x00 || out[0] === 0x02) {
-      // Blit the pixels straight to the canvas — no PNG encode (plugin) or decode.
-      const w = out[1] | out[2] << 8 | out[3] << 16 | out[4] << 24;
-      const h = out[5] | out[6] << 8 | out[7] << 16 | out[8] << 24;
-      const n = w * h * 4;
-      const px = new Uint8ClampedArray(out.buffer, out.byteOffset + 9, n);
-      elOutc.width = w; elOutc.height = h;
-      sizeCanvasDisplay();
-      const ctx = elOutc.getContext("2d");
-      ctx.putImageData(new ImageData(px, w, h), 0, 0);
-      elOutc.style.display = ""; elOut.style.display = "none";
-      lastRender = { kind: "raw" };
-      if (out[0] === 0x02) {
-        // Layer the transparent SVG overlay onto the same canvas (labels, grid
-        // lines, annotations, debug text). Async; guarded against a newer render.
-        const url = URL.createObjectURL(new Blob([out.subarray(9 + n)], { type: "image/svg+xml" }));
-        const svgImg = new Image();
-        svgImg.onload = () => { if (token === renderToken) ctx.drawImage(svgImg, 0, 0, w, h); URL.revokeObjectURL(url); };
-        svgImg.src = url;
-      }
+    // annotations add a transparent vector overlay ([0x02][…][svg…]) — both come
+    // back as a bitmap or bytes and go through paintRaster. Vector mode returns
+    // SVG (0x3C), always as bytes.
+    if (resp.bitmap || resp.result[0] === 0x00 || resp.result[0] === 0x02) {
+      paintRaster(resp, token);
     } else {
+      const out = resp.result;
       const url = URL.createObjectURL(new Blob([out], { type: "image/svg+xml" }));
       elOut.src = url; elOut.style.display = ""; elOutc.style.display = "none";
       if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = url;
@@ -2485,10 +2520,17 @@ document.addEventListener("keydown", (e) => {
   const t = e.target;
   const editable = t && (t.matches?.("input, textarea, select, [contenteditable]"));
   const mod = e.metaKey || e.ctrlKey;
+  const help = $("help");
+  // Esc closes the help overlay first (before falling through to Reset).
+  if (e.key === "Escape" && help && !help.hidden) { e.preventDefault(); toggleHelp(false); return; }
   if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
     e.preventDefault(); $("btn-share").click();
   } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
     e.preventDefault(); $("btn-download").click();
+  } else if (e.key === "?" && !editable) {
+    e.preventDefault(); toggleHelp();
+  } else if (!mod && !editable && e.key.toLowerCase() === "f" && fsSupported) {
+    e.preventDefault(); toggleFullscreen();
   } else if (e.key === "Escape" && !editable) {
     // Escape resets, but only when focus isn't in an input — otherwise
     // it'd cancel typed edits and users would lose context.
@@ -2506,6 +2548,47 @@ document.querySelectorAll("#fmt button").forEach((b) => {
     onChange();
   };
 });
+
+// ── fullscreen ─────────────────────────────────────────────────────────────
+// iOS Safari only supports fullscreen on <video>, so document.fullscreenEnabled
+// is false there — hide the button rather than show a dead control.
+const fsSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+function toggleFullscreen() {
+  if (!fsSupported) return;
+  const stage = $("stage");
+  const inFs = document.fullscreenElement || document.webkitFullscreenElement;
+  if (inFs) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  else (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage);
+}
+if (fsSupported) {
+  $("btn-fullscreen").hidden = false;
+  $("btn-fullscreen").onclick = toggleFullscreen;
+  const onFs = () => {
+    const inFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    $("btn-fullscreen").textContent = inFs ? "Exit" : "Fullscreen";
+    // The stage resized — the ResizeObserver below re-renders at the new size.
+  };
+  document.addEventListener("fullscreenchange", onFs);
+  document.addEventListener("webkitfullscreenchange", onFs);
+}
+
+// ── keyboard-shortcuts help overlay ────────────────────────────────────────
+function toggleHelp(force) {
+  const help = $("help");
+  if (!help) return;
+  help.hidden = force === undefined ? !help.hidden : !force;
+}
+$("help-x").onclick = () => toggleHelp(false);
+$("help").addEventListener("click", (e) => { if (e.target === $("help")) toggleHelp(false); });
+
+// ── re-render when the stage resizes (window resize, orientation, fullscreen) ─
+// renderConfig() recomputes the fit-to-view size each render, so a re-render is
+// all that's needed. Debounced; only fires once a model is loaded.
+let resizeT = null;
+new ResizeObserver(() => {
+  clearTimeout(resizeT);
+  resizeT = setTimeout(() => { if (maquettePlugin.ready && model && model.bytes) safeRender(); }, 160);
+}).observe($("stage"));
 
 ["dragenter","dragover"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); $("stage").classList.add("drag"); }));
 ["dragleave","drop"].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); if (ev==="dragleave" && e.relatedTarget) return; $("stage").classList.remove("drag"); }));

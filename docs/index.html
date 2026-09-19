@@ -57,7 +57,6 @@
     header { gap: 0.5rem; padding: 0.55rem 0.7rem; }
     header .brand img { width: 2rem; height: 2rem; }
     header h1 { font-size: 1rem; }
-    header .badge { display: none; }
   }
 
   main { flex: 1; display: flex; min-height: 0; }
@@ -293,6 +292,27 @@
      clear traced path through every interactive element. */
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
   button:focus-visible, .icon:focus-visible, .tab:focus-visible, .seg button:focus-visible { border-radius: 8px; }
+
+  /* Fullscreen stage — fill the screen, drop the tools-clearing side padding.
+     Split selectors: a combined list is dropped whole by a browser that doesn't
+     know one of the pseudo-classes. */
+  #stage:fullscreen { padding: 1.2rem; background: var(--bg); }
+  #stage:-webkit-full-screen { padding: 1.2rem; background: var(--bg); }
+
+  /* Keyboard-shortcuts overlay (toggled with "?"). */
+  #help[hidden] { display: none; }
+  #help { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--ink) 45%, transparent); padding: 1rem; }
+  #help .help-card { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: var(--shadow); padding: 14px 16px; max-width: 380px; width: 100%; }
+  #help .help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  #help .help-head b { font-size: 0.95rem; }
+  #help #help-x { border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer;
+    border-radius: 7px; padding: 2px 8px; font-size: 13px; line-height: 1; }
+  #help #help-x:hover { color: var(--accent); border-color: var(--accent); }
+  #help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 0.82rem; }
+  #help dt { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #help dd { margin: 0; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -377,6 +397,7 @@
         <button id="btn-reset" title="Reset all settings to defaults">Reset</button>
         <button id="btn-download" title="Download the current render">Download</button>
         <button id="btn-share" title="Copy a shareable link with this configuration">Share</button>
+        <button id="btn-fullscreen" title="Toggle fullscreen (F)" hidden>Fullscreen</button>
         <a id="btn-docs" target="_blank" rel="noopener" title="Open the plugin's documentation">Documentation</a>
         <a id="get-models" href="#" target="_blank" rel="noopener" title="Browse external asset libraries"></a>
       </div>
@@ -388,11 +409,29 @@
       <div id="busy" aria-hidden="true"><span class="spinner"></span><span id="busy-cap">rendering…</span></div>
       <div id="rtime" aria-live="polite" aria-atomic="true"></div>
       <div id="err" role="alert" aria-live="assertive" aria-atomic="true"></div>
-      <div id="hint">drag to orbit · scroll to zoom · drop a model file to load<span id="formats"></span></div>
+      <div id="hint">drag to orbit · scroll to zoom · drop a model file · press ? for shortcuts<span id="formats"></span></div>
     </section>
   </main>
 
   <div id="tip" role="tooltip"></div>
-  <script src="app.js?v=54"></script>
+
+  <div id="help" hidden role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    <div class="help-card">
+      <div class="help-head"><b>Keyboard &amp; mouse</b><button id="help-x" aria-label="Close">✕</button></div>
+      <dl>
+        <dt>Drag</dt><dd>Orbit the model</dd>
+        <dt>Scroll · pinch</dt><dd>Zoom</dd>
+        <dt>Arrow keys</dt><dd>Orbit (Shift = coarse)</dd>
+        <dt>+ − · PgUp PgDn</dt><dd>Zoom</dd>
+        <dt>F</dt><dd>Toggle fullscreen</dd>
+        <dt>⌘/Ctrl + S</dt><dd>Copy share link</dd>
+        <dt>⌘/Ctrl + ⇧ D</dt><dd>Download render</dd>
+        <dt>Esc</dt><dd>Reset (or close this)</dd>
+        <dt>?</dt><dd>Toggle this help</dd>
+      </dl>
+    </div>
+  </div>
+
+  <script src="app.js?v=55"></script>
 </body>
 </html>

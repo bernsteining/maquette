@@ -162,8 +162,28 @@ async function loadModule(url) {
 const ok  = (id, extra)   => self.postMessage({ id, ok: true, ...extra });
 const err = (id, error)   => self.postMessage({ id, ok: false, error });
 
+// Raster render output is [0x00|0x02][w u32 LE][h u32 LE][rgba8 w*h*4][svg?].
+// When the caller asks (raster:true), decode the pixels into an ImageBitmap
+// here in the worker and transfer it — moving the putImageData cost off the
+// main thread and letting it paint with a GPU drawImage blit. Falls back to
+// returning the raw bytes if createImageBitmap is missing or the header isn't
+// raster (SVG output), so the main thread's byte path always still works.
+async function toBitmapMessage(id, result) {
+  if (!self.createImageBitmap || result.length < 9 || (result[0] !== 0x00 && result[0] !== 0x02)) return null;
+  const w = result[1] | result[2] << 8 | result[3] << 16 | result[4] << 24;
+  const h = result[5] | result[6] << 8 | result[7] << 16 | result[8] << 24;
+  const n = w * h * 4;
+  if (!w || !h || result.length < 9 + n) return null;
+  const px = new Uint8ClampedArray(result.buffer, result.byteOffset + 9, n);
+  const bitmap = await createImageBitmap(new ImageData(px, w, h));
+  const transfer = [bitmap];
+  let svg = null;
+  if (result[0] === 0x02) { svg = result.slice(9 + n); transfer.push(svg.buffer); }
+  return { msg: { id, ok: true, bitmap, w, h, svg }, transfer };
+}
+
 self.onmessage = async (e) => {
-  const { id, kind, plugin, fn, args, key } = e.data;
+  const { id, kind, plugin, fn, args, key, raster } = e.data;
   const p = plugins[plugin];
   if (!p) return err(id, `unknown plugin: ${plugin}`);
   try {
@@ -176,6 +196,12 @@ self.onmessage = async (e) => {
       case "callWithModel": {
         await p.ensure();
         const result = kind === "callWithModel" ? p.callWithModel(fn, args) : p.call(fn, args);
+        if (raster) {
+          try {
+            const b = await toBitmapMessage(id, result);
+            if (b) return self.postMessage(b.msg, b.transfer);
+          } catch { /* fall through to the raw-bytes path */ }
+        }
         // Transfer the result's underlying buffer — main thread only reads it,
         // and we don't retain a reference here. Saves a copy for big renders
         // (helmet's ~500 KB RGBA blob at 512×512).
