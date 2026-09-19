@@ -19,6 +19,17 @@
 | **[maquette-gltf](crates/maquette-gltf/README.md)** | [glTF](https://www.khronos.org/gltf/) 2.0 (`.glb` / `.gltf`) |
 | **[maquette-scad](crates/maquette-scad/README.md)** | [.scad](https://openscad.org/) |
 
+## Beyond Typst
+
+The same renderer also ships as a native binary and as language bindings — headless, deterministic, no GL/GPU. See each README:
+
+| Target | What | Get it |
+|---|---|---|
+| **[CLI](crates/maquette-cli/README.md)** | native `maquette` binary → PNG/SVG | `cargo install --path crates/maquette-cli` |
+| **[Python](crates/maquette-py/README.md)** | pyo3 module (dict config → PNG/SVG bytes) | `pip install maquette` |
+| **[JavaScript](packages/maquette-js/README.md)** | the wasm, in Node + the browser | `npm install maquette-render` |
+| **[C ABI](crates/maquette-c/README.md)** | `libmaquette` + header — bind from C/C++/Ruby/Julia/Go/… | build from source |
+
 # Usage
 
 <table>
