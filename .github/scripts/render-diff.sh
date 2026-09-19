@@ -13,15 +13,24 @@ BIN="${MAQUETTE_BIN:-target/release/maquette}"
 MAX_FILES="${MAX_FILES:-12}"
 JOBS="${JOBS:-4}"
 
-# Render settings are user-configurable: commit a render-config dict (the same
-# keys the plugins accept — see render-config.schema.json) to this path and it
-# is passed to every render via --config. MAQUETTE_ARGS (extra `--set k=v`)
-# always wins on top. With neither, a sensible default framing is used.
+# Render settings are user-configurable via a repo config file (the same keys
+# the plugins accept — see render-config.schema.json). Two shapes:
+#   * flat:       a plain render-config dict, applied to every model.
+#   * per-model:  { "default": {...}, "overrides": [ {"match":"*.glb","config":{...}}, ... ] }
+#                 each model gets `default` deep-merged with the first override
+#                 whose glob matches its path (first match wins).
+# MAQUETTE_ARGS (extra `--set k=v`) always wins on top; with no config file a
+# sensible default framing is used.
 CFG="${RENDER_DIFF_CONFIG:-.github/render-diff.json}"
-if [ -f "$CFG" ]; then
+DEFAULT_ARGS="--set width=460 --set height=360 --set azimuth=28 --set elevation=22"
+STRUCTURED=0
+if [ -f "$CFG" ] && jq -e 'has("overrides") or has("default")' "$CFG" >/dev/null 2>&1; then
+  STRUCTURED=1
+  ARGS_STR="$DEFAULT_ARGS ${MAQUETTE_ARGS:-}"
+elif [ -f "$CFG" ]; then
   ARGS_STR="--config $CFG ${MAQUETTE_ARGS:-}"
 else
-  ARGS_STR="--set width=460 --set height=360 --set azimuth=28 --set elevation=22 ${MAQUETTE_ARGS:-}"
+  ARGS_STR="$DEFAULT_ARGS ${MAQUETTE_ARGS:-}"
 fi
 
 mkdir -p "$OUT"
@@ -49,13 +58,37 @@ fi
 
 safe_name() { echo "$1" | tr '/. ' '___'; }
 
+# Per-model config: merge `default` with the first matching override into a
+# per-file JSON that render_one picks up via --config.
+if [ "$STRUCTURED" = 1 ]; then
+  base_def="$(jq -c '.default // {}' "$CFG")"
+  n_ov="$(jq '(.overrides // []) | length' "$CFG")"
+  for f in "${files[@]}"; do
+    cfg="$base_def"
+    for ((i = 0; i < n_ov; i++)); do
+      pat="$(jq -r ".overrides[$i].match" "$CFG")"
+      if [[ "$f" == $pat ]]; then
+        ov="$(jq -c ".overrides[$i].config // {}" "$CFG")"
+        cfg="$(jq -cn --argjson a "$cfg" --argjson b "$ov" '$a * $b')"
+        break
+      fi
+    done
+    printf '%s\n' "$cfg" > "$OUT/$(safe_name "$f").cfg.json"
+  done
+fi
+
 render_one() {
-  local f="$1" ext safe before after src
+  local f="$1" ext safe before after src pfc
   ext="${f##*.}"
   safe="$(echo "$f" | tr '/. ' '___')"
   before="$OUT/$safe.before.png"
   after="$OUT/$safe.after.png"
-  read -ra A <<< "$ARGS_STR"
+  pfc="$OUT/$safe.cfg.json"
+  if [ -f "$pfc" ]; then
+    read -ra A <<< "--config $pfc ${MAQUETTE_ARGS:-}"
+  else
+    read -ra A <<< "$ARGS_STR"
+  fi
   "$BIN" "$f" -o "$after" "${A[@]}" >/dev/null 2>&1 || true
   if git cat-file -e "$BASE_REF:$f" 2>/dev/null; then
     src="$OUT/$safe.beforesrc.$ext"
@@ -64,7 +97,7 @@ render_one() {
   fi
 }
 export -f render_one
-export BIN OUT BASE_REF ARGS_STR
+export BIN OUT BASE_REF ARGS_STR MAQUETTE_ARGS
 
 printf '%s\n' "${files[@]}" | xargs -r -P "$JOBS" -I{} bash -c 'render_one "$@"' _ {}
 
