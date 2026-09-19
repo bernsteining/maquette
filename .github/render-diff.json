@@ -1,0 +1,6 @@
+{
+  "default": { "width": 480, "height": 360, "azimuth": 30, "elevation": 22, "background": "#0f1622" },
+  "overrides": [
+    { "match": "*nut*", "config": { "azimuth": 60, "background": "#1a1410" } }
+  ]
+}
