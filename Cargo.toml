@@ -41,6 +41,13 @@ overflow-checks = false
 inherits = "release"
 lto = "thin"
 
+# Fast CI profile: no LTO, parallel codegen. For tools (render-diff) that just
+# need to run, not ship — much quicker to build than the fat-LTO release.
+[profile.ci]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 # clippy runs with -D warnings (see `make lint`). The lints below are the
 # renderer's deliberate style — many-argument shader/setup fns, index loops in
 # hot paths, compact doc formatting — allowed so the gate catches real defects

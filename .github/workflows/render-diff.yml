@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       - name: System deps (cmake for Manifold's C++)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
@@ -40,12 +40,13 @@ jobs:
           shared-key: render-diff
           cache-on-failure: true
 
-      - name: Build the maquette CLI
-        run: cargo build --release -p maquette-cli
+      - name: Build the maquette CLI (no LTO — CI profile)
+        run: cargo build --profile ci -p maquette-cli
 
       - name: Render before/after for the changed models
         env:
-          MAQUETTE_BIN: target/release/maquette
+          MAQUETTE_BIN: target/ci/maquette
+          JOBS: "4"
         run: .github/scripts/render-diff.sh "${{ github.event.pull_request.base.sha }}" render-diff-out
 
       - name: Publish images to the render-diff-assets branch
