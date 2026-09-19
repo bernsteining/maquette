@@ -47,7 +47,9 @@ jobs:
         env:
           MAQUETTE_BIN: target/ci/maquette
           JOBS: "4"
-        run: .github/scripts/render-diff.sh "${{ github.event.pull_request.base.sha }}" render-diff-out
+        # HEAD is the PR merge commit; HEAD^1 is its base parent — reachable at
+        # fetch-depth 2, unlike a possibly-stale base.sha.
+        run: .github/scripts/render-diff.sh "HEAD^1" render-diff-out
 
       - name: Publish images to the render-diff-assets branch
         id: host
