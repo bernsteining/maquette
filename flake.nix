@@ -12,63 +12,70 @@
         pkgs = import nixpkgs { inherit system; };
         lib = pkgs.lib;
 
-        # ── The `maquette` CLI, from the prebuilt dist release ────────────────
-        # Building from source under Nix is impractical: the Manifold CSG kernel
-        # is git-cloned by a build script at build time, which the Nix sandbox
-        # (no network) forbids. So we wrap the release binary and patch it for
-        # NixOS instead. Bump `version` to the released tag, then run
-        # `nix build .#maquette` — Nix prints the real hash to paste in below.
-        version = "0.1.4";
-        asset = {
-          "x86_64-linux" = "maquette-cli-x86_64-unknown-linux-gnu.tar.xz";
-          "x86_64-darwin" = "maquette-cli-x86_64-apple-darwin.tar.xz";
-          "aarch64-darwin" = "maquette-cli-aarch64-apple-darwin.tar.xz";
-        }.${system} or null;
-        hash = {
-          "x86_64-linux" = lib.fakeHash;
-          "x86_64-darwin" = lib.fakeHash;
-          "aarch64-darwin" = lib.fakeHash;
-        }.${system} or lib.fakeHash;
+        # Manifold's CSG kernel and its Clipper2 dependency are normally cloned by
+        # a build script at build time — forbidden in the Nix sandbox (no network).
+        # Pre-fetch both as fixed-output derivations and hand them to the build via
+        # MANIFOLD_SRC / CLIPPER2_SRC (see crates/vendored/manifold-csg-sys), which
+        # skips the clones and forces a fully-disconnected cmake build.
+        #
+        # First build prints the real hashes to replace the lib.fakeHash placeholders
+        # (this one, the two below, and the four git deps in cargoLock.outputHashes).
+        manifoldSrc = pkgs.fetchFromGitHub {
+          owner = "elalish";
+          repo = "manifold";
+          rev = "v3.5.2";
+          hash = lib.fakeHash;
+        };
+        clipper2Src = pkgs.fetchFromGitHub {
+          owner = "AngusJohnson";
+          repo = "Clipper2";
+          rev = "46f639177fe418f9689e8ddb74f08a870c71f5b4";
+          hash = lib.fakeHash;
+        };
 
-        maquette = pkgs.stdenv.mkDerivation {
+        maquette = pkgs.rustPlatform.buildRustPackage {
           pname = "maquette";
-          inherit version;
-          src = pkgs.fetchurl {
-            url = "https://github.com/bernsteining/maquette/releases/download/v${version}/${asset}";
-            inherit hash;
+          version = "0.1.0";
+          src = ./.;
+
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            outputHashes = {
+              "gltf-1.4.1" = lib.fakeHash;
+              "gltf-derive-1.4.1" = lib.fakeHash;
+              "gltf-json-1.4.1" = lib.fakeHash;
+              "wasm-minimal-protocol-0.2.1" = lib.fakeHash;
+            };
           };
-          sourceRoot = ".";
-          nativeBuildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
-          buildInputs = lib.optionals pkgs.stdenv.isLinux [ pkgs.stdenv.cc.cc.lib ];
-          installPhase = ''
-            runHook preInstall
-            install -Dm755 "$(find . -type f -name maquette | head -1)" "$out/bin/maquette"
-            runHook postInstall
-          '';
+
+          # Only the native CLI; skip the workspace tests (they read example assets).
+          cargoBuildFlags = [ "--package" "maquette-cli" ];
+          doCheck = false;
+
+          nativeBuildInputs = [ pkgs.cmake pkgs.pkg-config ];
+
+          # Hermetic Manifold build (no network) — see the note above.
+          MANIFOLD_SRC = manifoldSrc;
+          CLIPPER2_SRC = clipper2Src;
+
           meta = {
             description = "Headless CPU 3D renderer (STL/OBJ/PLY, glTF PBR, OpenSCAD) → PNG/SVG";
             homepage = "https://github.com/bernsteining/maquette";
             license = lib.licenses.mit;
             mainProgram = "maquette";
-            platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-darwin" ];
           };
         };
       in
       {
-        packages = lib.optionalAttrs (asset != null) {
-          default = maquette;
-          maquette = maquette;
+        packages.default = maquette;
+        packages.maquette = maquette;
+
+        apps.default = {
+          type = "app";
+          program = "${maquette}/bin/maquette";
         };
 
-        apps = lib.optionalAttrs (asset != null) {
-          default = {
-            type = "app";
-            program = "${maquette}/bin/maquette";
-          };
-        };
-
-        # `nix develop` — a shell to build maquette (CLI + wasm) from source.
-        # Unlike `nix build`, this shell has network, so the Manifold clone works.
+        # `nix develop` — a shell to hack on maquette (CLI + wasm) from source.
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
             rustc
@@ -83,7 +90,7 @@
             git
           ];
           shellHook = ''
-            echo "maquette dev shell — try:  cargo build --release -p maquette-cli"
+            echo "maquette dev shell — cargo build --release -p maquette-cli"
           '';
         };
       });

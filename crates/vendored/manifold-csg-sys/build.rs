@@ -349,9 +349,19 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let patches_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("patches");
-    let manifold_src = out_dir.join("manifold-src");
     let build_dir = out_dir.join("build");
-    fetch::fetch(&out_dir, &manifold_src, &build_dir, &patches_dir);
+    println!("cargo:rerun-if-env-changed=MANIFOLD_SRC");
+    // Offline / sandboxed builds (e.g. Nix): point MANIFOLD_SRC at a pre-fetched
+    // manifold source tree (at MANIFOLD_VERSION) to skip the build-time git clone.
+    // Pair with CLIPPER2_SRC (see build/build.rs) for a fully network-free build.
+    let manifold_src = match env::var("MANIFOLD_SRC") {
+        Ok(src) => PathBuf::from(src),
+        Err(_) => {
+            let ms = out_dir.join("manifold-src");
+            fetch::fetch(&out_dir, &ms, &build_dir, &patches_dir);
+            ms
+        }
+    };
     build::build(
         is_emscripten,
         &manifold_src,

@@ -72,6 +72,15 @@ pub fn build(
         cmake_args.push("-DCMAKE_CXX_FLAGS=-fwasm-exceptions".to_string());
     }
 
+    // Offline: use a pre-fetched Clipper2 (the only host-build FetchContent dep
+    // when parallel/tests are off) and forbid any further network fetch — makes
+    // the build hermetic for Nix / air-gapped CI.
+    println!("cargo:rerun-if-env-changed=CLIPPER2_SRC");
+    if let Ok(clipper2) = env::var("CLIPPER2_SRC") {
+        cmake_args.push(format!("-DFETCHCONTENT_SOURCE_DIR_CLIPPER2={clipper2}"));
+        cmake_args.push("-DFETCHCONTENT_FULLY_DISCONNECTED=ON".to_string());
+    }
+
     // Route C/C++ compiles through sccache when available so rebuilds after
     // `cargo clean` reuse object files rather than recompiling manifold from
     // scratch. No-op when sccache isn't installed.

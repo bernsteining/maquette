@@ -44,12 +44,12 @@ The repo can also **dogfood** it by pointing `.github/workflows/render-diff.yml`
 
 ## Nix
 
-`flake.nix` provides:
+`flake.nix` builds the CLI **from source, hermetically** (the real Nix way — not a prebuilt blob):
 
-- `nix develop` — a dev shell (rust, cmake, clang, binaryen, …) that builds the CLI and wasm from source. It has network, so Manifold's build-time clone works (unlike `nix build`'s sandbox).
-- `nix run github:bernsteining/maquette` — runs the CLI, wrapping the **prebuilt dist release binary** (patched for NixOS). Building from source under Nix is impractical (the Manifold CSG kernel is git-cloned at build time, which the sandbox forbids). After the first `v*` release: bump `version` in `flake.nix`, run `nix build .#maquette` once, and paste the hash Nix prints in place of the `lib.fakeHash` placeholders.
+- `nix run github:bernsteining/maquette` / `nix build` — `rustPlatform.buildRustPackage`. Cargo deps are vendored from `Cargo.lock`; the Manifold CSG kernel and its Clipper2 dependency (normally git-cloned by a build script — forbidden in the sandbox) are pre-fetched as fixed-output derivations and injected via `MANIFOLD_SRC` / `CLIPPER2_SRC`, which the vendored `manifold-csg-sys` build script honours to run a fully network-free cmake build.
+- `nix develop` — a dev shell (rust, cmake, clang, binaryen, git) to hack on the CLI + wasm.
 
-Linux/macOS (x64 + arm) only — the systems dist ships a binary for.
+First build: replace the `lib.fakeHash` placeholders — the two source FODs and the four git deps in `cargoLock.outputHashes` — with the hashes Nix prints. The offline `MANIFOLD_SRC`/`CLIPPER2_SRC` support is validated natively; the Nix derivation itself is unverified until someone runs it (no `nix` in the dev environment here). Builds on any Linux/macOS system (it compiles from source).
 
 ## Linux packages (deb / rpm / apk / pacman)
 
