@@ -200,7 +200,7 @@ pub fn parse_i64_bytes(b: &[u8]) -> Option<i64> {
 // SIMD f32 view matrix — pre-splatted coefficients for batch vertex transforms
 // ---------------------------------------------------------------------------
 
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 
 /// View matrix with pre-splatted f32x4 coefficients.
 /// Transforms 3 triangle vertices in one call using 9 SIMD multiply-adds

@@ -1,6 +1,6 @@
 use crate::math::Vec3;
 use crate::parser::Triangle;
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 
 /// Grid vertex-clustering decimation (sort-based, SIMD-accelerated).
 ///

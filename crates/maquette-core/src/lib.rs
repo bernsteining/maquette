@@ -29,7 +29,7 @@ pub mod light;
 pub mod math;
 pub mod rasterizer;
 pub mod rgbe;
-pub mod shadow;
+pub mod shadow; #[cfg(not(target_arch = "wasm32"))] pub mod simd;
 pub mod ssao;
 pub mod texture;
 pub mod texture_decode;

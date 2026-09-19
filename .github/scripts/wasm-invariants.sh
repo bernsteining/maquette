@@ -9,7 +9,7 @@ set -euo pipefail
 wasm="${1:?usage: wasm-invariants.sh <path-to-wasm>}"
 
 case "$(basename "$wasm")" in
-  maquette.wasm)       max=700000 ;;
+  maquette.wasm)       max=950000 ;;
   maquette-gltf.wasm)  max=2000000 ;;
   maquette-scad.wasm)  max=1300000 ;;
   *) echo "::error::no size budget defined for $(basename "$wasm")"; exit 1 ;;

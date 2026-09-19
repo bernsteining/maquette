@@ -162,7 +162,7 @@ fn sample_bilinear(mip: &MipLevel, u: f32, v: f32, wrap_s: Wrap, wrap_t: Wrap) -
     // scalar ops. SIMD collapses that to ~15 f32x4 ops. Hot for any textured
     // material — this is called ~5-10 times per pixel with a typical PBR
     // asset (base, MR, normal, emissive, occlusion, [transmission]) bound.
-    use std::arch::wasm32::*;
+    #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
     let p00 = load_texel_simd(mip, x0 as u32, y0 as u32);
     let p10 = load_texel_simd(mip, x1 as u32, y0 as u32);
     let p01 = load_texel_simd(mip, x0 as u32, y1 as u32);
@@ -181,14 +181,14 @@ fn sample_bilinear(mip: &MipLevel, u: f32, v: f32, wrap_s: Wrap, wrap_t: Wrap) -
         f32x4_extract_lane::<3>(out),
     ]
 }
-
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::v128; #[cfg(not(target_arch = "wasm32"))] use crate::simd::v128;
 /// Load one RGBA8 texel from `mip` at `(x, y)` and expand to `f32x4` in
 /// `[0, 1]`. Replaces scalar `pixel_norm` — the u32 unaligned load + SIMD
 /// unsigned-extend chain hits ~5 wasm ops vs the 8 (4 loads + 4 muls) of
 /// the scalar version. Bounds are trusted: callers pass wrap/clamped x/y.
 #[inline(always)]
-fn load_texel_simd(mip: &MipLevel, x: u32, y: u32) -> std::arch::wasm32::v128 {
-    use std::arch::wasm32::*;
+fn load_texel_simd(mip: &MipLevel, x: u32, y: u32) -> v128 {
+    #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
     let off = ((y * mip.width + x) * 4) as usize;
     unsafe {
         // Load the 4-byte RGBA texel as a u32 into the low lane of v128 (the

@@ -4,7 +4,7 @@
 /// SIMD batch early-exit (16 pixels) + all-integer scalar processing + LUT.
 /// Two-row ring buffer instead of full pixel buffer clone.
 
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
 
 const EDGE_MIN: u8 = 8;
 

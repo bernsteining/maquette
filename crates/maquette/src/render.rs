@@ -14,7 +14,7 @@ use crate::smooth;
 use crate::projection::*;
 use crate::shading::*;
 use crate::svg::*;
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------------------

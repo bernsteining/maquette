@@ -2,7 +2,7 @@
 // TODO: If Typst switches to a JIT WASM engine (e.g. Wasmtime), implement
 // tile-based rasterization (bin triangles into 16x16 tiles) for L1 cache locality.
 
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 
 const HIZ_SHIFT: usize = 4; // 16×16 tiles
 const HIZ_SIZE: usize = 1 << HIZ_SHIFT;

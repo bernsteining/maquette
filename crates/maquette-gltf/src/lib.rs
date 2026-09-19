@@ -10,7 +10,7 @@
 
 use wasm_minimal_protocol::*;
 
-initiate_protocol!();
+#[cfg(target_arch = "wasm32")] initiate_protocol!();
 
 mod cache;
 mod config;
@@ -177,4 +177,43 @@ fn max_animation_endpoint(loaded: &gltf_loader::LoadedGltf) -> f32 {
         }
     }
     max_t
+}
+
+// Off-wasm stand-ins for the protocol glue that `initiate_protocol!` provides on
+// wasm (gated out here), so the `#[wasm_func]` export wrappers still type-check.
+#[cfg(not(target_arch = "wasm32"))]
+unsafe fn __write_args_to_buffer(_ptr: *mut u8) {}
+#[cfg(not(target_arch = "wasm32"))]
+unsafe fn __send_result_to_host(_ptr: *const u8, _len: usize) {}
+#[cfg(not(target_arch = "wasm32"))]
+trait __ToResult {
+    type Ok: ::core::convert::AsRef<[u8]>;
+    type Err: ::core::fmt::Display;
+    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err>;
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl __ToResult for Vec<u8> {
+    type Ok = Self;
+    type Err = ::core::convert::Infallible;
+    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl __ToResult for Box<[u8]> {
+    type Ok = Self;
+    type Err = ::core::convert::Infallible;
+    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<'a> __ToResult for &'a [u8] {
+    type Ok = Self;
+    type Err = ::core::convert::Infallible;
+    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
+}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: ::core::convert::AsRef<[u8]>, E: ::core::fmt::Display> __ToResult
+    for ::core::result::Result<T, E>
+{
+    type Ok = T;
+    type Err = E;
+    fn to_result(self) -> Self { self }
 }

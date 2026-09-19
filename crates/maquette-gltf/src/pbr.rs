@@ -24,7 +24,7 @@ use maquette_core::math::Vec3;
 use maquette_core::rasterizer::{PixelShader, ShadeIn4, ShadeOut4};
 use crate::scene::Material;
 use maquette_core::texture::Texture;
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 
 /// Pre-splatted punctual light — ready for the SIMD shader loop. Position
 /// and direction are in world space. `attenuation_kind` picks the falloff
@@ -1483,7 +1483,7 @@ fn shadow_lane<const L: usize>(
     softness: usize,
     pcss_light_size: f64,
 ) -> f32
-where std::arch::wasm32::v128: Sized,
+where v128: Sized,
 {
     let pos = Vec3::new(
         f32x4_extract_lane::<L>(in_.pos_x) as f64,

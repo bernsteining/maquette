@@ -5,7 +5,7 @@
 use crate::config::{LightKind, RenderConfig};
 use crate::color::linear_to_srgb;
 use crate::math::Vec3;
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum ShadingMode { BlinnPhong, Gooch, Cel, Flat, Normal }

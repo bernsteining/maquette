@@ -6,7 +6,7 @@ license = "MIT"
 description = "Typst plugin that compiles glTF 2.0 assets into raster images at document build time. Sibling to maquette (STL/OBJ/PLY)."
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 # Explicit name so the produced artefact is `maquette_gltf.wasm` regardless of
 # the crate name's dash-to-underscore conversion.
 name = "maquette_gltf"

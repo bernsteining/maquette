@@ -2,7 +2,7 @@
 /// Pre-computes integer sample offsets per noise pattern for fast per-pixel sampling.
 /// Uses separable bilateral blur for noise reduction.
 
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
 
 /// Parameters for SSAO computation.
 #[derive(Clone)]

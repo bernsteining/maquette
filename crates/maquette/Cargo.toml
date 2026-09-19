@@ -6,7 +6,7 @@ description = "Typst plugin that rasterizes STL / OBJ / PLY models into raster o
 license = "MIT"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }

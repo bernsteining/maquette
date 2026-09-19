@@ -18,7 +18,7 @@
 
 use crate::math::Vec3;
 
-use std::arch::wasm32::*;
+#[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
 use std::cell::RefCell;
 
 // Reusable scratch buffers for SSAO. Sized on demand each render, but the
