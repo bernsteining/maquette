@@ -1,0 +1,28 @@
+[package]
+name = "maquette-py"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Python bindings for maquette — deterministic, headless, CPU 3D rendering (STL/OBJ/PLY, glTF PBR, OpenSCAD) to PNG/SVG. No GL/GPU."
+repository = "https://github.com/bernsteining/maquette"
+
+# Own workspace: a pyo3 extension needs panic=unwind (so a Rust panic becomes a
+# Python exception, not a process abort), unlike the root's panic=abort. Also
+# keeps it out of the wasm workspace's build/lint.
+[workspace]
+
+[lib]
+name = "_maquette"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module", "abi3-py38"] }
+maquette = { path = "../maquette" }
+maquette-gltf = { path = "../maquette-gltf" }
+maquette-scad = { path = "../maquette-scad" }
+png = "0.18"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true

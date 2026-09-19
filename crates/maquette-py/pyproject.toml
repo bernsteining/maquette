@@ -1,0 +1,28 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "maquette"
+version = "0.1.0"
+description = "Deterministic, headless, CPU 3D renderer (STL/OBJ/PLY, glTF PBR, OpenSCAD) to PNG/SVG — no GL/GPU."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "bernsteining" }]
+keywords = ["3d", "rendering", "stl", "obj", "ply", "gltf", "openscad", "headless", "pbr"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Graphics :: 3D Rendering",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
+]
+
+[project.urls]
+Repository = "https://github.com/bernsteining/maquette"
+
+[tool.maturin]
+python-source = "python"
+module-name = "maquette._maquette"
+features = ["pyo3/extension-module"]
