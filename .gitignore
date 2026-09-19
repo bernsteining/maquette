@@ -20,3 +20,7 @@ render-diff-out/
 
 # npm package: wasm staged from the build
 packages/maquette-js/wasm/
+
+# python build artifacts (maturin develop)
+__pycache__/
+crates/maquette-py/python/maquette/_maquette*.so
