@@ -679,12 +679,17 @@ function renderConfig() {
   // The paint step pins the canvas to this, so a reduced-resolution interactive
   // frame upscales to fill the stage (rather than shrinking).
   displayDims = fitBox(rw, rh);
-  lastRenderReduced = reduceNow();
+  const div = dragDivisor();
+  lastRenderReduced = div > 1;
   if (lastRenderReduced) {
+    let dw = rw / div, dh = rh / div;
+    // Keep the aspect: if the shorter axis dips below the floor, scale both up.
+    const lo = Math.min(dw, dh);
+    if (lo < DRAG_MIN) { const k = DRAG_MIN / lo; dw *= k; dh *= k; }
     return {
       ...cfg,
-      width: Math.max(DRAG_MIN, Math.round(rw * DRAG_SCALE)),
-      height: Math.max(DRAG_MIN, Math.round(rh * DRAG_SCALE)),
+      width: Math.round(dw),
+      height: Math.round(dh),
       antialias: model._gltf ? 1 : 0,   // "off": maquette=0, gltf=1
       fxaa: false,
     };
@@ -1288,14 +1293,18 @@ let settleTimer = null;
 let displayDims = null;   // { w, h } of the intended full output, set by renderConfig
 let lastFullMs = 0;       // duration of the last full-resolution render
 let lastRenderReduced = false;
-const DRAG_SCALE = 0.5;
-const DRAG_MIN = 96;
+const DRAG_MIN = 96;       // floor per axis (aspect-preserving) while dragging
+const DRAG_MAX_DIV = 16;   // most we ever shrink each axis by
 const SETTLE_MS = 200;
-const REDUCE_MS = 150;
-// Gate on the last FULL time, not the current frame, so a cheap reduced frame
-// doesn't flip us back to full mid-drag (which would oscillate).
-function reduceNow() {
-  return interacting && outputFormat !== "svg" && lastFullMs > REDUCE_MS;
+const REDUCE_MS = 150;     // no reduction under this; each doubling past it halves resolution again
+// How much to divide each axis by while the camera moves: 1 (none), 2, 4, 8, 16.
+// Keyed to the last FULL-frame time (not the current frame) so a cheap reduced
+// frame can't flip the tier mid-drag and oscillate — heavier models degrade
+// harder (÷150ms=2, ÷300ms=4, ÷600ms=8, ÷1200ms=16), lighter ones stay crisp.
+function dragDivisor() {
+  if (!interacting || outputFormat === "svg" || lastFullMs <= REDUCE_MS) return 1;
+  const steps = Math.floor(Math.log2(lastFullMs / REDUCE_MS)) + 1;
+  return Math.min(DRAG_MAX_DIV, 1 << steps);
 }
 function markInteracting() {
   interacting = true;
