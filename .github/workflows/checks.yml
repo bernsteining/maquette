@@ -16,6 +16,9 @@ on:
       - ".cargo/**"
       - "Makefile"
       - ".github/workflows/checks.yml"
+      - "docs/js/**"
+      - "docs/worker.js"
+      - "eslint.config.mjs"
   workflow_dispatch:
 
 concurrency:
@@ -44,3 +47,17 @@ jobs:
           shared-key: checks
       - name: make check (clippy -D warnings + tests)
         run: make check
+
+  # Webdemo JS module-graph lint — runs on the plain runner (has node), so it
+  # catches a symbol used-but-not-imported (the class the module split can
+  # introduce) on every PR and on master pushes touching docs/js.
+  webdemo-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: ESLint no-undef (docs/js + worker)
+        run: make lint-js

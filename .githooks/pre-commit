@@ -1,4 +1,13 @@
 #!/bin/sh
-# Runs the same gate as CI: clippy -D warnings (wasm + scad) + native tests.
+# Runs the same gates as CI: clippy -D warnings (wasm + scad) + native tests,
+# plus the webdemo JS module-graph lint (ESLint no-undef).
 # Bypass a single commit with: git commit --no-verify
-exec make check
+set -e
+make check
+# The JS lint needs node/npx. Skip gracefully when absent so offline commits
+# aren't blocked — CI (checks.yml + pages.yml) enforces it regardless.
+if command -v npx >/dev/null 2>&1; then
+  make lint-js
+else
+  echo "pre-commit: npx not found — skipping lint-js (CI enforces it)"
+fi

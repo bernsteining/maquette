@@ -174,6 +174,12 @@ lint:
 test:
 	cargo test -p maquette-scad
 
+# Webdemo JS: ESLint no-undef across the ES modules (docs/js) + the worker.
+# Guards against an identifier used but never imported — the class of bug a
+# module refactor introduces (see eslint.config.mjs). Needs node/npx.
+lint-js:
+	npx --yes eslint@9 docs/js docs/worker.js
+
 check: lint test
 
 # Native CLI: a real ELF/PE/Mach-O `maquette` binary (STL/OBJ/PLY, glTF, scad
@@ -189,4 +195,4 @@ install-hooks:
 	git config core.hooksPath .githooks
 	@echo "git hooks path set to .githooks — pre-commit active (skip with git commit --no-verify)"
 
-.PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint test check install-hooks cli cli-install
+.PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint lint-js test check install-hooks cli cli-install

@@ -146,6 +146,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Lint demo JS (module-graph no-undef)
+        run: make lint-js
+
       - name: Bundle + minify demo JS
         shell: bash
         run: |
