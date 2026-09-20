@@ -86,7 +86,7 @@ function toggleHelp(force) {
   help.hidden = force === undefined ? !help.hidden : !force;
 }
 $("help-x").onclick = () => toggleHelp(false);
-$("help-btn").onclick = () => toggleHelp(true);
+$("hint-help").onclick = () => toggleHelp(true);
 $("help").addEventListener("click", (e) => { if (e.target === $("help")) toggleHelp(false); });
 
 // ── re-render when the stage resizes (window resize, orientation, fullscreen) ─

@@ -179,7 +179,7 @@ function ensureSpherical() {
   };
 
   stage.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("#tools, #fs-toggle")) return;     // ignore toolbar + fullscreen-icon clicks
+    if (e.target.closest("#tools, #fs-toggle, #hint-help")) return;   // ignore chrome clicks
     if (e.pointerType === "mouse" && e.button !== 0) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { stage.setPointerCapture(e.pointerId); } catch {}
@@ -235,13 +235,14 @@ function ensureSpherical() {
     scheduleRender();
   }, { passive: false });
 
-  // Keyboard-only camera controls: arrow keys orbit ±5°, PageUp/Down zoom.
-  // Stage is now `tabindex="0"` (set in index.html) so keyboard users can
-  // focus it and drive the view without touching the form fields.
+  // Keyboard camera controls: arrows orbit, PageUp/Down & +/- zoom. Active
+  // anywhere except while typing in a form field (so they match the help and
+  // work without first clicking the stage). tabindex keeps it a focus stop.
   stage.tabIndex = 0;
-  stage.addEventListener("keydown", (e) => {
-    // Only when the stage itself has focus (not a nested control).
-    if (document.activeElement !== stage) return;
+  document.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const el = e.target;
+    if (el && el.matches?.("input, textarea, select, [contenteditable]")) return;
     const step = e.shiftKey ? 30 : 10;    // shift = coarse
     let handled = true;
     if (e.key === "ArrowLeft")  orbitBy(-step, 0, "mouse");
