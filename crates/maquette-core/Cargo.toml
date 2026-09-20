@@ -20,7 +20,7 @@ image-webp = "0.2"
 # Native-only SIMD backing for the `simd` shim (never pulled into wasm, which
 # keeps `std::arch::wasm32`).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wide = "0.7"
+wide = "1.7"
 bytemuck = "1"
 
 [lints]
