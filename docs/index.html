@@ -69,7 +69,7 @@
 
   #panel {
     /* Shrinks earlier on tablets so the render side keeps a usable canvas. */
-    width: clamp(300px, 32vw, 500px); flex: none; border-right: 1px solid var(--line);
+    width: clamp(320px, 34vw, 560px); flex: none; border-right: 1px solid var(--line);
     overflow-y: auto; background: var(--panel); scrollbar-width: thin;
   }
   @media (max-width: 840px) { #panel { width: auto; border-right: none; border-bottom: 1px solid var(--line); max-height: 50vh; } }
@@ -80,6 +80,26 @@
     #panel { width: clamp(240px, 38vw, 360px); max-height: none;
              border-right: 1px solid var(--line); border-bottom: none; }
   }
+
+  /* Scrollbars: slim, muted thumb that matches the panel chrome (the native
+     ones read as heavy/foreign against this UI). Firefox via scrollbar-*,
+     WebKit via the pseudo-elements; the transparent border insets the thumb. */
+  #panel, .editor-body, #scad-hl, #scad-src {
+    scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
+  }
+  #panel::-webkit-scrollbar, .editor-body::-webkit-scrollbar,
+  #scad-hl::-webkit-scrollbar, #scad-src::-webkit-scrollbar { width: 10px; height: 10px; }
+  #panel::-webkit-scrollbar-thumb, .editor-body::-webkit-scrollbar-thumb,
+  #scad-hl::-webkit-scrollbar-thumb, #scad-src::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted) 38%, transparent);
+    border-radius: 8px; border: 2px solid transparent; background-clip: padding-box;
+  }
+  #panel::-webkit-scrollbar-thumb:hover, .editor-body::-webkit-scrollbar-thumb:hover,
+  #scad-hl::-webkit-scrollbar-thumb:hover, #scad-src::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--muted) 60%, transparent); background-clip: padding-box;
+  }
+  #panel::-webkit-scrollbar-track, .editor-body::-webkit-scrollbar-track,
+  #scad-hl::-webkit-scrollbar-track, #scad-src::-webkit-scrollbar-track { background: transparent; }
 
   .panel-head { position: sticky; top: 0; background: var(--panel); z-index: 3; border-bottom: 1px solid var(--line); }
   .file-row {
@@ -268,7 +288,12 @@
      stage width for the canvas so it never underlaps the buttons on phones
      (portrait or landscape) — where the vertical stack was ~13rem wide,
      more than the stage could spare after padding. */
-  @media (max-width: 640px), (max-height: 500px) {
+  /* Also all touch devices (incl. iPad landscape): the desktop layout's wide
+     tools-clearing side padding would squeeze the render into a narrow vertical
+     strip. Move the tools to a bottom bar and shrink the padding so the render
+     fills the stage. `hover:none + pointer:coarse` is touch-primary (a touch
+     laptop keeps a fine pointer, so it stays on the desktop layout). */
+  @media (max-width: 640px), (max-height: 500px), (hover: none) and (pointer: coarse) {
     #stage { padding: 1rem 0.8rem 4.5rem; }
     #tools { top: auto; bottom: 0.6rem; left: 0.6rem; right: 0.6rem;
              flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 0.35rem; }
