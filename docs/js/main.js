@@ -22,15 +22,16 @@ document.addEventListener("keydown", (e) => {
   const editable = t && (t.matches?.("input, textarea, select, [contenteditable]"));
   const mod = e.metaKey || e.ctrlKey;
   const help = $("help");
-  // Esc closes the help overlay first (before falling through to Reset).
+  // Esc closes the help overlay, then pseudo-fullscreen, before Reset.
   if (e.key === "Escape" && help && !help.hidden) { e.preventDefault(); toggleHelp(false); return; }
+  if (e.key === "Escape" && $("stage").classList.contains("pseudo-fs")) { e.preventDefault(); toggleFullscreen(); return; }
   if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
     e.preventDefault(); $("btn-share").click();
   } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
     e.preventDefault(); $("btn-download").click();
   } else if (e.key === "?" && !editable) {
     e.preventDefault(); toggleHelp();
-  } else if (!mod && !editable && e.key.toLowerCase() === "f" && fsSupported) {
+  } else if (!mod && !editable && e.key.toLowerCase() === "f") {
     e.preventDefault(); toggleFullscreen();
   } else if (e.key === "Escape" && !editable) {
     // Escape resets, but only when focus isn't in an input — otherwise
@@ -51,27 +52,28 @@ document.querySelectorAll("#fmt button").forEach((b) => {
 });
 
 // ── fullscreen ─────────────────────────────────────────────────────────────
-// iOS Safari only supports fullscreen on <video>, so document.fullscreenEnabled
-// is false there — hide the button rather than show a dead control.
-const fsSupported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+// Prefer the native Fullscreen API (hides browser chrome). iOS Safari only
+// supports it on <video>, so fall back to a CSS overlay (.pseudo-fs fills the
+// viewport) — that works everywhere, incl. iPad. The stage resize triggers the
+// ResizeObserver below, which re-renders at the new size.
+const nativeFs = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+const inNativeFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const fsActive = () => inNativeFs() || $("stage").classList.contains("pseudo-fs");
+function updateFsBtn() { $("btn-fullscreen").textContent = fsActive() ? "Exit" : "Fullscreen"; }
 function toggleFullscreen() {
-  if (!fsSupported) return;
   const stage = $("stage");
-  const inFs = document.fullscreenElement || document.webkitFullscreenElement;
-  if (inFs) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-  else (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage);
+  if (nativeFs) {
+    if (inNativeFs()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    else (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage);
+  } else {
+    stage.classList.toggle("pseudo-fs");
+    updateFsBtn();
+  }
 }
-if (fsSupported) {
-  $("btn-fullscreen").hidden = false;
-  $("btn-fullscreen").onclick = toggleFullscreen;
-  const onFs = () => {
-    const inFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    $("btn-fullscreen").textContent = inFs ? "Exit" : "Fullscreen";
-    // The stage resized — the ResizeObserver below re-renders at the new size.
-  };
-  document.addEventListener("fullscreenchange", onFs);
-  document.addEventListener("webkitfullscreenchange", onFs);
-}
+$("btn-fullscreen").hidden = false;
+$("btn-fullscreen").onclick = toggleFullscreen;
+document.addEventListener("fullscreenchange", updateFsBtn);
+document.addEventListener("webkitfullscreenchange", updateFsBtn);
 
 // ── keyboard-shortcuts help overlay ────────────────────────────────────────
 function toggleHelp(force) {

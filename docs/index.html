@@ -8,7 +8,7 @@
 <!-- Start the demo's two heaviest first-load fetches during head parse instead
      of after the deferred module script runs. CI rewrites the modulepreload to
      the bundled JS; the wasm is the boot plugin (maquette), fetched by worker.js. -->
-<link rel="modulepreload" href="js/main.js?v=1">
+<link rel="modulepreload" href="js/main.js?v=2">
 <link rel="preload" as="fetch" type="application/wasm" href="maquette.wasm">
 <style>
   :root {
@@ -330,6 +330,9 @@
      know one of the pseudo-classes. */
   #stage:fullscreen { padding: 1.2rem; background: var(--bg); }
   #stage:-webkit-full-screen { padding: 1.2rem; background: var(--bg); }
+  /* Fallback fullscreen (iPad Safari & anywhere the Fullscreen API is missing):
+     a CSS overlay filling the viewport. Below the help dialog (z 80) so `?` still works. */
+  #stage.pseudo-fs { position: fixed; inset: 0; z-index: 70; padding: 1.2rem; background: var(--bg); }
 
   /* Keyboard-shortcuts overlay (toggled with "?"). */
   #help[hidden] { display: none; }
@@ -464,6 +467,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=1"></script>
+  <script type="module" src="js/main.js?v=2"></script>
 </body>
 </html>
