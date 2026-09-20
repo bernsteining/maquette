@@ -59,7 +59,11 @@ document.querySelectorAll("#fmt button").forEach((b) => {
 const nativeFs = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
 const inNativeFs = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
 const fsActive = () => inNativeFs() || $("stage").classList.contains("pseudo-fs");
-function updateFsBtn() { $("btn-fullscreen").textContent = fsActive() ? "Exit" : "Fullscreen"; }
+function updateFsBtn() {   // the enter/exit glyph swap is CSS-driven; JS only updates the tooltip
+  const b = $("fs-toggle"); if (!b) return;
+  b.title = fsActive() ? "Exit fullscreen (Esc)" : "Fullscreen (F)";
+  b.setAttribute("aria-label", b.title);
+}
 function toggleFullscreen() {
   const stage = $("stage");
   if (nativeFs) {
@@ -70,8 +74,7 @@ function toggleFullscreen() {
     updateFsBtn();
   }
 }
-$("btn-fullscreen").hidden = false;
-$("btn-fullscreen").onclick = toggleFullscreen;
+$("fs-toggle").onclick = toggleFullscreen;
 document.addEventListener("fullscreenchange", updateFsBtn);
 document.addEventListener("webkitfullscreenchange", updateFsBtn);
 
