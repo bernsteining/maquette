@@ -47,7 +47,11 @@ $("search").addEventListener("input", () => filterForm($("search").value));
 document.querySelectorAll("#fmt button").forEach((b) => {
   b.onclick = () => {
     setOutputFormat(b.dataset.fmt);
-    document.querySelectorAll("#fmt button").forEach((x) => x.classList.toggle("on", x === b));
+    document.querySelectorAll("#fmt button").forEach((x) => {
+      const on = x === b;
+      x.classList.toggle("on", on);
+      x.setAttribute("aria-pressed", on ? "true" : "false");
+    });
     onChange();
   };
 });
@@ -79,15 +83,21 @@ $("fs-toggle").onclick = toggleFullscreen;
 document.addEventListener("fullscreenchange", updateFsBtn);
 document.addEventListener("webkitfullscreenchange", updateFsBtn);
 
-// ── keyboard-shortcuts help overlay ────────────────────────────────────────
+// ── keyboard-shortcuts help overlay (a modal: focus in, trap, restore) ─────
+let helpReturnFocus = null;
 function toggleHelp(force) {
   const help = $("help");
   if (!help) return;
-  help.hidden = force === undefined ? !help.hidden : !force;
+  const open = force === undefined ? help.hidden : force;
+  help.hidden = !open;
+  if (open) { helpReturnFocus = document.activeElement; $("help-x").focus(); }
+  else if (helpReturnFocus && helpReturnFocus.focus) { helpReturnFocus.focus(); helpReturnFocus = null; }
 }
 $("help-x").onclick = () => toggleHelp(false);
 $("hint-help").onclick = () => toggleHelp(true);
 $("help").addEventListener("click", (e) => { if (e.target === $("help")) toggleHelp(false); });
+// Trap Tab inside the dialog (its only control is the close button).
+$("help").addEventListener("keydown", (e) => { if (e.key === "Tab") { e.preventDefault(); $("help-x").focus(); } });
 
 // ── re-render when the stage resizes (window resize, orientation, fullscreen) ─
 // renderConfig() recomputes the fit-to-view size each render, so a re-render is

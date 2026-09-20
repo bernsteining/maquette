@@ -8,7 +8,7 @@
 <!-- Start the demo's two heaviest first-load fetches during head parse instead
      of after the deferred module script runs. CI rewrites the modulepreload to
      the bundled JS; the wasm is the boot plugin (maquette), fetched by worker.js. -->
-<link rel="modulepreload" href="js/main.js?v=6">
+<link rel="modulepreload" href="js/main.js?v=7">
 <link rel="preload" as="fetch" type="application/wasm" href="maquette.wasm">
 <style>
   :root {
@@ -33,6 +33,8 @@
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
+  /* Visually hidden, still read by screen readers (live-region announcements). */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
   /* Fluid base font — grows from ~12px on a phone to 15px on a widescreen.
      Every downstream rem/em size follows, so headings, paddings and button
      targets scale smoothly without per-breakpoint overrides. */
@@ -330,6 +332,17 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
   button:focus-visible, .icon:focus-visible, .tab:focus-visible, .seg button:focus-visible { border-radius: 8px; }
 
+  /* Windows High Contrast / forced-colors: box-shadow doesn't render, so the
+     box-shadow-based focus rings and the accent-fill "active" states vanish.
+     Restore a real outline for focus, and mark active segments with a system
+     colour so the selection stays visible. */
+  @media (forced-colors: active) {
+    :focus-visible, input:focus, select:focus, textarea:focus,
+    .seg button:focus-visible, #fs-toggle:focus-visible,
+    .plugin-row #plugin button:focus-visible, #tools button:focus-visible { outline: 2px solid Highlight !important; outline-offset: 1px; }
+    .seg button.on, .plugin-row #plugin button.on { forced-color-adjust: none; background: Highlight; color: HighlightText; }
+  }
+
   /* Fullscreen stage — fill the screen, drop the tools-clearing side padding.
      Split selectors: a combined list is dropped whole by a browser that doesn't
      know one of the pseudo-classes. */
@@ -458,9 +471,9 @@
            has a spoken affordance beyond the visible #hint text below. -->
 
       <div id="tools">
-        <div class="seg" id="fmt" title="Output format">
-          <button data-fmt="png" class="on">PNG</button>
-          <button data-fmt="svg">SVG</button>
+        <div class="seg" id="fmt" role="group" aria-label="Output format">
+          <button data-fmt="png" class="on" aria-pressed="true">PNG</button>
+          <button data-fmt="svg" aria-pressed="false">SVG</button>
         </div>
         <button id="btn-reset" title="Reset all settings to defaults">Reset</button>
         <button id="btn-download" title="Download the current render">Download</button>
@@ -469,8 +482,8 @@
         <a id="get-models" href="#" target="_blank" rel="noopener" title="Browse external asset libraries"></a>
       </div>
       <div id="viewport">
-        <img id="out" alt="render" draggable="false">
-        <canvas id="outc" style="display:none"></canvas>
+        <img id="out" alt="3D render" draggable="false">
+        <canvas id="outc" style="display:none" role="img" aria-label="3D render"></canvas>
         <button id="fs-toggle" title="Fullscreen (F)" aria-label="Toggle fullscreen">
           <svg class="fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
           <svg class="fs-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h3a2 2 0 0 0 2-2V3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3"/></svg>
@@ -482,6 +495,7 @@
       <div id="busy" aria-hidden="true"><span class="spinner"></span><span id="busy-cap">rendering…</span></div>
       <div id="rtime" aria-live="polite" aria-atomic="true"></div>
       <div id="err" role="alert" aria-live="assertive" aria-atomic="true"></div>
+      <div id="sr-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
       <div id="hint">drag to orbit · scroll to zoom · drop a file · <button id="hint-help" type="button" title="Keyboard &amp; mouse shortcuts (?)">shortcuts</button><span id="formats"></span></div>
     </section>
   </main>
@@ -518,6 +532,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=6"></script>
+  <script type="module" src="js/main.js?v=7"></script>
 </body>
 </html>

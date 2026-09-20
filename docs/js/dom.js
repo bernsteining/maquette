@@ -24,4 +24,12 @@ const elCode = $("code"), elErr = $("err"), elOut = $("out"), elOutc = $("outc")
 })();
 
 
-export { $, ENC, DEC, elCode, elErr, elOut, elOutc, elRtime, elMeasure };
+// Announce a status message to screen readers via the polite live region.
+// Clears first so the same text re-announces (e.g. reloading the same model).
+function announce(msg) {
+  const el = $("sr-live"); if (!el) return;
+  el.textContent = "";
+  requestAnimationFrame(() => { el.textContent = msg; });
+}
+
+export { $, ENC, DEC, elCode, elErr, elOut, elOutc, elRtime, elMeasure, announce };

@@ -1,4 +1,4 @@
-import { $, ENC, DEC, elCode, elMeasure, elOutc, elOut } from "./dom.js";
+import { $, ENC, DEC, elCode, elMeasure, elOutc, elOut, announce } from "./dom.js";
 import { state, model, setModel, makeModel, getSchema, ext, isGltf, MOL_FMTS, isMolExt, GLTF_SCHEMA, PLUGINS, MODELS, MODELS_BY_PLUGIN, MOLECULES, PLUGIN_OF_MODEL, MODEL_DEFAULTS, DEFAULTS_KEYS, setRenderOverride, setOutputFormat, resetState, topFields, num, fmtT, eq, outputFormat } from "./state.js";
 import { maquettePlugin, scadPlugin, gltfPlugin, molfigPlugin, bindModel } from "./plugins.js";
 import { buildConfig, buildMolOpts, updateScadHighlight, renderCode, buildTypst } from "./config.js";
@@ -183,6 +183,12 @@ function refreshGetModelsLink() {
 }
 
 // Shared ingestion for both dropped/browsed files and built-in presets.
+// a11y: label the render for screen readers + announce the new model.
+function loadedModel(label) {
+  elOutc.setAttribute("aria-label", "3D render of " + label);
+  elOut.alt = "3D render of " + label;
+  announce("Loaded " + label);
+}
 function ingest(name, bytes) {
   const kindChanged = kindDiffers(model && model.name, name);
   setModel(makeModel(name, bytes));
@@ -200,6 +206,7 @@ function ingest(name, bytes) {
   if (kindChanged) { resetState(); buildForm(); }
   syncFmtToggleForKind(name);
   refreshGetModelsLink();
+  loadedModel(name);
   // Probe animation length + retype the Animation-time field to a slider
   // when the asset actually has animations. Async: fires alongside the
   // render, doesn't gate it.
@@ -457,6 +464,7 @@ async function enterScadMode(initial, presetName = "__scad__") {
   for (const k in sd) state[k] = structuredClone(sd[k]);
   buildForm(); refreshVisibility();
   refreshGetModelsLink();
+  loadedModel("OpenSCAD model");
   await compileScad();
 }
 $("scad-src").addEventListener("input", () => {
@@ -516,6 +524,7 @@ async function enterMolModeFromFile(name, bytes) {
     syncPreset(name);
     syncFmtToggleForKind(name);
     refreshGetModelsLink();
+    loadedModel(name);
     if (location.search || location.hash) history.replaceState(null, "", location.pathname);
     await compileMol();
   } catch (e) { showErr("failed to load molecule " + name + ": " + e.message); }
@@ -536,6 +545,7 @@ async function enterMolMode(name, { applyDefaults = true } = {}) {
     buildForm(); refreshVisibility();
     syncFmtToggleForKind(name);
     refreshGetModelsLink();
+    loadedModel(name);
     if (applyDefaults && (location.search || location.hash)) {
       history.replaceState(null, "", location.pathname);
     }
