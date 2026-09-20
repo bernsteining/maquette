@@ -8,11 +8,19 @@ const elCode = $("code"), elErr = $("err"), elOut = $("out"), elOutc = $("outc")
 
 (function () {
   const el = $("build"); if (!el) return;
-  const c = el.dataset.commit;
-  const v = c && !c.startsWith("__") ? c : "dev";
-  el.title = "deployed build · " + v;
   el.style.cursor = "pointer";
-  el.onclick = () => { const o = el.textContent; el.textContent = v; setTimeout(() => (el.textContent = o), 1600); };
+  const stamped = el.dataset.commit;
+  let v = stamped && !stamped.startsWith("__") ? stamped : "";   // CI stamps the SHA into index.html
+  const wire = () => {
+    el.title = v ? "build · " + v : "dev build";
+    el.onclick = () => { const o = el.textContent; el.textContent = v || "dev"; setTimeout(() => (el.textContent = o), 1600); };
+  };
+  wire();
+  // Local (`make demo`): no HTML stamp, so read the short SHA from build.txt.
+  if (!v) fetch("build.txt").then(r => r.ok ? r.text() : "").then(t => {
+    t = (t || "").trim();
+    if (/^[0-9a-f]{7,40}$/.test(t)) { v = t.slice(0, 12); wire(); }
+  }).catch(() => {});
 })();
 
 

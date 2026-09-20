@@ -78,6 +78,7 @@ demo: wasm demo-assets scad-wasm gltf-wasm
 	cp $(WASM_OUT) docs/maquette.wasm
 	cp $(SCAD_WASM_OUT) docs/maquette-scad.wasm
 	cp $(GLTF_WASM_OUT) docs/maquette-gltf.wasm
+	@git rev-parse --short HEAD > docs/build.txt 2>/dev/null || true   # local build stamp; the pill reads it
 	@echo "docs/ ready — serve with:  python3 -m http.server -d docs"
 
 # --- maquette-scad: OpenSCAD/CSG plugin (workspace member, Manifold kernel) ---

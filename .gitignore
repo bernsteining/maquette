@@ -12,6 +12,7 @@ docs/*.stl
 docs/*.ply
 docs/*.glb
 docs/*.blg
+docs/build.txt
 docs/js/app.bundle.js
 docs/js/package.json
 idea.md
