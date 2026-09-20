@@ -1,5 +1,5 @@
 import { $, elCode } from "./dom.js";
-import { state, model, getSchema, num, fmtT, eq, group, ambientCfg, bgCfg, hlCollapse, outputFormat } from "./state.js";
+import { state, model, getSchema, num, fmtT, eq, group, ambientCfg, bgCfg, hlCollapse, outputFormat, topFields } from "./state.js";
 
 function buildConfig() {
   const c = {};

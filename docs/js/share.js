@@ -3,7 +3,7 @@ import { state, model, setModel, makeModel, renderOverride, setRenderOverride, i
 import { buildConfig, buildTypst, renderCode } from "./config.js";
 import { rebuildForm, buildForm, refreshVisibility, filterForm, controlRefs } from "./form.js";
 import { onChange, render, safeRender, lastRender, copyText } from "./render.js";
-import { applyModelDefaults, loadPresetByName, kindOf, kindDiffers, triggerRecompile, ingest, loadFile, enterScadMode, enterMolMode, setPlugin, syncGltfInfo, measure, gltfCameraNames } from "./models.js";
+import { applyModelDefaults, loadPresetByName, kindOf, kindDiffers, triggerRecompile, ingest, loadFile, enterScadMode, enterMolMode, setPlugin, syncGltfInfo, measure, gltfCameraNames, _scadDefault, scadCanonicalSrc } from "./models.js";
 
 // ── download / share / reset ───────────────────────────────────────────────
 $("btn-download").onclick = () => {

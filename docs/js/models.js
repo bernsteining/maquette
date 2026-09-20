@@ -566,4 +566,4 @@ async function measure() {
 }
 
 
-export { currentPluginId, triggerRecompile, isConstrainedDevice, preloadDemoModels, modelsReady, loadScadDefault, kindOf, kindDiffers, syncFmtToggleForKind, gltfCameraNames, applyModelDefaults, GET_MODELS_LINKS, refreshGetModelsLink, ingest, syncGltfInfo, loadFile, loadPreset, syncPreset, fillPresetDropdown, loadScadPreset, loadPresetByName, setPlugin, setTab, renderScadResult, compileScad, enterScadMode, unpackMolBundle, compileMol, enterMolModeFromFile, enterMolMode, measure, INFO_FN };
+export { currentPluginId, _scadDefault, scadCanonicalSrc, triggerRecompile, isConstrainedDevice, preloadDemoModels, modelsReady, loadScadDefault, kindOf, kindDiffers, syncFmtToggleForKind, gltfCameraNames, applyModelDefaults, GET_MODELS_LINKS, refreshGetModelsLink, ingest, syncGltfInfo, loadFile, loadPreset, syncPreset, fillPresetDropdown, loadScadPreset, loadPresetByName, setPlugin, setTab, renderScadResult, compileScad, enterScadMode, unpackMolBundle, compileMol, enterMolModeFromFile, enterMolMode, measure, INFO_FN };
