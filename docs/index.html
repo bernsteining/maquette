@@ -8,7 +8,7 @@
 <!-- Start the demo's two heaviest first-load fetches during head parse instead
      of after the deferred module script runs. CI rewrites the modulepreload to
      the bundled JS; the wasm is the boot plugin (maquette), fetched by worker.js. -->
-<link rel="modulepreload" href="js/main.js?v=4">
+<link rel="modulepreload" href="js/main.js?v=5">
 <link rel="preload" as="fetch" type="application/wasm" href="maquette.wasm">
 <style>
   :root {
@@ -359,20 +359,31 @@
   #stage.pseudo-fs #fs-toggle .fs-exit { display: block; }
   #stage.pseudo-fs #tools, #stage.pseudo-fs #hint { display: none; }
 
-  /* Keyboard-shortcuts overlay (toggled with "?"). */
+  /* Header shortcuts button (opens the help overlay — discoverable, touch-friendly). */
+  header .links #help-btn { background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink-soft); display: flex; align-items: center; transition: color .12s; }
+  header .links #help-btn:hover { color: var(--accent); }
+  header .links #help-btn svg { width: 2.1rem; height: 2.1rem; display: block; }
+
+  /* Keyboard & mouse help overlay (the ? icon / key). */
   #help[hidden] { display: none; }
   #help { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center;
-    background: color-mix(in srgb, var(--ink) 45%, transparent); padding: 1rem; }
+    background: color-mix(in srgb, var(--ink) 50%, transparent); padding: 1rem; backdrop-filter: blur(2px); }
   #help .help-card { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
-    border-radius: 12px; box-shadow: var(--shadow); padding: 14px 16px; max-width: 380px; width: 100%; }
-  #help .help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-  #help .help-head b { font-size: 0.95rem; }
+    border-radius: 14px; box-shadow: var(--shadow); padding: 16px 18px; max-width: 460px; width: 100%; }
+  #help .help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  #help .help-head b { font-size: 1rem; letter-spacing: -.2px; }
   #help #help-x { border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer;
-    border-radius: 7px; padding: 2px 8px; font-size: 13px; line-height: 1; }
+    border-radius: 8px; padding: 3px 9px; font-size: 13px; line-height: 1; transition: .12s; }
   #help #help-x:hover { color: var(--accent); border-color: var(--accent); }
-  #help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; font-size: 0.82rem; }
-  #help dt { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #help .help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 24px; }
+  #help h4 { margin: 2px 0 7px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 700; }
+  #help dl { display: grid; grid-template-columns: auto 1fr; gap: 9px 12px; margin: 0 0 6px; font-size: 0.82rem; align-items: center; }
+  #help dt { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
   #help dd { margin: 0; color: var(--muted); }
+  #help kbd { display: inline-block; min-width: 1.1em; text-align: center; padding: 1px 6px; line-height: 1.5;
+    font: 600 0.72rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-soft);
+    background: var(--bg); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; }
+  @media (max-width: 440px) { #help .help-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -383,6 +394,9 @@
     </a>
     <span class="badge" id="build" data-commit="__BUILD_COMMIT__">demo</span>
     <nav class="links">
+      <button id="help-btn" class="icon" type="button" title="Shortcuts (?)" aria-label="Keyboard &amp; mouse shortcuts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.1 9.5a2.9 2.9 0 0 1 5.6 1c0 2-2.7 2.5-2.7 3.5"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+      </button>
       <a id="link-typst" class="icon" target="_blank" rel="noopener" title="Typst Universe">
         <!-- "t" glyph extracted from typst.app/assets/images/typst.svg (official wordmark). -->
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -480,23 +494,36 @@
 
   <div id="tip" role="tooltip"></div>
 
-  <div id="help" hidden role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+  <div id="help" hidden role="dialog" aria-modal="true" aria-label="Shortcuts">
     <div class="help-card">
-      <div class="help-head"><b>Keyboard &amp; mouse</b><button id="help-x" aria-label="Close">✕</button></div>
-      <dl>
-        <dt>Drag</dt><dd>Orbit the model</dd>
-        <dt>Scroll · pinch</dt><dd>Zoom</dd>
-        <dt>Arrow keys</dt><dd>Orbit (Shift = coarse)</dd>
-        <dt>+ − · PgUp PgDn</dt><dd>Zoom</dd>
-        <dt>F</dt><dd>Toggle fullscreen</dd>
-        <dt>⌘/Ctrl + S</dt><dd>Copy share link</dd>
-        <dt>⌘/Ctrl + ⇧ D</dt><dd>Download render</dd>
-        <dt>Esc</dt><dd>Reset (or close this)</dd>
-        <dt>?</dt><dd>Toggle this help</dd>
-      </dl>
+      <div class="help-head"><b>Shortcuts</b><button id="help-x" aria-label="Close">✕</button></div>
+      <div class="help-grid">
+        <section>
+          <h4>Navigate</h4>
+          <dl>
+            <dt><kbd>drag</kbd></dt><dd>Orbit</dd>
+            <dt><kbd>scroll</kbd><kbd>pinch</kbd></dt><dd>Zoom</dd>
+            <dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Orbit</dd>
+            <dt><kbd>+</kbd><kbd>−</kbd></dt><dd>Zoom</dd>
+          </dl>
+        </section>
+        <section>
+          <h4>Actions</h4>
+          <dl>
+            <dt><kbd>/</kbd></dt><dd>Search settings</dd>
+            <dt><kbd>S</kbd></dt><dd>Share link</dd>
+            <dt><kbd>D</kbd></dt><dd>Download</dd>
+            <dt><kbd>C</kbd></dt><dd>Copy code</dd>
+            <dt><kbd>F</kbd></dt><dd>Fullscreen</dd>
+            <dt><kbd>R</kbd></dt><dd>Reset</dd>
+            <dt><kbd>?</kbd></dt><dd>This help</dd>
+            <dt><kbd>Esc</kbd></dt><dd>Close · reset</dd>
+          </dl>
+        </section>
+      </div>
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=4"></script>
+  <script type="module" src="js/main.js?v=5"></script>
 </body>
 </html>

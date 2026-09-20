@@ -17,27 +17,28 @@ import { loadFile, loadPresetByName, kindOf, preloadDemoModels, modelsReady, app
 // left. Add a field to SCHEMA and it appears in all three.
 
 
+// Single-key shortcuts (outside text fields), plus Esc handling. See the help
+// overlay for the list. `/` focuses search; letters trigger the toolbar buttons.
 document.addEventListener("keydown", (e) => {
   const t = e.target;
-  const editable = t && (t.matches?.("input, textarea, select, [contenteditable]"));
-  const mod = e.metaKey || e.ctrlKey;
-  const help = $("help");
-  // Esc closes the help overlay, then pseudo-fullscreen, before Reset.
-  if (e.key === "Escape" && help && !help.hidden) { e.preventDefault(); toggleHelp(false); return; }
-  if (e.key === "Escape" && $("stage").classList.contains("pseudo-fs")) { e.preventDefault(); toggleFullscreen(); return; }
-  if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
-    e.preventDefault(); $("btn-share").click();
-  } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
-    e.preventDefault(); $("btn-download").click();
-  } else if (e.key === "?" && !editable) {
-    e.preventDefault(); toggleHelp();
-  } else if (!mod && !editable && e.key.toLowerCase() === "f") {
-    e.preventDefault(); toggleFullscreen();
-  } else if (e.key === "Escape" && !editable) {
-    // Escape resets, but only when focus isn't in an input — otherwise
-    // it'd cancel typed edits and users would lose context.
-    e.preventDefault(); $("btn-reset").click();
+  const editable = t && t.matches?.("input, textarea, select, [contenteditable]");
+  if (e.key === "Escape") {                                  // close → exit fs → clear search → reset
+    if (!$("help").hidden) { e.preventDefault(); toggleHelp(false); }
+    else if ($("stage").classList.contains("pseudo-fs")) { e.preventDefault(); toggleFullscreen(); }
+    else if (t === $("search")) { e.preventDefault(); t.value = ""; filterForm(""); t.blur(); }
+    else if (!editable) { e.preventDefault(); $("btn-reset").click(); }
+    return;
   }
+  // Cmd/Ctrl+S also shares, so the browser's Save-page dialog never fires.
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") {
+    e.preventDefault(); $("btn-share").click(); return;
+  }
+  if (e.key === "/" && !editable) { e.preventDefault(); const s = $("search"); s.focus(); s.select(); return; }
+  if (editable || e.metaKey || e.ctrlKey || e.altKey) return;   // rest are bare single keys
+  const act = { s: "btn-share", d: "btn-download", c: "copy", r: "btn-reset" }[e.key.toLowerCase()];
+  if (act) { e.preventDefault(); $(act).click(); }
+  else if (e.key.toLowerCase() === "f") { e.preventDefault(); toggleFullscreen(); }
+  else if (e.key === "?") { e.preventDefault(); toggleHelp(); }
 });
 
 $("search").addEventListener("input", () => filterForm($("search").value));
@@ -85,6 +86,7 @@ function toggleHelp(force) {
   help.hidden = force === undefined ? !help.hidden : !force;
 }
 $("help-x").onclick = () => toggleHelp(false);
+$("help-btn").onclick = () => toggleHelp(true);
 $("help").addEventListener("click", (e) => { if (e.target === $("help")) toggleHelp(false); });
 
 // ── re-render when the stage resizes (window resize, orientation, fullscreen) ─
