@@ -161,10 +161,20 @@ jobs:
           # still needs a manual pass).
           cp docs/js/app.bundle.js /tmp/app.bundle.mjs
           node .github/scripts/webdemo-smoke.mjs /tmp/app.bundle.mjs
-          # Point the page at the bundle (cache-busted by the build SHA).
-          sed -i "s|js/main.js?v=[0-9]*|js/app.bundle.js?v=${GITHUB_SHA::7}|" docs/index.html
+          # Point the page (script + modulepreload) at the bundle, cache-busted
+          # by the build SHA.
+          sed -i "s|js/main.js?v=[0-9]*|js/app.bundle.js?v=${GITHUB_SHA::7}|g" docs/index.html
           grep -q "js/app.bundle.js" docs/index.html && echo "index.html → bundle ✓"
           ls -la docs/js/app.bundle.js
+
+      - name: Minify index.html (+ inline CSS)
+        shell: bash
+        run: |
+          npx --yes html-minifier-terser@7.2.0 \
+            --collapse-whitespace --remove-comments --minify-css true \
+            docs/index.html -o docs/index.min.html
+          mv docs/index.min.html docs/index.html
+          echo "minified index.html → $(wc -c < docs/index.html) bytes"
 
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
