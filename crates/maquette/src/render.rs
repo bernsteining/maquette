@@ -17,9 +17,6 @@ use crate::svg::*;
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 use std::collections::{HashMap, HashSet};
 
-// ---------------------------------------------------------------------------
-// Internal types
-// ---------------------------------------------------------------------------
 
 struct ProjectedTri {
     pts: [(f64, f64); 3],
@@ -45,9 +42,6 @@ struct ProjectedTri {
     tex: Option<u16>,
 }
 
-// ---------------------------------------------------------------------------
-// Bounding box
-// ---------------------------------------------------------------------------
 
 fn bbox_of(iter: impl Iterator<Item = Vec3>) -> (Vec3, Vec3) {
     let mut min = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
@@ -111,23 +105,12 @@ pub(crate) fn pointcloud_to_triangles(
     let has_scalars = cloud.scalars.len() == n;
 
     let max_neighbors: usize = config.point_neighbors.max(3);
-    // Cut fan connections across a normal jump larger than `point_boundary`°
-    // (removes hairy fringes at surface boundaries). <=0 disables the filter.
     let boundary_cos = if config.point_boundary > 0.0 { config.point_boundary.to_radians().cos() } else { -2.0 };
 
-    // f32 SOA for SIMD-accelerated distance checks
     let xs: Vec<f32> = positions.iter().map(|p| p.x as f32).collect();
     let ys: Vec<f32> = positions.iter().map(|p| p.y as f32).collect();
     let zs: Vec<f32> = positions.iter().map(|p| p.z as f32).collect();
 
-    // Search radius. Each point fans to its `max_neighbors` nearest points, so
-    // the radius only needs to *cover* those. Instead of assuming a dimensionality
-    // (the old `diag / n^(1/3)` over-sizes surface scans ~3x — ~27x too many
-    // candidates for the identical mesh), we derive it from the data: sample
-    // points, measure each sample's k-th-nearest-neighbor distance, and size the
-    // radius to cover the sparsest sampled point (+ a margin for unsampled points
-    // and f32 rounding). Capped at the old estimate, so it is never larger or
-    // sparser than before — only right-sized — for any cloud topology/density.
     let volume_radius = diag / (n as f64).cbrt() * 1.5;
     let radius = if config.point_size > 0.0 {
         config.point_size
@@ -179,7 +162,6 @@ pub(crate) fn pointcloud_to_triangles(
     };
     let rsq_f32 = (radius * radius) as f32;
 
-    // Build spatial hash at the chosen radius.
     let inv_cell_f32 = (1.0 / radius) as f32;
     let mut grid: HashMap<(i32, i32, i32), Vec<u32>, FxBuildHasher> =
         HashMap::with_hasher(FxBuildHasher::default());
@@ -192,7 +174,6 @@ pub(crate) fn pointcloud_to_triangles(
     let mut tri_set: HashSet<(u32, u32, u32), FxBuildHasher> =
         HashSet::with_hasher(FxBuildHasher::default());
 
-    // Fallback normal if no normals provided: use camera direction
     let fallback_normal = if !has_normals {
         let bc = bbox_center(bmin, bmax);
         let br = bbox_radius(bmin, bmax);
@@ -202,15 +183,12 @@ pub(crate) fn pointcloud_to_triangles(
         Vec3::new(0.0, 1.0, 0.0)
     };
 
-    // Reusable buffers with pre-reserved capacity
     let mut candidates: Vec<u32> = Vec::with_capacity(64);
     let mut neighbors: Vec<(u32, f32)> = Vec::with_capacity(max_neighbors + 4);
     let mut sorted: Vec<(u32, f64, f64)> = Vec::with_capacity(max_neighbors);
 
-    // Iterate cell-by-cell: 27 HashMap lookups amortized across all points in each cell
     let cell_keys: Vec<(i32, i32, i32)> = grid.keys().copied().collect();
     for cell in &cell_keys {
-        // Collect candidates from 27 neighbors — done once per cell, shared by all points
         candidates.clear();
         for dz in -1i32..=1 {
             for dy in -1i32..=1 {
@@ -228,7 +206,6 @@ pub(crate) fn pointcloud_to_triangles(
             let i = ii as usize;
             let normal = if has_normals { cloud.normals[i] } else { fallback_normal };
 
-            // SIMD f32x4 distance check — 4 candidates per iteration
             neighbors.clear();
             let px4 = f32x4_splat(xs[i]);
             let py4 = f32x4_splat(ys[i]);
@@ -277,16 +254,13 @@ pub(crate) fn pointcloud_to_triangles(
 
             if neighbors.len() < 2 { continue; }
 
-            // Keep only closest max_neighbors
             if neighbors.len() > max_neighbors {
                 neighbors.select_nth_unstable_by(max_neighbors, |a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
                 neighbors.truncate(max_neighbors);
             }
 
-            // Build tangent frame from normal
             let (t1, t2) = normal.tangent_basis();
 
-            // Project neighbors onto tangent plane using f64x2 (u and v simultaneously)
             sorted.clear();
             let t1x_t2x = f64x2(t1.x, t2.x);
             let t1y_t2y = f64x2(t1.y, t2.y);
@@ -301,7 +275,6 @@ pub(crate) fn pointcloud_to_triangles(
                 sorted.push((j, f64x2_extract_lane::<0>(uv), f64x2_extract_lane::<1>(uv)));
             }
 
-            // Sort by angle around normal: quadrant + cross product (no atan2)
             sorted.sort_unstable_by(|a, b| {
                 let qa = angle_quadrant(a.1, a.2);
                 let qb = angle_quadrant(b.1, b.2);
@@ -312,12 +285,6 @@ pub(crate) fn pointcloud_to_triangles(
                 else { core::cmp::Ordering::Equal }
             });
 
-            // Fan-triangulate: triangle (i, neighbor[k], neighbor[k+1]). Reject
-            // "bridge" triangles that span a normal discontinuity — a boundary
-            // between surfaces at different orientations (e.g. a scanned object
-            // meeting its support plane), the cause of the hairy fringes. Uses
-            // the per-vertex normals when present; smoothly-curved surfaces have
-            // similar adjacent normals, so this connects them fully (no holes).
             let nn = sorted.len();
             let ni = if has_normals { cloud.normals[i] } else { Vec3::new(0.0, 0.0, 0.0) };
             for k in 0..nn {
@@ -337,7 +304,6 @@ pub(crate) fn pointcloud_to_triangles(
         }
     }
 
-    // Convert deduplicated triangles to Triangle structs
     let mut triangles = Vec::with_capacity(tri_set.len());
     for &(a, b, c) in &tri_set {
         let (ia, ib, ic) = (a as usize, b as usize, c as usize);
@@ -356,16 +322,11 @@ pub(crate) fn pointcloud_to_triangles(
         } else {
             None
         };
-        // Propagate scan-provided per-vertex normals into the triangles so
-        // smooth shading uses them directly instead of face-normal averaging.
         let vertex_normals = if has_normals {
             Some([cloud.normals[ia], cloud.normals[ib], cloud.normals[ic]])
         } else {
             None
         };
-        // Same for the scan's per-vertex scalar (curvature/quality/…) so
-        // `color_map: "ply_scalar"` renders reconstructed clouds as heatmaps
-        // without a separate mesh export step.
         let vertex_scalars = if has_scalars {
             Some([cloud.scalars[ia], cloud.scalars[ib], cloud.scalars[ic]])
         } else {
@@ -389,9 +350,6 @@ pub(crate) fn pointcloud_to_triangles(
     triangles
 }
 
-// ---------------------------------------------------------------------------
-// Core triangle projection
-// ---------------------------------------------------------------------------
 
 /// Everything the shade paths need to apply cast shadows. `maps` has one entry
 /// per light (None = non-caster); `factors` is the per-unique-vertex×light
@@ -456,8 +414,8 @@ impl ShadowData {
             .map(|(r, g, b)| (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0))
             .unwrap_or((1.0, 1.0, 1.0));
         let chan = |cc: u8, tint: f32| {
-            let m = keep * tint;          // shadow floor for this channel
-            let mul = m + t * (1.0 - m);  // lerp floor→1 by lit factor
+            let m = keep * tint;
+            let mul = m + t * (1.0 - m);
             (cc as f32 * mul).round().clamp(0.0, 255.0) as u8
         };
         (chan(c.0, tr), chan(c.1, tg), chan(c.2, tb))
@@ -481,12 +439,9 @@ fn build_shadow_data(
     if cfg.strength <= 0.0 || lights.is_empty() {
         return None;
     }
-    // Per-pixel is PNG-only; SVG callers pass allow_per_pixel = false.
     let per_pixel = cfg.per_pixel && allow_per_pixel;
     let tint = if cfg.color.is_empty() { None } else { Some(parse_hex_color(&cfg.color)) };
     let up = Vec3::from(config.up);
-    // Occluder filter: skip triangles that are (nearly) transparent so a glassy
-    // or x-ray part doesn't cast a solid shadow.
     let global_opacity = config.opacity;
     let is_occluder = |tri: &Triangle| -> bool {
         let o = tri.group_id
@@ -499,8 +454,6 @@ fn build_shadow_data(
     let bias = crate::shadow::BiasParams { bias: cfg.bias, normal_bias: cfg.normal_bias, slope_bias: cfg.slope_bias };
     let strength = cfg.strength as f32;
 
-    // Precompute per-unique-vertex factors for the smooth paths (per-vertex
-    // mode only; per-pixel samples the maps during rasterization instead).
     let factors = if per_pixel {
         None
     } else {
@@ -520,8 +473,6 @@ fn build_shadow_data(
     };
 
     let ambient_keep_base = (config.ambient.intensity as f32).clamp(0.0, 1.0);
-    // Per-light PCSS radius: an area light uses its own `size`; every other
-    // light falls back to the global `shadows.light_size` (backward compatible).
     let light_sizes: Vec<f64> = lights.iter()
         .map(|l| if l.kind == LightKind::Area { l.size } else { cfg.light_size })
         .collect();
@@ -541,8 +492,6 @@ fn project_triangles(
     lights: &[ResolvedLight],
     shadow: Option<&ShadowData>,
 ) -> Vec<ProjectedTri> {
-    // Smooth paths consume the precomputed per-vertex factors; the flat path
-    // (below) samples the maps directly, so it needs the full bundle.
     let shadow_factors: Option<&[f32]> = shadow.and_then(|s| s.factors.as_deref());
     let proj = if force_ortho { Projection::Ortho } else { resolve_projection(&config.projection) };
     let proj_setup = setup_projection(proj, config, view, vw, vh, br);
@@ -554,8 +503,6 @@ fn project_triangles(
     let skip_cull = matches!(proj, Projection::Cabinet | Projection::Cavalier | Projection::TinyPlanet);
     let do_cull = config.cull_backface && !is_wireframe && !is_xray && !skip_cull && config.explode.abs() < 1e-12;
 
-    // Back-face test computed ONCE and reused by the shade-skip and the cull
-    // loop below (avoids computing it twice). `true` = back-facing.
     let face_back: Vec<bool> = if do_cull || is_xray {
         let pv = if proj == Projection::Ortho { Some(view.camera.sub(view.center)) } else { None };
         triangles.iter().map(|tri| {
@@ -585,8 +532,6 @@ fn project_triangles(
         ((0.0f32, 0.0f32, 0.0f32), (0.0f32, 0.0f32, 0.0f32))
     };
 
-    // Pre-compute power LUTs: x^shininess and x^fresnel_power for x ∈ [0,1].
-    // Rebuilds only when exponent changes (handles per-group shininess overrides).
     let fresnel_lut = if !is_wireframe && config.fresnel.intensity > 0.0 {
         let mut lut = [0.0f32; 256];
         let fp = config.fresnel.power as f32;
@@ -609,7 +554,6 @@ fn project_triangles(
     let cfg_cel_bands = config.cel_bands;
     let cfg_xray_opacity = config.xray_opacity;
     let cfg_ambient_intensity = config.ambient.intensity as f32;
-    // Pre-parse hemisphere sky/ground colors (pre-multiplied by intensity)
     let (sky_r8, sky_g8, sky_b8) = parse_hex_color(&config.ambient.sky);
     let (gnd_r8, gnd_g8, gnd_b8) = parse_hex_color(&config.ambient.ground);
     let amb_sky = (
@@ -627,9 +571,6 @@ fn project_triangles(
     let cfg_shininess = config.shininess as f32;
     let view_camera = view.camera;
 
-    // Pre-build one specular LUT per distinct shininess (global + group overrides)
-    // so the per-triangle slow path looks up a ready table instead of rebuilding
-    // 256 powf() values whenever interleaved groups change shininess.
     fn lut_ref<'a>(luts: &'a [(f32, [f32; 256])], sh: f32) -> &'a [f32; 256] {
         const ZERO: [f32; 256] = [0.0f32; 256];
         luts.iter().find(|(s, _)| *s == sh).map(|(_, l)| l).unwrap_or(&ZERO)
@@ -652,9 +593,6 @@ fn project_triangles(
         v
     };
     let lights_f32: Vec<LightF32> = lights.iter().map(|l| {
-        // Disk area light: subdue the highlight in proportion to the light's
-        // angular radius (size / distance-to-subject). A cheap stand-in for a
-        // true broadened lobe — big soft lights don't produce a tight glint.
         let spec_scale = if l.kind == LightKind::Area && l.size > 0.0 {
             let d = l.vector.sub(view.center).length().max(1e-3);
             (1.0 / (1.0 + 4.0 * (l.size / d))) as f32
@@ -667,16 +605,12 @@ fn project_triangles(
         }
     }).collect();
 
-    // Hemisphere ambient blend: lerp sky↔ground based on normal·up
     #[inline(always)]
     fn hemi_ambient(n: Vec3, sky: (f32, f32, f32), gnd: (f32, f32, f32), up: (f32, f32, f32)) -> (f32, f32, f32) {
         let t = (n.x as f32 * up.0 + n.y as f32 * up.1 + n.z as f32 * up.2 + 1.0) * 0.5;
         (gnd.0 + (sky.0 - gnd.0) * t, gnd.1 + (sky.1 - gnd.1) * t, gnd.2 + (sky.2 - gnd.2) * t)
     }
 
-    // Memoized smooth shading: shade each unique vertex once when possible.
-    // Valid when base color is uniform (no per-tri color, no vertex_colors)
-    // and shading params are uniform (no per-group material overrides, not x-ray).
     let shade_cache: Option<Vec<(u8, u8, u8)>> = if let Some(sd) = smooth {
         let groups_uniform = group_styles.values().all(|a|
             a.specular.is_none() && a.shininess.is_none() && a.ambient.is_none());
@@ -696,10 +630,6 @@ fn project_triangles(
                 } else {
                     (base_r as f32, base_g as f32, base_b as f32)
                 };
-                // Shade only vertices touching a front-facing (un-culled) triangle
-                // when culling is on and there are no cast shadows (whose dense
-                // per-vertex factors would also need compacting). Back-facing-only
-                // vertices are never rasterized — byte-identical, fewer shade calls.
                 let ids: Vec<usize> = if do_cull && shadow_factors.is_none() {
                     let mut mask = vec![false; n_unique];
                     for (ti, &is_back) in face_back.iter().enumerate() {
@@ -732,7 +662,6 @@ fn project_triangles(
                 let cam_z = view_camera.z as f32;
                 let n_batches = m / 4;
                 let n_lights = lights_f32.len();
-                // Reused per-light shadow-factor lanes for the current batch of 4.
                 let mut sh_scratch: Vec<v128> = vec![f32x4_splat(1.0); n_lights];
                 let mut cache: Vec<(u8, u8, u8)> = vec![(0u8, 0u8, 0u8); n_unique];
                 for bi in 0..n_batches {
@@ -806,21 +735,11 @@ fn project_triangles(
         } else { None }
     } else { None };
 
-    // Back-face culling direction. Perspective uses the per-triangle vector to
-    // the camera *point* (a converging eye). Parallel projections (orthographic
-    // plus the axonometric family — all Projection::Ortho here) instead need a
-    // single constant view direction; using the per-triangle camera vector there
-    // over-culls silhouette faces and punches holes when the camera is close.
-    // Kept normal-based (not screen-space winding) so meshes whose winding is
-    // inconsistent with their normals — e.g. point-cloud reconstructions — stay
-    // correct.
     let mut projected: Vec<ProjectedTri> = Vec::with_capacity(triangles.len());
 
-    // Slow-path shadow scratch: gathered per-light lanes for a triangle's 3 verts.
     let sh_n_lights = lights_f32.len();
     let sh_stride = smooth.map(|s| s.positions.len()).unwrap_or(0);
     let mut slow_sh_scratch: Vec<v128> = vec![f32x4_splat(1.0); sh_n_lights];
-    // Flat-path shadow scratch: one factor per light, sampled at the face centroid.
     let mut flat_sh_scratch: Vec<f32> = vec![1.0; sh_n_lights];
 
     for (ti, tri) in triangles.iter().enumerate() {
@@ -830,14 +749,11 @@ fn project_triangles(
             continue;
         }
 
-        // SIMD f32 batch transform: 3 vertices at once (9 SIMD mul-adds vs 27 scalar)
         let cam = view_simd.transform_tri(tri.vertices[0], tri.vertices[1], tri.vertices[2]);
 
-        // Wireframe mode: skip all shading, only need projection
         let (r, g, b, vertex_colors, opacity) = if is_wireframe {
             (0, 0, 0, None, 1.0)
         } else if let Some(ref cache) = shade_cache {
-            // Fast path: look up pre-computed vertex colors from cache
             let sd = unsafe { smooth.unwrap_unchecked() };
             let [i0, i1, i2] = sd.tri_indices[ti];
             let vcols = [cache[i0], cache[i1], cache[i2]];
@@ -847,9 +763,7 @@ fn project_triangles(
                 * tri.alpha.unwrap_or(1.0) as f64;
             (r, g, b, Some(vcols), opacity)
         } else {
-            // Per-group appearance overrides
             let ga = tri.group_id.and_then(|gid| group_styles.get(&gid));
-            // Per-group ambient override scales intensity; sky/ground colors stay global
             let grp_intensity = ga.and_then(|a| a.ambient).map(|v| v as f32).unwrap_or(cfg_ambient_intensity);
             let intensity_scale = if grp_intensity == cfg_ambient_intensity { 1.0 } else { grp_intensity / cfg_ambient_intensity.max(1e-6) };
             let grp_sky = (amb_sky.0 * intensity_scale, amb_sky.1 * intensity_scale, amb_sky.2 * intensity_scale);
@@ -859,10 +773,8 @@ fn project_triangles(
             let shininess = ga.and_then(|a| a.shininess).map(|v| v as f32).unwrap_or(cfg_shininess);
             let mut opacity = ga.and_then(|a| a.opacity).unwrap_or(config.opacity);
 
-            // Look up the pre-built specular LUT for this shininess (no rebuild).
             let spec_lut = lut_ref(&spec_luts, shininess);
 
-            // X-ray mode: set opacity based on face orientation
             if is_xray {
                 if is_back_facing {
                     opacity = 1.0;
@@ -872,13 +784,8 @@ fn project_triangles(
                 }
             }
 
-            // Per-face mesh alpha (e.g. PLY `alpha`) multiplies the resolved opacity.
             opacity *= tri.alpha.unwrap_or(1.0) as f64;
 
-            // Textured faces shade with a white albedo so the resulting vertex
-            // colors are pure lighting; the raster pass multiplies them by the
-            // per-pixel texture sample (albedo × light). Untextured faces use
-            // the per-face / base color as before.
             let (fr, fg, fb) = if tri.tex.is_some() {
                 (255, 255, 255)
             } else {
@@ -886,12 +793,9 @@ fn project_triangles(
             };
 
             if let Some(sd) = smooth {
-                // Smooth shading: per-vertex lighting (slow path with per-tri overrides)
                 let [i0, i1, i2] = sd.tri_indices[ti];
                 let vn = [sd.normals[i0], sd.normals[i1], sd.normals[i2]];
 
-                // SIMD batch path: 3 vertices in one shade_batch_4 call
-                // Valid when base color is uniform (no vertex colors)
                 let vcols = if tri.vertex_colors.is_none()
                     && matches!(shading, ShadingMode::BlinnPhong | ShadingMode::Flat | ShadingMode::Cel | ShadingMode::Gooch)
                 {
@@ -931,7 +835,6 @@ fn project_triangles(
                     );
                     [colors[0], colors[1], colors[2]]
                 } else {
-                    // Scalar fallback: per-vertex colors or Normal
                     let gamma_or_gooch = cfg_gamma || shading == ShadingMode::Gooch;
                     let mut vcols = [(0u8, 0u8, 0u8); 3];
                     for i in 0..3 {
@@ -959,7 +862,6 @@ fn project_triangles(
                 let (r, g, b) = crate::color::avg3(vcols[0], vcols[1], vcols[2]);
                 (r, g, b, Some(vcols), opacity)
             } else {
-                // Flat shading: single face normal
                 let centroid = Vec3::centroid(tri.vertices[0], tri.vertices[1], tri.vertices[2]);
                 let amb = hemi_ambient(tri.normal, grp_sky, grp_gnd, up_f32);
                 let base_lin = if cfg_gamma || shading == ShadingMode::Gooch {
@@ -967,8 +869,6 @@ fn project_triangles(
                 } else {
                     (fr as f32 / 255.0, fg as f32 / 255.0, fb as f32 / 255.0)
                 };
-                // Flat shading has no smooth vertices, so sample the shadow maps
-                // per-face at the centroid (stride 1, index 0 → f[li]).
                 let flat_shadow = shadow.filter(|s| !s.per_pixel).map(|s| {
                     for li in 0..sh_n_lights {
                         flat_sh_scratch[li] = s.sample(li, centroid, tri.normal);
@@ -1002,10 +902,6 @@ fn project_triangles(
     projected
 }
 
-// Reusable scratch for the depth radix sort. WASM is single-threaded and the
-// sort is non-reentrant, so static buffers avoid re-allocating keys/indices and
-// the gathered output on every call (every render sorts at least once; grid and
-// turntable sort many times). Same safety justification as the model cache.
 static mut RADIX_KEYS: Vec<u32> = Vec::new();
 static mut RADIX_IDX: Vec<u32> = Vec::new();
 static mut RADIX_OUT: Vec<ProjectedTri> = Vec::new();
@@ -1021,8 +917,6 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
     let idx = unsafe { &mut *std::ptr::addr_of_mut!(RADIX_IDX) };
     let out = unsafe { &mut *std::ptr::addr_of_mut!(RADIX_OUT) };
 
-    // Quantize f64 depths to u32 sort keys.
-    // Flip bits so that IEEE-754 ordering becomes unsigned ordering.
     keys.clear();
     keys.reserve(n);
     for tri in projected.iter() {
@@ -1031,7 +925,6 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
         keys.push(if descending { !k } else { k });
     }
 
-    // Compute all 4 byte-histograms in a single pass, then prefix-sum them.
     let mut hist = [[0u32; 256]; 4];
     for &k in keys.iter() {
         hist[0][(k & 0xFF) as usize] += 1;
@@ -1048,7 +941,6 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
         }
     }
 
-    // Two index buffers in a single allocation; ping-pong via split_at_mut.
     idx.clear();
     idx.resize(2 * n, 0);
     for i in 0..n { idx[i] = i as u32; }
@@ -1056,25 +948,21 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
     {
         let (a, b) = idx.split_at_mut(n);
 
-        // Pass 1: a → b (byte 0)
         for &v in a.iter() {
             let bucket = (keys[v as usize] & 0xFF) as usize;
             b[hist[0][bucket] as usize] = v;
             hist[0][bucket] += 1;
         }
-        // Pass 2: b → a (byte 1)
         for &v in b.iter() {
             let bucket = ((keys[v as usize] >> 8) & 0xFF) as usize;
             a[hist[1][bucket] as usize] = v;
             hist[1][bucket] += 1;
         }
-        // Pass 3: a → b (byte 2)
         for &v in a.iter() {
             let bucket = ((keys[v as usize] >> 16) & 0xFF) as usize;
             b[hist[2][bucket] as usize] = v;
             hist[2][bucket] += 1;
         }
-        // Pass 4: b → a (byte 3) — result lands in a = idx[0..n]
         for &v in b.iter() {
             let bucket = ((keys[v as usize] >> 24) & 0xFF) as usize;
             a[hist[3][bucket] as usize] = v;
@@ -1082,10 +970,6 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
         }
     }
 
-    // Gather into the reusable output buffer. ptr::read moves each large struct
-    // exactly once; set_len(0) then prevents `projected` from dropping the moved
-    // elements. Swapping hands the sorted buffer to the caller and recycles the
-    // now-empty old buffer for the next call.
     out.clear();
     out.reserve(n);
     let ptr = projected.as_mut_ptr();
@@ -1096,9 +980,6 @@ fn radix_sort_by_depth(projected: &mut Vec<ProjectedTri>, descending: bool) {
     std::mem::swap(projected, out);
 }
 
-// ---------------------------------------------------------------------------
-// Ground shadow projection
-// ---------------------------------------------------------------------------
 
 fn project_shadow(
     triangles: &[Triangle],
@@ -1114,7 +995,6 @@ fn project_shadow(
 ) -> Vec<ProjectedTri> {
     let light_dir = shadow_dir;
 
-    // No shadow if light is at or below ground level
     if light_dir.z <= 0.01 {
         return Vec::new();
     }
@@ -1127,7 +1007,6 @@ fn project_shadow(
     let mut projected: Vec<ProjectedTri> = Vec::with_capacity(triangles.len());
 
     for tri in triangles {
-        // Project each vertex onto the ground plane along the light direction
         let mut sv = [Vec3::new(0.0, 0.0, 0.0); 3];
         for (i, v) in tri.vertices.iter().enumerate() {
             let t = (v.z - ground_z) / light_dir.z;
@@ -1149,9 +1028,6 @@ fn project_shadow(
     projected
 }
 
-// ---------------------------------------------------------------------------
-// SVG building helpers
-// ---------------------------------------------------------------------------
 
 fn svg_open(svg: &mut String, w: f64, h: f64, bg: &str) {
     svg.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ");
@@ -1208,14 +1084,11 @@ fn push_hatch_defs(svg: &mut String, hc: &crate::config::HatchConfig) {
         svg.push_str("\"/>");
     };
     match hc.style {
-        // A single family of vertical lines (tiled → parallel section lines).
         HatchStyle::Lines => push_line(0.0, 0.0, 0.0, s),
-        // Vertical + horizontal lines → a cross-hatch grid.
         HatchStyle::Cross => {
             push_line(0.0, 0.0, 0.0, s);
             push_line(0.0, 0.0, s, 0.0);
         }
-        // A `+` mark centred in each cell → a grid of plus signs.
         HatchStyle::Crosses => {
             let (c, arm) = (s * 0.5, s * HATCH_CROSS_ARM);
             push_line(c, c - arm, c, c + arm);
@@ -1231,23 +1104,19 @@ fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Opti
     svg.push_str("\" fill=\"");
     push_hex_color(svg, tri.r, tri.g, tri.b);
     svg.push('"');
-    // Per-group opacity
     if tri.opacity < 1.0 {
         svg.push_str(" fill-opacity=\"");
         push_f2(svg, tri.opacity);
         svg.push('"');
     }
-    // Debug area-light disk: clean fill, no edge strokes (would show fan spokes).
     if tri.group_id == Some(DEBUG_DISK_GID) {
         svg.push_str("/>");
         return;
     }
-    // Debug light octahedron faces
     if tri.group_id == Some(u32::MAX) {
         svg.push_str(" stroke=\"#333\" stroke-width=\"0.5\" stroke-linejoin=\"round\"/>");
         return;
     }
-    // Per-group stroke overrides
     let ga = tri.group_id.and_then(|gid| group_styles.get(&gid));
     let has_group_stroke = ga.map_or(false, |a| {
         a.stroke.as_deref().map_or(false, |s| s != "none") && a.stroke_width.unwrap_or(1.0) > 0.0
@@ -1273,8 +1142,6 @@ fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Opti
         svg.push_str("\" stroke-width=\"0.5\" stroke-linejoin=\"round\"");
     }
     svg.push_str("/>");
-    // Section hatching: overlay the cap face with the hatch pattern, in paint
-    // order right after its solid fill so nearer geometry still occludes it.
     if hatch && tri.group_id == Some(clip::CAP_GID) {
         svg.push_str("<polygon points=\"");
         push_tri_points(svg, &tri.pts);
@@ -1315,9 +1182,6 @@ fn capitalize(s: &str) -> String {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Turntable views
-// ---------------------------------------------------------------------------
 
 fn turntable_view(bc: Vec3, br: f64, azimuth: f64, elevation_deg: f64) -> ViewParams {
     let dist = br * 3.0;
@@ -1338,9 +1202,6 @@ fn turntable_labels(n: usize) -> Vec<String> {
     }).collect()
 }
 
-// ---------------------------------------------------------------------------
-// Preprocessing pipeline
-// ---------------------------------------------------------------------------
 
 /// Resolve a `ClipConfig` to a concrete world-space plane `[a,b,c,d]` (keep the
 /// `>= 0` half) plus the cap flag. For camera/axis/normal sources the plane's
@@ -1353,14 +1214,13 @@ fn resolve_clip(clip: &crate::config::ClipConfig, bmin: Vec3, bmax: Vec3, config
             let bc = bbox_center(bmin, bmax);
             let br = bbox_radius(bmin, bmax);
             let view = resolve_config_view(config, bc, br);
-            view.center.sub(view.camera).normalized() // forward: camera → scene
+            view.center.sub(view.camera).normalized()
         }
         ClipSource::Axis(0) => Vec3::new(1.0, 0.0, 0.0),
         ClipSource::Axis(1) => Vec3::new(0.0, 1.0, 0.0),
         ClipSource::Axis(_) => Vec3::new(0.0, 0.0, 1.0),
         ClipSource::Normal(v) => Vec3::from(*v).normalized(),
     };
-    // Extent of the model projected onto the normal.
     let corners = [
         Vec3::new(bmin.x, bmin.y, bmin.z), Vec3::new(bmax.x, bmin.y, bmin.z),
         Vec3::new(bmin.x, bmax.y, bmin.z), Vec3::new(bmax.x, bmax.y, bmin.z),
@@ -1369,12 +1229,10 @@ fn resolve_clip(clip: &crate::config::ClipConfig, bmin: Vec3, bmax: Vec3, config
     ];
     let (mut tmin, mut tmax) = (f64::INFINITY, f64::NEG_INFINITY);
     for c in corners { let t = n.dot(c); tmin = tmin.min(t); tmax = tmax.max(t); }
-    // Position of the cut along the normal (measured from the near side).
     let t = match clip.distance {
         Some(d) => tmin + d,
         None => tmin + clip.depth.clamp(0.0, 1.0) * (tmax - tmin),
     };
-    // keep_far → keep `n·x >= t`; keep_near → flip the normal so `-n·x >= -t`.
     let plane = if clip.keep_far {
         [n.x, n.y, n.z, -t]
     } else {
@@ -1387,8 +1245,6 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
     let mut tris = triangles.to_vec();
     let (mut bmin, mut bmax) = compute_bbox(&tris);
 
-    // 0. Decimation (vertex clustering) — runs first so every later stage and
-    //    the shading itself operate on the reduced mesh.
     if config.decimate > 0.0 {
         tris = decimate::decimate(&tris, bmin, bmax, config.decimate);
         if !tris.is_empty() {
@@ -1398,7 +1254,6 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
         }
     }
 
-    // 1. Color mapping
     if !config.color_map.is_empty() {
         match config.color_map.as_str() {
             "overhang" => {
@@ -1416,7 +1271,6 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
                     .map(|s| parse_hex_color(s))
                     .collect();
                 if let Err(e) = color_map::apply_scalar_map(&mut tris, &config.scalar_function, &palette, config.vertex_smoothing) {
-                    // If parsing fails, skip scalar mapping
                     eprintln!("Scalar function error: {}", e);
                 }
             }
@@ -1430,22 +1284,17 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
         }
     }
 
-    // 2. Clipping
     if let Some(clip_cfg) = &config.clip {
         let (plane, cap) = resolve_clip(clip_cfg, bmin, bmax, config);
-        // Fall back to the model's base color for plain (uncolored) meshes, so the
-        // clipped surface and cap inherit `color` instead of a hardcoded gray.
         let base = parse_hex_color(&config.color);
         tris = clip::clip_triangles(&tris, plane, cap, base);
     }
 
-    // 3. Explode
     if config.explode.abs() > 1e-12 {
         let bc = bbox_center(bmin, bmax);
         explode::explode_triangles(&mut tris, bc, config.explode);
     }
 
-    // 4. Recompute bbox after clipping/exploding
     if config.clip.is_some() || config.explode.abs() > 1e-12 {
         if !tris.is_empty() {
             let (new_min, new_max) = compute_bbox(&tris);
@@ -1454,7 +1303,6 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
         }
     }
 
-    // 5. Normalize face normals (avoids per-triangle normalize in shade_point)
     for tri in &mut tris {
         tri.normal = tri.normal.normalized();
     }
@@ -1528,7 +1376,6 @@ fn prep_cache_key(base: u64, config: &RenderConfig) -> u64 {
         (h ^ x).wrapping_mul(0x100000001b3)
     }
     let mut h = base;
-    // Color mapping (sets vertex colors).
     for &b in config.color_map.as_bytes() { h = m(h, b as u64); }
     h = m(h, 0xF1);
     for s in &config.color_map_palette {
@@ -1540,10 +1387,7 @@ fn prep_cache_key(base: u64, config: &RenderConfig) -> u64 {
     h = m(h, config.overhang_angle.to_bits());
     h = m(h, config.vertex_smoothing as u64);
     for &u in &config.up { h = m(h, u.to_bits()); }
-    // Clipping (geometry) + explode + decimate.
     h = clip_key(h, config);
-    // Clipping bakes the model base color into the cap/clipped vertex colors for
-    // plain meshes, so the preprocessed mesh depends on `color` when clip is on.
     if config.clip.is_some() {
         for &b in config.color.as_bytes() { h = m(h, b as u64); }
         h = m(h, 0xF4);
@@ -1576,9 +1420,6 @@ fn cached_preprocess<'a>(
     (&e.0, e.1, e.2)
 }
 
-// ---------------------------------------------------------------------------
-// Point projection helper (for dimensions/outlines)
-// ---------------------------------------------------------------------------
 
 fn make_point_projector(
     config: &RenderConfig,
@@ -1598,16 +1439,12 @@ fn make_point_projector(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Main entry point
-// ---------------------------------------------------------------------------
 
 pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>) -> String {
     if triangles.is_empty() {
         return build_empty_svg(config);
     }
 
-    // Preprocessing pipeline (cached when the mesh geometry/colors are unchanged)
     let mut prep_owned: Option<(Vec<Triangle>, Vec3, Vec3)> = None;
     let (tris, bmin, bmax) = cached_preprocess(triangles, config, prep_key, &mut prep_owned);
     if tris.is_empty() {
@@ -1616,7 +1453,6 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
 
-    // Turntable mode
     if config.turntable.iterations >= 2 {
         let labels = turntable_labels(config.turntable.iterations);
         let mut views = Vec::with_capacity(config.turntable.iterations);
@@ -1627,7 +1463,6 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
         return render_grid_svg(&tris, config, &views, br, bmin.z, group_styles);
     }
 
-    // Grid mode
     if let Some(ref views) = config.views {
         if !views.is_empty() {
             let resolved: Vec<_> = views.iter().map(|n| (named_view(n, bc, br), capitalize(n))).collect();
@@ -1635,13 +1470,10 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
         }
     }
 
-    // Smooth normals (skip for cel shading which doesn't use per-vertex normals)
     let needs_smooth = config.smooth
         && config.mode != "wireframe"
         && config.shading != "cel"
         && config.shading != "flat";
-    // Owned fallback for the no-cache path (e.g. PLY, whose point-cloud
-    // reconstruction can be camera-dependent); cached for STL/OBJ.
     let owned_smooth: Option<smooth::SmoothData> = if needs_smooth && data_key.is_none() {
         Some(smooth::compute_vertex_normals(&tris))
     } else {
@@ -1656,7 +1488,6 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
         None
     };
 
-    // Single view
     let view = resolve_config_view(config, bc, br);
     let is_wireframe = config.mode == "wireframe";
     let is_solid_wireframe = config.mode == "solid+wireframe";
@@ -1677,7 +1508,6 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
         Vec::new()
     };
 
-    // Outline edges
     let outline_edges = if config.outline.is_some() && !is_wireframe {
         let view_dir = (view.center - view.camera).normalized();
         let projector = make_point_projector(config, &view, config.width, config.height, br);
@@ -1693,9 +1523,6 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
     )
 }
 
-// ---------------------------------------------------------------------------
-// Single-view SVG
-// ---------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
 fn build_single_svg_full(
@@ -1722,7 +1549,6 @@ fn build_single_svg_full(
     let hatch = config.clip.as_ref().and_then(|c| c.hatch.as_ref());
     if let Some(hc) = hatch { push_hatch_defs(&mut svg, hc); }
 
-    // Background rect
     if !config.background.is_empty() && config.background != "none" {
         svg.push_str("<rect width=\""); push_f2(&mut svg, w);
         svg.push_str("\" height=\""); push_f2(&mut svg, h);
@@ -1730,7 +1556,6 @@ fn build_single_svg_full(
         svg.push_str("\"/>");
     }
 
-    // Shadow pass
     if !shadow_tris.is_empty() {
         svg.push_str("<g opacity=\""); push_f2(&mut svg, unsafe { config.shadow.as_ref().unwrap_unchecked() }.opacity); svg.push_str("\">");
         for tri in shadow_tris {
@@ -1739,7 +1564,6 @@ fn build_single_svg_full(
         svg.push_str("</g>");
     }
 
-    // Model pass
     if is_wireframe {
         let wire_color = resolve_wireframe_color(config, false);
         let wire_width = config.wireframe.width;
@@ -1755,7 +1579,6 @@ fn build_single_svg_full(
         }
     }
 
-    // Wireframe overlay (solid+wireframe mode)
     if is_solid_wireframe {
         let wire_color = resolve_wireframe_color(config, true);
         let wire_width = config.wireframe.width;
@@ -1764,7 +1587,6 @@ fn build_single_svg_full(
         }
     }
 
-    // Silhouette outlines
     if !outline_edges.is_empty() {
         let ol = unsafe { config.outline.as_ref().unwrap_unchecked() };
         let ol_color = ol.color.as_str();
@@ -1780,7 +1602,6 @@ fn build_single_svg_full(
         }
     }
 
-    // Annotations
     if let Some(ref ann_cfg) = config.annotations {
         let centroids = compute_group_centroids(tris);
         let anns = annotations::compute_annotations(
@@ -1789,7 +1610,6 @@ fn build_single_svg_full(
         annotations::write_annotations_svg(&mut svg, &anns, ann_cfg);
     }
 
-    // Debug overlay
     if config.debug {
         render_debug_light_lines(&mut svg, config, view, bmin, bmax, w, h);
         render_debug_overlay(&mut svg, w, h, orig_tris, bmin, bmax, view, config, "SVG");
@@ -1865,9 +1685,6 @@ fn make_debug_light_tris(
         let g = linear_to_srgb(light.color.1.min(1.0f32));
         let b = linear_to_srgb(light.color.2.min(1.0f32));
 
-        // Area (disk) lights render as a flat disk of the light color, sized to
-        // the light's physical radius and facing the model center — distinct from
-        // the point-light marker octahedron.
         if light.kind == LightKind::Area && light.size > 0.0 {
             let n = {
                 let d = bc.sub(pos);
@@ -1878,7 +1695,7 @@ fn make_debug_light_tris(
             let vv = n.cross(u);
             const SEGS: usize = 24;
             let mut dv = Vec::with_capacity(SEGS + 1);
-            dv.push(pos); // center
+            dv.push(pos);
             for i in 0..SEGS {
                 let ang = (i as f64) / (SEGS as f64) * std::f64::consts::TAU;
                 dv.push(pos.add(u.scale(light.size * ang.cos())).add(vv.scale(light.size * ang.sin())));
@@ -1917,7 +1734,6 @@ fn make_debug_light_tris(
             Vec3::new(pos.x, pos.y, pos.z - size),
         ];
 
-        // Transform to camera space and project
         let cam: Vec<Vec3> = verts.iter().map(|v| view_mat.transform_point(*v)).collect();
         let proj_pts: Vec<(f64, f64)> = (0..6).map(|i| {
             let c = [cam[i], cam[i], cam[i]];
@@ -1996,7 +1812,6 @@ fn render_debug_overlay(
     let key_x = val_x - 120.0;
     let mut row = 0usize;
 
-    // Emit one key-value debug row
     let mut emit_row = |svg: &mut String, key: &str, val: &str| {
         let y = pad + font_size + row as f64 * line_height;
         svg.push_str("<text x=\""); push_f1(svg, key_x);
@@ -2049,7 +1864,6 @@ fn render_debug_overlay(
     }
 
     let mut buf = String::with_capacity(32);
-    // Helper for Vec3 rows
     let mut vec3_row = |svg: &mut String, key: &str, v: Vec3| {
         buf.clear();
         buf.push('('); push_f2(&mut buf, v.x);
@@ -2134,7 +1948,6 @@ fn overlay_grid_labels(
     let cell_w = w / cols as f64;
     let cell_h = h / rows as f64;
 
-    // Labels
     for (i, (_view, label)) in views.iter().enumerate() {
         let col = i % cols;
         let row = i / cols;
@@ -2147,7 +1960,6 @@ fn overlay_grid_labels(
         svg.push_str("</text>");
     }
 
-    // Grid lines
     if views.len() > 1 {
         write_grid_lines(&mut svg, cols, rows, cell_w, cell_h, w, h);
     }
@@ -2163,9 +1975,6 @@ fn build_empty_svg(config: &RenderConfig) -> String {
     svg
 }
 
-// ---------------------------------------------------------------------------
-// Grid (multi-view) rendering
-// ---------------------------------------------------------------------------
 
 /// Compute grid layout: (cols, rows) from the number of views.
 fn grid_layout(n: usize) -> (usize, usize) {
@@ -2189,7 +1998,6 @@ fn render_grid_svg(
     let is_wireframe = config.mode == "wireframe";
 
     let lights = resolve_lights(config);
-    // Shadow maps are camera-independent → build once, reuse for every view.
     let (gbmin, gbmax) = compute_bbox(triangles);
     let shadow_data = build_shadow_data(triangles, &lights, None, config, group_styles, bbox_center(gbmin, gbmax), br, false);
     let estimated = triangles.len() * 200 * views.len() + 512;
@@ -2250,7 +2058,6 @@ fn render_grid_svg(
         svg.push_str("</g>");
     }
 
-    // Grid lines
     if views.len() > 1 {
         write_grid_lines(&mut svg, cols, rows, cell_w, cell_h, config.width, config.height);
     }
@@ -2259,9 +2066,6 @@ fn render_grid_svg(
     svg
 }
 
-// ---------------------------------------------------------------------------
-// PNG rendering
-// ---------------------------------------------------------------------------
 
 /// The raw RGBA producer shared by both plain and overlay outputs: downsamples
 /// (opaque SSAA) or composites z-buffer coverage (transparent) into straight
@@ -2349,10 +2153,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     let h = config.height as usize * aa;
     let vw = config.width * aa as f64;
     let vh = config.height * aa as f64;
-    // Transparent output: emit RGBA, using the z-buffer as model coverage. The
-    // buffer is still filled with white so the opaque rasterization is unchanged;
-    // the white only shows through where the model doesn't cover, and there it is
-    // made transparent at encode time (and excluded from edge colour averaging).
     let transparent = config.background.is_empty() || config.background == "none";
     let bg = if transparent {
         (255, 255, 255)
@@ -2365,7 +2165,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         return finish_raster(&buf, 1, transparent);
     }
 
-    // Preprocessing pipeline (cached when the mesh geometry/colors are unchanged)
     let mut prep_owned: Option<(Vec<Triangle>, Vec3, Vec3)> = None;
     let (tris, bmin, bmax) = cached_preprocess(triangles, config, prep_key, &mut prep_owned);
     if tris.is_empty() {
@@ -2375,7 +2174,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
 
-    // Turntable mode
     if config.turntable.iterations >= 2 {
         let labels = turntable_labels(config.turntable.iterations);
         let mut views = Vec::with_capacity(config.turntable.iterations);
@@ -2392,7 +2190,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         };
     }
 
-    // Grid mode
     if let Some(ref views) = config.views {
         if !views.is_empty() {
             let resolved: Vec<_> = views.iter().map(|n| (named_view(n, bc, br), capitalize(n))).collect();
@@ -2406,12 +2203,10 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Smooth normals (skip for cel shading which doesn't use per-vertex normals)
     let needs_smooth = config.smooth
         && config.mode != "wireframe"
         && config.shading != "cel"
         && config.shading != "flat";
-    // Owned fallback for the no-cache path (PLY); cached for STL/OBJ.
     let owned_smooth: Option<smooth::SmoothData> = if needs_smooth && data_key.is_none() {
         Some(smooth::compute_vertex_normals(&tris))
     } else {
@@ -2426,7 +2221,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         None
     };
 
-    // Single view
     let view = resolve_config_view(config, bc, br);
     let is_wireframe = config.mode == "wireframe";
     let is_solid_wireframe = config.mode == "solid+wireframe";
@@ -2437,14 +2231,10 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, vw, vh));
     }
-    // Front-to-back sort: closer triangles fill z-buffer first, so farther
-    // triangles' pixels fail z-test early (skipping color interpolation + writes).
-    // Also correct for transparent pass which iterates in reverse (back-to-front).
     radix_sort_by_depth(&mut projected, true);
 
     let mut buf = PixelBuffer::new(w, h, bg);
 
-    // Shadow pass
     if let Some(shadow_cfg) = &config.shadow {
         if !is_wireframe {
             let shadow = project_shadow(&tris, config, shadow_light_dir(config), &view, vw, vh, br, bmin.z, false, &shadow_cfg.color);
@@ -2452,18 +2242,11 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Model pass: opaque triangles first (z-buffer write + test), then transparent (blend only)
     if !is_wireframe {
-        // Opaque pass (front-to-back: closer triangles fill z-buffer first,
-        // so farther triangles' pixels fail z-test early, skipping color interpolation).
-        // Hi-Z: skip entire triangles whose closest point is behind all overlapping tiles.
         for tri in &projected {
             if tri.opacity >= 1.0 {
                 let max_d = tri.depths[0].max(tri.depths[1]).max(tri.depths[2]) as f32;
                 if buf.hiz_can_skip(&tri.pts, max_d) { continue; }
-                // Textured faces (OBJ map_Kd): sample the bound texture per pixel
-                // and modulate it by the (white-albedo) lit vertex colors, which
-                // already carry ambient/diffuse/specular + non-per-pixel shadow.
                 if let (Some(ti), Some(uvs)) = (tri.tex, tri.uvs) {
                     if let Some(tex) = textures.get(ti as usize) {
                         let light = tri.vertex_colors.unwrap_or([(tri.r, tri.g, tri.b); 3]);
@@ -2474,7 +2257,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
                     }
                 }
                 match (shadow_data.as_ref(), tri.pp) {
-                    // Per-pixel shadows: sample the maps at each fragment's world pos.
                     (Some(sd), Some((wp, normal))) => {
                         let cols = tri.vertex_colors.unwrap_or([(tri.r, tri.g, tri.b); 3]);
                         let world = [[wp[0].x, wp[0].y, wp[0].z], [wp[1].x, wp[1].y, wp[1].z], [wp[2].x, wp[2].y, wp[2].z]];
@@ -2493,7 +2275,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
                 buf.hiz_update(&tri.pts);
             }
         }
-        // Transparent pass (back-to-front via reverse iteration for correct alpha blending)
         for tri in projected.iter().rev() {
             if tri.opacity < 1.0 {
                 if let Some(vcols) = &tri.vertex_colors {
@@ -2505,9 +2286,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Section hatching over clip caps (PNG). The SVG path fills the cap with a
-    // <pattern>; here we overlay anti-aliased section lines on the visible cap
-    // fragments so cross-sections read the same in PNG output.
     if !is_wireframe {
         if let Some(hc) = config.clip.as_ref().and_then(|c| c.hatch.as_ref()) {
             let color = parse_hex_color(&hc.color);
@@ -2525,17 +2303,14 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Per-triangle stroke (global config.stroke or per-group overrides) for PNG
     if !is_wireframe {
         let global_has_stroke = config.stroke.color != "none" && config.stroke.width > 0.0;
         if global_has_stroke && group_styles.is_empty() {
-            // Fast path: uniform stroke, no per-group overrides
             let (sr, sg, sb) = parse_hex_color(&config.stroke.color);
             for tri in &projected {
                 buf.draw_triangle_edges(&tri.pts, sr, sg, sb);
             }
         } else if global_has_stroke || !group_styles.is_empty() {
-            // Slow path: per-group stroke overrides
             let global_color = if global_has_stroke { Some(parse_hex_color(&config.stroke.color)) } else { None };
             let default_stroke_width = config.stroke.width;
             for tri in &projected {
@@ -2561,7 +2336,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Debug light octahedron edges (z-tested so they hide behind model)
     if config.debug {
         for tri in &projected {
             if tri.group_id == Some(u32::MAX) {
@@ -2570,7 +2344,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Wireframe overlay for PNG
     if is_solid_wireframe || is_wireframe {
         let (wr, wg, wb) = parse_hex_color(resolve_wireframe_color(config, is_solid_wireframe));
         for tri in &projected {
@@ -2578,7 +2351,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Screen-space outline detection for PNG
     if let Some(ref outline) = config.outline {
         if !is_wireframe {
             let (or, og, ob) = parse_hex_color(&outline.color);
@@ -2586,7 +2358,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Apply SSAO (screen-space ambient occlusion) if enabled
     if let Some(ref ssao) = config.ssao {
         if !is_wireframe {
             let ssao_params = crate::ssao::SSAOParams {
@@ -2599,14 +2370,12 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Bloom post-process
     if let Some(ref bloom) = config.bloom {
         if !is_wireframe {
             buf.apply_bloom(bloom.threshold as f32, bloom.intensity as f32, bloom.radius);
         }
     }
 
-    // Glow post-process
     if let Some(ref glow) = config.glow {
         if !is_wireframe {
             let gc = parse_hex_color(&glow.color);
@@ -2614,22 +2383,15 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    // Sharpen post-process
     if let Some(ref sharpen) = config.sharpen {
         buf.apply_sharpen(sharpen.strength as f32);
     }
 
-    // FXAA post-process. `antialias` is the single AA control: 0 = none,
-    // 1 = FXAA, 2/4 = SSAA (aa > 1, handled by the supersample downsample), so
-    // FXAA runs only at antialias == 1. Skipped for transparent output: FXAA
-    // blends edges in RGB only, which would fringe against the white fill while
-    // alpha stays hard — use SSAA for smooth transparent edges instead.
     if config.antialias == 1 && !transparent {
         crate::fxaa::apply_fxaa(&mut buf.pixels, buf.width, buf.height);
     }
 
     if let Some(ref ann_cfg) = config.annotations {
-        // Scale centroids from supersampled space to output space
         let scale = 1.0 / aa as f64;
         let centroids: FxHashMap<u32, (f64, f64)> = compute_group_centroids(&projected)
             .into_iter()
@@ -2659,16 +2421,12 @@ fn render_grid_png_buf(
     let (cols, rows) = grid_layout(views.len());
     let cell_w = w / cols;
     let cell_h = h / rows;
-    // Reserve space for labels (proportional to cell height, matching SVG's 24px at 500px)
     let label_h = if config.grid_labels { (cell_h as f64 * 0.048).round() as usize } else { 0 };
     let render_h = cell_h - label_h;
     let is_wireframe = config.mode == "wireframe";
 
     let lights = resolve_lights(config);
-    // Shadow maps are camera-independent → build once, reuse for every view.
     let (gbmin, gbmax) = compute_bbox(triangles);
-    // Grid uses the per-vertex/flat sampling path (its raster loop has no
-    // per-pixel branch), so disable per-pixel here regardless of config.
     let shadow_data = build_shadow_data(triangles, &lights, None, config, group_styles, bbox_center(gbmin, gbmax), br, false);
     let mut buf = PixelBuffer::new(w, h, bg);
 
@@ -2709,7 +2467,6 @@ fn render_grid_png_buf(
                 buf.rasterize_triangle_offset(&tri.pts, &tri.depths, tri.r, tri.g, tri.b, ox, oy);
                 buf.hiz_update(&pts_off);
             }
-            // Section hatching over clip caps (matches the SVG grid <pattern>).
             if let Some(hc) = config.clip.as_ref().and_then(|c| c.hatch.as_ref()) {
                 let color = parse_hex_color(&hc.color);
                 let ang = hc.angle.to_radians();
@@ -2747,17 +2504,16 @@ fn render_grid_png_buf(
 /// used when the mesh encloses ~no signed volume.
 fn mesh_measures(triangles: &[Triangle], fallback_centroid: Vec3) -> (f64, f64, Vec3) {
     let mut area = 0.0;
-    let mut vol6 = 0.0; // 6 × signed volume
-    let mut cacc = Vec3::new(0.0, 0.0, 0.0); // Σ  sv · (a + b + c)
+    let mut vol6 = 0.0;
+    let mut cacc = Vec3::new(0.0, 0.0, 0.0);
     for t in triangles {
         let (a, b, c) = (t.vertices[0], t.vertices[1], t.vertices[2]);
         area += 0.5 * b.sub(a).cross(c.sub(a)).length();
-        let sv = a.dot(b.cross(c)); // 6 × signed volume of tetra (origin, a, b, c)
+        let sv = a.dot(b.cross(c));
         vol6 += sv;
         cacc = cacc.add(a.add(b).add(c).scale(sv));
     }
     let volume = (vol6 / 6.0).abs();
-    // Centre of mass = Σ(vol_i · tetra_centroid_i) / V, with tetra_centroid = (a+b+c)/4.
     let centroid = if vol6.abs() > 1e-9 {
         cacc.scale(1.0 / (4.0 * vol6))
     } else {
@@ -2767,7 +2523,6 @@ fn mesh_measures(triangles: &[Triangle], fallback_centroid: Vec3) -> (f64, f64, 
 }
 
 pub fn get_info(triangles: &[Triangle], config: &RenderConfig) -> String {
-    // Apply decimation so the reported counts match what render() produces.
     let decimated: Vec<Triangle>;
     let triangles: &[Triangle] = if config.decimate > 0.0 && !triangles.is_empty() {
         let (bmin, bmax) = compute_bbox(triangles);

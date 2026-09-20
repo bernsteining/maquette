@@ -1,12 +1,3 @@
-// Mesh-side shadow builder.
-//
-// The shade-time half — the `ShadowMap` depth map with its PCF/PCSS sampling,
-// the `LightShadow` dispatch, and `BiasParams` — is shared from maquette-core
-// and re-exported here so the rasterizer's `crate::shadow::…` paths are
-// unchanged. Only the frustum *builder* stays local: the mesh frames each light
-// view at the scene centre (a simple, robust approximation), whereas gltf aims
-// along the light's own direction with its real spot cone. The mesh also
-// filters occluders (transparent triangles don't cast) via `is_occluder`.
 
 use crate::config::{LightKind, ShadowMapConfig};
 use crate::math::{Mat4, Vec3};
@@ -38,7 +29,6 @@ pub fn build_shadow_maps(
             } else {
                 LightShadow::Single(build_one(light, bc, br, up, res))
             };
-            // Depth pass with the occluder filter (transparent tris don't cast).
             match &mut ls {
                 LightShadow::Single(m) => {
                     for tri in triangles {
@@ -61,9 +51,7 @@ pub fn build_shadow_maps(
 }
 
 fn build_one(light: &ResolvedLight, bc: Vec3, br: f64, up: Vec3, res: usize) -> ShadowMap {
-    // Pick an up vector for the light view that isn't parallel to its forward axis.
     let forward = if light.kind == LightKind::Directional {
-        // `vector` points toward the light; the light shines along -vector.
         light.vector.normalized().scale(-1.0)
     } else {
         (bc - light.vector).normalized()

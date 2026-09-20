@@ -21,11 +21,6 @@ use crate::math::Vec3;
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
 use std::cell::RefCell;
 
-// Reusable scratch buffers for SSAO. Sized on demand each render, but the
-// backing allocation is retained across calls — so an animation scrub with
-// N frames does one alloc + fill instead of N. Also applies to the harness
-// bench loop (--bench=5 sees ~4 fewer 1MB allocations). thread_local rather
-// than static-mut so this stays sound if we ever host multi-threaded wasm.
 thread_local! {
     static AO_BUFFER:    RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
     static FLAT_OFFSETS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
@@ -129,7 +124,7 @@ impl PixelBuffer {
         let n = self.width * self.height;
         for idx in 0..n {
             let reveal = unsafe { *self.oit_reveal.get_unchecked(idx) };
-            if reveal >= 1.0 { continue; } // nothing accumulated here
+            if reveal >= 1.0 { continue; }
             let ao = idx * 4;
             let (ar, ag, ab, aa) = unsafe {
                 (
@@ -227,7 +222,6 @@ impl PixelBuffer {
             x0 += sx; y0 += sy; zc += sz;
             cr += scr; cg += scg; cb += scb; ca += sca;
         }
-        // Suppress unused warnings.
         let _ = (x1, y1);
     }
 
@@ -399,11 +393,6 @@ impl PixelBuffer {
             None => return,
         };
         let width = self.width;
-        // `depths` is the per-vertex 1/w used for perspective-correct attribute
-        // interpolation. `zbuf_depths` is the per-vertex z-buffer key (larger =
-        // closer). For perspective they're equal (both -1/v.z). For orthographic
-        // they differ: `depths = [1, 1, 1]` (no perspective correction — plain
-        // barycentric interp) and `zbuf_depths = [-v.z, -v.z, -v.z]` (linear).
         let d0 = depths[0] as f32;
         let d1 = depths[1] as f32;
         let d2 = depths[2] as f32;
@@ -411,11 +400,6 @@ impl PixelBuffer {
         let zk1 = zbuf_depths[1] as f32;
         let zk2 = zbuf_depths[2] as f32;
 
-        // Precompute attribute·depth per vertex — the "over-w" values that
-        // make perspective-correct interpolation just barycentric math.
-        // Stored as f32 scalars first, then splatted to v128 once for the
-        // SIMD interior. Also kept as f64 tuples for the scalar remainder,
-        // where the extra precision costs nothing measurable.
         let pd_pos = [
             (positions[0].x as f32 * d0, positions[0].y as f32 * d0, positions[0].z as f32 * d0),
             (positions[1].x as f32 * d1, positions[1].y as f32 * d1, positions[1].z as f32 * d1),
@@ -451,14 +435,8 @@ impl PixelBuffer {
             (tangents[1][0] * d1, tangents[1][1] * d1, tangents[1][2] * d1),
             (tangents[2][0] * d2, tangents[2][1] * d2, tangents[2][2] * d2),
         ];
-        // Bitangent handedness is a per-triangle constant; splat once and pass
-        // through unchanged (barycentric interp of ±1 is well-defined as ±1
-        // only when all three vertices agree, which is our per-triangle case).
         let tan_w_splat = tangents[0][3];
 
-        // Lazy-init OIT buffers on the first WBOIT triangle so opaque-only
-        // renders don't pay the memory/init cost. Once initialised the buffers
-        // survive for the rest of the render and are composited at the end.
         if matches!(blend, BlendMode::WBOIT) && !self.oit_used {
             let n = self.width * self.height;
             self.oit_accum = vec![0.0f32; n * 4];
@@ -481,8 +459,6 @@ impl PixelBuffer {
             let zero = f32x4_splat(0.0);
             let one = f32x4_splat(1.0);
 
-            // Splat per-vertex attribute·depth values once — reused for every
-            // 4-pixel batch inside this triangle. 24 f32x4 splats total.
             let pdv_pos_x = [f32x4_splat(pd_pos[0].0), f32x4_splat(pd_pos[1].0), f32x4_splat(pd_pos[2].0)];
             let pdv_pos_y = [f32x4_splat(pd_pos[0].1), f32x4_splat(pd_pos[1].1), f32x4_splat(pd_pos[2].1)];
             let pdv_pos_z = [f32x4_splat(pd_pos[0].2), f32x4_splat(pd_pos[1].2), f32x4_splat(pd_pos[2].2)];
@@ -534,13 +510,8 @@ impl PixelBuffer {
                         let in_mask = i32x4_bitmask(inside);
 
                         if in_mask != 0 {
-                            // Perspective-interp weight (`Σ w_i · d_i`, where
-                            // d_i is 1/w for perspective, 1 for ortho).
                             let depth_v = f32x4_add(f32x4_add(
                                 f32x4_mul(w0v, d0v), f32x4_mul(w1v, d1v)), f32x4_mul(w2v, d2v));
-                            // Z-buffer key (`Σ w_i · zk_i`). For perspective
-                            // this equals `depth_v` and LLVM folds the compute;
-                            // for ortho zk_i = -v.z (linear depth).
                             let zbuf_key_v = f32x4_add(f32x4_add(
                                 f32x4_mul(w0v, zk0v), f32x4_mul(w1v, zk1v)), f32x4_mul(w2v, zk2v));
                             let idx0 = row_base + px;
@@ -551,9 +522,6 @@ impl PixelBuffer {
                             if wmask != 0 {
                                 let inv_depth_v = f32x4_div(one, depth_v);
 
-                                // Perspective-correct barycentric interp of each attribute:
-                                //   A = Σ(w_i · A_i · depth_i) / Σ(w_i · depth_i)
-                                //     = Σ(w_i · pd_i) · inv_depth
                                 let interp = |a: &[v128; 3]| -> v128 {
                                     let num = f32x4_add(
                                         f32x4_add(f32x4_mul(w0v, a[0]), f32x4_mul(w1v, a[1])),
@@ -581,7 +549,6 @@ impl PixelBuffer {
                                 let tan_y = interp(&pdv_tan_y);
                                 let tan_z = interp(&pdv_tan_z);
 
-                                // Normalize the interpolated normal in SIMD.
                                 let n_len2 = f32x4_add(
                                     f32x4_add(f32x4_mul(nx_raw, nx_raw), f32x4_mul(ny_raw, ny_raw)),
                                     f32x4_mul(nz_raw, nz_raw),
@@ -611,7 +578,6 @@ impl PixelBuffer {
                         px += 4;
                     }
 
-                    // Scalar remainder — shade one at a time via shade_scalar.
                     let mut w0s = f32x4_extract_lane::<0>(w0v);
                     let mut w1s = f32x4_extract_lane::<0>(w1v);
                     let mut w2s = f32x4_extract_lane::<0>(w2v);
@@ -701,12 +667,6 @@ impl PixelBuffer {
         let num_samples = offsets[0].len();
         let batches = num_samples / 4;
         let n_rot = crate::ssao::NOISE_ROTATIONS;
-        // Take ownership of the reusable buffers out of the thread-locals for
-        // the duration of this render, then put them back at the end. Keeps
-        // the backing allocation alive across renders (saves ~1 MB alloc + fill
-        // per 512×512 render for `ao_buffer`, plus a couple of small ones for
-        // the offset tables). Safe: apply_ssao has no early returns / `?`, so
-        // the swap-back at the bottom always runs.
         let mut flat_offsets = FLAT_OFFSETS.with(|c| std::mem::take(&mut *c.borrow_mut()));
         let mut z_biases     = Z_BIASES    .with(|c| std::mem::take(&mut *c.borrow_mut()));
         flat_offsets.clear(); flat_offsets.resize(n_rot * num_samples, 0);
@@ -821,7 +781,6 @@ impl PixelBuffer {
 
         let blurred = crate::ssao::bilateral_blur_separable(&ao_buffer, &self.zbuf, w, h, 4);
 
-        // Apply AO by darkening pixels.
         unsafe {
             for i in 0..w * h {
                 let ao = *blurred.get_unchecked(i);
@@ -832,8 +791,6 @@ impl PixelBuffer {
             }
         }
 
-        // Return the scratch Vecs to the thread-locals so the next call reuses
-        // the backing allocations. `blurred` is a fresh Vec — dropped here.
         AO_BUFFER   .with(|c| *c.borrow_mut() = ao_buffer);
         FLAT_OFFSETS.with(|c| *c.borrow_mut() = flat_offsets);
         Z_BIASES    .with(|c| *c.borrow_mut() = z_biases);
@@ -847,13 +804,10 @@ impl PixelBuffer {
             width: self.width, height: self.height,
             pixels: self.pixels.clone(),
             zbuf: self.zbuf.clone(),
-            // OIT buffers are consumed by `composite_oit` before downsample —
-            // downsampled buffer never needs its own.
             oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false,
         }; }
         if factor == 2 { return self.downsample_2x(); }
         if factor == 4 { return self.downsample_2x().downsample_2x(); }
-        // Generic scalar path for other factors.
         let nw = self.width / factor;
         let nh = self.height / factor;
         let count = (factor * factor) as u32;
@@ -886,9 +840,6 @@ impl PixelBuffer {
                 }
             }
         }
-        // Rebuild a partial z-buffer via the same box average — matters for
-        // the transparent-background path (pixels with zbuf == −∞ are treated
-        // as background). Any lane hit becomes non-∞.
         let mut zbuf = vec![f32::NEG_INFINITY; nw * nh];
         for ny in 0..nh {
             for nx in 0..nw {
@@ -918,7 +869,7 @@ impl PixelBuffer {
         let mut out = vec![0u8; nw * nh * 3];
 
         unsafe {
-            let half_v = i16x8_splat(2); // rounding: (sum + 2) >> 2
+            let half_v = i16x8_splat(2);
 
             for ny in 0..nh {
                 let row0 = ny * 2 * src_w3;
@@ -990,8 +941,6 @@ impl PixelBuffer {
             }
         }
 
-        // Coverage-preserving zbuf: any covered subpixel means output is
-        // covered. Use max (front-most in our +z=closer convention).
         let mut zbuf = vec![f32::NEG_INFINITY; nw * nh];
         for ny in 0..nh {
             for nx in 0..nw {
@@ -1019,17 +968,12 @@ impl PixelBuffer {
         let mut rgba = vec![0u8; n * 4];
         let src = self.pixels.as_ptr();
         let dst = rgba.as_mut_ptr();
-        // A batch of 4 pixels reads `[p*3 .. p*3 + 16)` and writes 16 bytes.
-        // Safe while `p*3 + 16 <= 3n`, i.e. `p <= n - 6` (integer).
         let simd_end_p = if n >= 6 { (n - 5) & !3 } else { 0 };
         unsafe {
             let ff = u8x16_splat(0xff);
             let mut p = 0usize;
             while p < simd_end_p {
                 let v = v128_load(src.add(p * 3) as *const v128);
-                // Lane picks: [R0,G0,B0, α, R1,G1,B1, α, R2,G2,B2, α, R3,G3,B3, α]
-                // 0-15 come from `v`; 16 comes from `ff` (splat, so any lane of
-                // `ff` is 0xFF — pick 16).
                 let out = i8x16_shuffle::<
                     0, 1, 2, 16,
                     3, 4, 5, 16,
@@ -1039,7 +983,6 @@ impl PixelBuffer {
                 v128_store(dst.add(p * 4) as *mut v128, out);
                 p += 4;
             }
-            // Tail: remaining `n - p` pixels scalar.
             while p < n {
                 *dst.add(p * 4)     = *src.add(p * 3);
                 *dst.add(p * 4 + 1) = *src.add(p * 3 + 1);
@@ -1138,18 +1081,8 @@ unsafe fn write_pixel(
             *zbuf.get_unchecked_mut(idx) = depth;
         }
         BlendMode::WBOIT => {
-            // WBOIT accumulate: (rgb·a·w, a·w) into accum, (1−a) into reveal.
-            // Do NOT touch the pixel buffer or z-buffer — the opaque render is
-            // still visible where the translucents get composited later.
-            // Weight `w = a`: simple form that works well for non-interpenetrating
-            // translucents. Can be swapped for a depth-weighted variant later
-            // if needed.
             let a = rgba[3].clamp(0.0, 1.0);
             if a <= 0.0 { return; }
-            // Depth-test against the opaque z-buffer: skip fragments occluded by
-            // opaque geometry (per WBOIT spec — translucents behind opaque are
-            // never seen). `depth` is the interp weight in perspective mode; the
-            // opaque zbuf stores the same units, so `>` means "closer".
             if depth <= *zbuf.get_unchecked(idx) { return; }
             let w = a;
             let ao = idx * 4;
@@ -1162,9 +1095,6 @@ unsafe fn write_pixel(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Triangle setup for scanline + SIMD rasterization
-// ---------------------------------------------------------------------------
 
 #[inline]
 fn edge(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> f64 {

@@ -3,10 +3,6 @@ const isGltf = (name) => GLTF_EXTS.has(ext(name || ""));
 const MOL_FMTS = { pdb: "pdb", cif: "cif", mmcif: "mmcif", bcif: "bcif", xyz: "xyz" };
 const isMolExt = (name) => ext(name || "") in MOL_FMTS;
 
-// ──────────────────────────────── SCHEMA ──────────────────────────────────
-// Field: {k, label, t, def, ...}. t ∈ sel|num|rng|col|bool|txt|vec.
-// Group: {k, label, t:"grp", toggle, bool, def:{}, fields:[]}  (toggle→enable box; bool→`key:true` shorthand)
-// Special: t ∈ views|lights|palette|map|raw.  when:(state,local)=>bool for conditional display.
 const PROJ = ["perspective","orthographic","isometric","dimetric","trimetric","military",
   "cabinet","cavalier","fisheye","stereographic","curvilinear","cylindrical","pannini","tiny-planet"];
 
@@ -17,8 +13,6 @@ const SCHEMA = [
     { k: "point_boundary", label: "Boundary cut angle ° (0 = off)", t: "num", def: 60, omitIf: v => v === 60 },
   ]},
   { s: "Molecule (molfig)", open: true, when: () => model._mol, fields: [
-    // Default "cartoon": molfig renders polymers as ribbons and falls back to
-    // ball-and-stick for ligands/small molecules, tagged so `carbon-color` applies.
     { k: "mol_representation", label: "Representation", t: "sel", def: "cartoon",
       opts: [
         ["default", "default"],
@@ -30,7 +24,6 @@ const SCHEMA = [
         ["surface", "molecular-surface"],
       ], recompile: "mol",
       onSet: v => { if (v === "surface" && state.mol_quality !== "highest") { state.mol_quality = "highest"; _rebuildForm(); } } },
-    // See MOL_ALWAYS_SEND — this value is always forwarded even when it equals our default.
     { k: "mol_color_theme", label: "Color theme", t: "sel", def: "element-symbol",
       opts: [
         ["element-symbol", "element-symbol"],
@@ -71,8 +64,6 @@ const SCHEMA = [
     { k: "mol_radial_segments", label: "Radial segments", t: "num", def: 16, recompile: "mol" },
   ]},
   { s: "Camera & viewport", fields: [
-    // `init` = starting value (a good view of the default bunny); `def` = maquette's
-    // real default, used as the export baseline so the snippet stays faithful.
     { k: "_cam", label: "Camera mode", t: "sel", def: "cartesian", init: "spherical", opts: [["cartesian","Cartesian (x,y,z)"],["spherical","Spherical"]] },
     { k: "camera", label: "Position", t: "vec", def: [3,3,3], when: s => s._cam === "cartesian" },
     { k: "azimuth", label: "Azimuth °", t: "num", def: 0, init: 180, when: s => s._cam === "spherical" },
@@ -252,18 +243,8 @@ const SCHEMA = [
   ]},
 ];
 
-// ─────────────────────────────── GLTF SCHEMA ──────────────────────────────
-// Parallel schema for glTF assets rendered via maquette-gltf. Same field
-// shape as SCHEMA so the SAME form builder / renderConfig / renderCode
-// walk works — `getSchema()` swaps between them based on `model.name`'s
-// extension. Field keys match the JSON keys the plugin's config parser
-// accepts (see crates/maquette-gltf/src/config.rs).
 const GLTF_SCHEMA = [
   { s: "Camera & viewport", fields: [
-    // Cartesian is the default because ingest() auto-populates state.camera
-    // from the asset's bounding sphere. Spherical is available for docs that
-    // want the orbit knobs directly — az/el/dist take over as soon as the
-    // user switches modes; state.camera stops being exported (see `when`).
     { k: "_cam", label: "Camera mode", t: "sel", def: "cartesian",
       opts: [["cartesian", "Cartesian (x,y,z)"], ["spherical", "Spherical (az/el/dist)"]] },
     { k: "camera",    label: "Position [x,y,z]", t: "vec", def: [2.5, 1.5, 2.5],
@@ -293,8 +274,6 @@ const GLTF_SCHEMA = [
   ]},
 
   { s: "Image-based lighting", fields: [
-    // IBL is on by default with a deep-blue sky — most glTF assets are
-    // authored expecting IBL, and without it metals look flat.
     { k: "ibl", label: "IBL env", t: "grp", toggle: true, def: { __on: true, sky: "#20273c", ground: "#403020", intensity: 1.4, rotation: 0 }, fields: [
       { k: "sky",       label: "Sky colour",    t: "col", def: "#20273c" },
       { k: "ground",    label: "Ground colour", t: "col", def: "#403020" },
@@ -304,8 +283,6 @@ const GLTF_SCHEMA = [
   ]},
 
   { s: "Shadows", fields: [
-    // Shadows on by default — cheap on the small demo helmet and adds a lot
-    // of visual grounding. Turn off for point-cloud-heavy or huge scenes.
     { k: "shadows", label: "Cast shadows", t: "grp", toggle: true, bool: true, def: {
         __on: true, resolution: 1024, softness: 2, bias: 0.001, normal_bias: 1.5, slope_bias: 2.0, pcss_light_size: 0
       }, fields: [
@@ -325,16 +302,11 @@ const GLTF_SCHEMA = [
       { k: "color",      label: "Colour",     t: "col", def: "#282838" },
       { k: "size_scale", label: "Size scale × bbox radius", t: "num", def: 3.0 },
       { k: "roughness",  label: "Roughness",  t: "rng", def: 0.9, min: 0, max: 1, step: 0.01 },
-      // Plugin treats a missing `y` as "sit the plane at `bbox_min.y - ε`".
-      // 0 in the form means "leave unset" — the group's serialiser skips it
-      // via omitIf, so the plugin never sees `y: 0` and picks its default.
       { k: "y",          label: "Y position (0 = auto)", t: "num", def: 0, omitIf: v => v === 0 },
     ]},
   ]},
 
   { s: "Post-processing", fields: [
-    // SSAA off by default — 2× quadruples render cost, way too slow for live
-    // interaction. FXAA alone cleans up most edges. Bump to 2×/4× for finals.
     { k: "antialias",    label: "SSAA",       t: "sel", def: 1, num: true, opts: [[1, "Off"], [2, "×2"], [4, "×4"]] },
     { k: "fxaa",         label: "FXAA",       t: "bool", def: true },
     { k: "tone_mapping", label: "Tone mapping", t: "sel", def: "aces", opts: [["none", "None"], ["reinhard", "Reinhard"], ["aces", "ACES"]] },
@@ -350,10 +322,6 @@ const GLTF_SCHEMA = [
   ]},
 
   { s: "Animation & variants", fields: [
-    // Defaults to a bare number input for static assets. When the loaded
-    // glTF has animations, `syncGltfInfo()` retypes this to a slider bounded
-    // to the asset's actual animation duration (see get_gltf_info's
-    // max_animation_time). Same field key either way.
     { k: "time",             label: "Animation time (s)", t: "num", def: 0 },
     { k: "animation_index",  label: "Animation clip (-1 = stack all)", t: "num", def: -1, omitIf: v => v === -1 },
     { k: "material_variant", label: "Material variant (KHR_materials_variants)", t: "num", def: 0, omitIf: v => v === 0 },
@@ -362,9 +330,6 @@ const GLTF_SCHEMA = [
   ]},
 ];
 
-// Which SCHEMA drives the panel for the current model — swaps in GLTF_SCHEMA
-// when a .glb / .gltf / .blg is selected. Also used by the form builder,
-// renderConfig, buildTypst, refreshVisibility, and applyModelDefaults.
 function getSchema() { return model._gltf ? GLTF_SCHEMA : SCHEMA; }
 
 
@@ -418,22 +383,10 @@ const HELP = {
   debug_color: "Debug overlay text color.",
 };
 
-// State→DOM sync closures (per top-level control) for programmatic updates
-// (orbit, zoom, reset, shared-link restore). Search index for filtering.
 
-// ──────────────────────────── state (nested) ──────────────────────────────
-// `model` is declared before initState/state because getSchema() (called
-// from initState) reads `model._gltf` — an uninitialised model would hit
-// a TDZ ReferenceError and the form would never build.
 const ext = (name) => name.split(".").pop().toLowerCase();
-// Populated by the models.json loader below — hoisted so makeModel (declared
-// next) doesn't hit a TDZ on the initial `model = makeModel("bunny.obj")`.
 let PLUGINS = [], MODELS = [], MODELS_BY_PLUGIN = {}, MOLECULES = {};
 let PLUGIN_OF_MODEL = {}, MODEL_DEFAULTS = {}, DEFAULTS_KEYS = [];
-// Every ingest/boot goes through this so `model._ext` and `model._gltf`
-// stay in sync with `model.name` without recomputing on every render or
-// drag. Hot paths read the cached props instead of re-running `ext(...)`
-// or `isGltf(...)` on the string each time.
 const makeModel = (name, bytes, extra = null) => {
   const mol = MOLECULES[name];
   if (mol) {
@@ -456,10 +409,6 @@ function initState() {
 }
 const state = initState();
 
-// ─────────────────────── Typst / config value helpers ─────────────────────
-// Fast paths for the two common shapes on hot buildTypst inequality checks
-// (primitives → `===`, small flat arrays → element-wise). Falls back to
-// JSON.stringify for nested dicts, which the schema uses sparingly.
 const eq = (a, b) => {
   if (a === b) return true;
   if (Array.isArray(a) && Array.isArray(b)) {
@@ -471,7 +420,7 @@ const eq = (a, b) => {
 };
 const num = (v) => Number.isInteger(v) ? String(v) : String(+v.toFixed(4));
 const round3 = (x) => Math.round(x * 1000) / 1000;
-function fmtT(v) {                                  // JS value → Typst literal
+function fmtT(v) {
   if (typeof v === "string") return `"${v}"`;
   if (typeof v === "boolean") return v ? "true" : "false";
   if (typeof v === "number") return num(v);
@@ -479,10 +428,9 @@ function fmtT(v) {                                  // JS value → Typst litera
   return `(${Object.entries(v).map(([k,x]) => `${k}: ${fmtT(x)}`).join(", ")})`;
 }
 
-// Collect a group's subfields into a plain object; `mode` = "cfg" | "diff".
 function group(f, mode) {
   const s = state[f.k];
-  if (f.build === "clip") {                          // clip: assemble source/keep/hatch
+  if (f.build === "clip") {
     const o = {};
     if (s.source === "plane") o.plane = s.plane.slice();
     else { o.depth = s.depth; if (s.source === "camera") o.from = "camera"; else o.axis = s.source; }
@@ -495,19 +443,14 @@ function group(f, mode) {
   const o = {};
   for (const sub of f.fields) {
     const v = s[sub.k];
-    if (v === undefined) continue;                   // subfield missing after a preset overlay
-    if (sub.allowBlank && v === "") continue;        // blank optional color → omit
-    if (mode === "diff" && eq(v, sub.def)) continue; // export: only changed subfields
+    if (v === undefined) continue;
+    if (sub.allowBlank && v === "") continue;
+    if (mode === "diff" && eq(v, sub.def)) continue;
     o[sub.k] = v;
   }
   return o;
 }
 
-// ─────────────────────── build render config (→ WASM) ─────────────────────
-// Exact config from a deep-link, kept as a render override so features the UI
-// can't fully represent (clip plane equation, per-group highlight stroke/opacity)
-// still render pixel-exact. Wins over the state-derived config per top-level key;
-// cleared the moment the user edits anything (then it's a live, state-driven config).
 let renderOverride = null;
 
 const hlNormalize = (cv) => {
@@ -527,7 +470,7 @@ const hlCollapse = (v) => {
   if (v.stroke) o.stroke = v.stroke;
   if (v.stroke_width) o.stroke_width = v.stroke_width;
   if (v.opacity != null && v.opacity !== 1) o.opacity = v.opacity;
-  return Object.keys(o).length === 1 ? o.color : o;   // only color → plain string
+  return Object.keys(o).length === 1 ? o.color : o;
 };
 
 const ambientCfg = () => state._hemi.__on
@@ -543,11 +486,6 @@ const topFields = () => {
   return tf;
 };
 
-// Wipe every key from `state` and refill from a fresh initState(). Callers:
-//   - kind-switch (glTF ↔ maquette) sites, where the next code path assumes
-//     `state` matches the new schema and `state._hemi` etc. would blow up if
-//     left as the previous schema's shape.
-//   - the Reset button.
 function resetState() {
   for (const k in state) delete state[k];
   Object.assign(state, initState());

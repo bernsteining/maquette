@@ -35,8 +35,6 @@ initiate_protocol!();
 #[derive(Clone, Debug, PartialEq)]
 struct Rgb([u8; 4]);
 
-// Uncolored geometry defaults to OpenSCAD's signature "Cornfield" gold (#f9d72c),
-// so renders read as OpenSCAD out of the box. `color(...)` overrides it.
 const DEFAULT_RGB: Rgb = Rgb([249, 215, 44, 255]);
 
 thread_local! {
@@ -104,7 +102,7 @@ fn register(m: Manifold, color: &Rgb) -> Manifold {
 
 /// Global defaults, overridable per-call via the `opts` argument.
 struct Defaults {
-    seg: usize, // default facet count ($fn)
+    seg: usize,
     /// Binary assets from Typst (name -> bytes) for `import()`.
     bin: HashMap<String, Vec<u8>>,
     /// If set, run Manifold's `calculate_normals(0, angle)` on the final mesh
@@ -192,7 +190,6 @@ enum Bop {
     Inter,
 }
 
-// --- small JSON extraction helpers ---
 
 fn num(node: &Json, key: &str) -> Option<f64> {
     node.get(key).and_then(Json::as_f64)
@@ -246,7 +243,6 @@ fn child_of(node: &Json) -> Result<&Json, String> {
     node.get("child").ok_or_else(|| "node: missing \"child\"".into())
 }
 
-// --- validation helpers ---
 
 /// Distance below which a revolve profile vertex counts as "on the axis".
 const AXIS_EPS: f64 = 1e-4;
@@ -357,12 +353,9 @@ fn build(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> {
 fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> {
     let op = node.get("op").and_then(Json::as_str).ok_or("node: missing \"op\"")?;
     match op {
-        // ---- 3D primitives ----
         "cube" => {
             let s = v3(node, "size").ok_or("cube: size")?;
             finite_all(&s, "cube")?;
-            // OpenSCAD tolerates negative sizes (box spans into -axis) and treats
-            // a zero size as empty. Build from |size| and offset accordingly.
             let ax = [s[0].abs(), s[1].abs(), s[2].abs()];
             if ax.iter().any(|&x| x < 1e-9) {
                 return Ok(Geo::D3(Manifold::empty()));
@@ -384,8 +377,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             Ok(Geo::D3(register(Manifold::sphere(r, frags(node, d, r)), &color)))
         }
         "cylinder" => {
-            // OpenSCAD tolerates negative h (spans -z) and treats degenerate as
-            // empty; radii are taken as |r|. r1=bottom, r2=top (cone/frustum).
             let h = req(node, "h", "cylinder")?;
             let ah = h.abs();
             if ah < 1e-9 {
@@ -401,12 +392,12 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
                 return Ok(Geo::D3(Manifold::empty()));
             }
             let seg = frags(node, d, r1.max(r2));
-            let m = Manifold::cylinder(ah, r1, r2, seg, false); // sits 0..ah on Z
+            let m = Manifold::cylinder(ah, r1, r2, seg, false);
             let centered = node.get("center").and_then(Json::as_bool).unwrap_or(false);
             let m = if centered {
                 m.translate(0.0, 0.0, -ah / 2.0)
             } else if h < 0.0 {
-                m.translate(0.0, 0.0, h) // negative height → span into -z
+                m.translate(0.0, 0.0, h)
             } else {
                 m
             };
@@ -430,7 +421,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
                 for i in idx {
                     face.push(i.as_f64().ok_or("polyhedron: index must be a number")? as u64);
                 }
-                // Fan-triangulate the (assumed convex, planar) face.
                 for k in 1..face.len().saturating_sub(1) {
                     tris.extend_from_slice(&[face[0], face[k], face[k + 1]]);
                 }
@@ -440,7 +430,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             Ok(Geo::D3(register(m, &color)))
         }
 
-        // ---- 2D primitives ----
         "square" => {
             let (w, h) = square_dims(node);
             if w.abs() < 1e-9 || h.abs() < 1e-9 {
@@ -459,7 +448,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
         "ellipse" => {
             let w = req_pos(node, "w", "ellipse")?;
             let h = req_pos(node, "h", "ellipse")?;
-            // Unit circle (diameter 2) scaled to the requested full width/height.
             let cs = CrossSection::circle(1.0, seg_i32(node, d)).scale(w * 0.5, h * 0.5);
             Ok(Geo::D2(cs, color))
         }
@@ -478,9 +466,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
                     }
                     Ok(sanitize_ring(&r))
                 };
-                // All rings via EvenOdd: outer filled, nested rings become holes —
-                // matching OpenSCAD's `paths` (first = outer, rest = holes) and
-                // winding-agnostic.
                 let mut rings: Vec<Vec<[f64; 2]>> = Vec::with_capacity(paths.len());
                 for path in paths {
                     let r = ring(path)?;
@@ -506,7 +491,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
                 return Err(format!("ngon: sides must be >= 3 (got {sides})"));
             }
             let r = req_pos(node, "r", "ngon")?;
-            // A circle with exactly `sides` segments IS a regular n-gon.
             Ok(Geo::D2(CrossSection::circle(r, sides as i32), color))
         }
         "star" => {
@@ -530,8 +514,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             let h = req_pos(node, "h", "rounded_square")?;
             let r = req_pos(node, "r", "rounded_square")?;
             let seg = seg_i32(node, d);
-            // Inset core rect grown back out by r with round joins → rounded rect
-            // occupying 0..w × 0..h (matching un-centered square()).
             let iw = (w - 2.0 * r).max(1e-6);
             let ih = (h - 2.0 * r).max(1e-6);
             let core = CrossSection::square(iw, ih, false).translate(r, r);
@@ -541,8 +523,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             let file = node.get("file").and_then(Json::as_str).ok_or("import: file")?;
             let lower = file.to_ascii_lowercase();
             let is3d = [".stl", ".obj", ".off", ".3mf"].iter().any(|e| lower.ends_with(e));
-            // Missing asset or unsupported format (svg/dxf/…) → skip (empty) rather
-            // than abort a whole assembly for one import; empty of the right dim.
             let empty = || {
                 if is3d {
                     Geo::D3(Manifold::empty())
@@ -559,18 +539,14 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             } else if lower.ends_with(".obj") {
                 parse_obj(data)
             } else {
-                None // .off/.3mf unsupported → skip
+                None
             };
             match parsed.and_then(|(v, t)| mesh_from_flat(&v, &t)) {
                 Some(m) => Ok(Geo::D3(register(m, &color))),
-                None => Ok(empty()), // unparseable / non-manifold → skip
+                None => Ok(empty()),
             }
         }
         "text" => {
-            // OpenSCAD `text(str, size=10, font=..., halign=..., valign=...,
-            // spacing=1, direction="ltr")`. Font source: user bytes fed via
-            // `scadypst(font: ...)` (stored under bin["__font__"]), else the
-            // DejaVu Sans subset shipped in assets/.
             let s = node.get("text").and_then(Json::as_str).unwrap_or("");
             if s.is_empty() {
                 return Ok(Geo::D2(CrossSection::empty(), color));
@@ -588,8 +564,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
                 Some("bottom") => text::VAlign::Bottom,
                 _ => text::VAlign::Baseline,
             };
-            // `$fn` controls curve smoothness — quarter of the segment count
-            // per Bezier gives visually clean glyphs without over-tessellation.
             let curve_steps = (seg_of(node, d).max(4) / 4).max(3) as u32;
             let font_bytes: &[u8] = d.bin.get("__font__").map(Vec::as_slice).unwrap_or(text::DEFAULT_FONT);
             let params = text::TextParams { text: s, size, spacing, halign, valign, curve_steps };
@@ -600,7 +574,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             Ok(Geo::D2(CrossSection::from_polygons_with_fill_rule(&polys, FillRule::EvenOdd), color))
         }
 
-        // ---- 2D -> 3D bridges ----
         "linear_extrude" => {
             let h = req_pos(node, "h", "linear_extrude")?;
             let twist = num(node, "twist").unwrap_or(0.0);
@@ -616,7 +589,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
                     .unwrap_or_else(|| {
                         (((twist.abs() / 15.0).ceil() as i32).max(seg_i32(node, d) / 2)).max(2)
                     });
-                // OpenSCAD twists CCW-positive; Manifold twists CW-positive → negate.
                 Manifold::extrude_with_options(&cs, h, slices, -twist, scale, scale)
             };
             let centered = node.get("center").and_then(Json::as_bool).unwrap_or(false);
@@ -631,34 +603,22 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             let cs = build_revolve_profile(child_of(node)?, color.clone(), d)?;
             let radius = cs.bounds().max()[0].abs();
             let seg = frags(node, d, radius);
-            // Manifold's revolve already matches OpenSCAD: the +x half of the XY
-            // profile is spun around the Z axis (profile Y → height Z).
             let m = Manifold::revolve(&cs, seg, angle);
             Ok(Geo::D3(register(m, &color)))
         }
         "projection" => {
-            // 3D → 2D shadow onto the Z=0 plane (union of all cross-sections).
             let mesh = build(child_of(node)?, color.clone(), d)?.into_manifold("projection")?;
             let polys = mesh.project();
             let cs = CrossSection::from_polygons_with_fill_rule(&polys, FillRule::NonZero);
             Ok(Geo::D2(cs, color))
         }
         "slice" => {
-            // 3D → 2D horizontal cross-section at the given Z. Distinct from
-            // `projection`, which unions every horizontal slice; `slice`
-            // takes just one plane. Pairs with build_svg for laser-cutter
-            // stacks (slice → SVG → sheet).
             let z = num(node, "z").unwrap_or(0.0);
             if !z.is_finite() { return Err("slice: z must be a finite number".into()); }
             let mesh = build(child_of(node)?, color.clone(), d)?.into_manifold("slice")?;
             Ok(Geo::D2(mesh.slice_to_cross_section(z), color))
         }
         "trim" => {
-            // Cut a 3D solid with an arbitrary plane, keep the half where
-            // dot(pos, normal) >= offset. First-class alternative to the
-            // OpenSCAD "difference() with a giant cube" trick — Manifold
-            // implements it as a plane intersection, so it's exact and
-            // cheap regardless of the input's size.
             let normal = v3(node, "normal").ok_or("trim: normal")?;
             let offset = num(node, "offset").unwrap_or(0.0);
             finite_all(&normal, "trim")?;
@@ -670,9 +630,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             Ok(Geo::D3(mesh.trim_by_plane([normal[0], normal[1], normal[2]], offset)))
         }
         "hull_pts" => {
-            // Convex hull of a raw 3D point set. Complements `hull()` (which
-            // takes geometry children) — takes a list of [x, y, z] points
-            // and returns the 3D hull directly.
             let pts_j = node.get("points").and_then(Json::as_arr)
                 .ok_or("hull_pts: missing points[]")?;
             let mut pts: Vec<[f64; 3]> = Vec::with_capacity(pts_j.len());
@@ -694,11 +651,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             Ok(Geo::D3(register(Manifold::hull_pts(&pts), &color)))
         }
         "simplify" => {
-            // Douglas-Peucker style vertex reduction — collapses edges shorter
-            // than `epsilon` in the input's units. Works on both 2D
-            // (CrossSection) and 3D (Manifold) inputs; dispatches on the child
-            // dimension. Cheap way to strip micro-detail from booleans or to
-            // downsize a mesh before shipping it through PLY.
             let eps = num(node, "epsilon").unwrap_or(0.01);
             if !eps.is_finite() || eps < 0.0 {
                 return Err("simplify: epsilon must be a non-negative finite number".into());
@@ -709,23 +661,14 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             })
         }
         "calculate_normals" => {
-            // Attach per-vertex normals to a 3D mesh; edges sharper than
-            // `sharp_angle` (degrees) get their own vertices so creases stay
-            // crisp. Stored at property slot 3 in the Manifold's vertex table;
-            // `to_ply` emits them as nx/ny/nz when present, and maquette's PLY
-            // reader picks them up for smooth shading.
             let angle = num(node, "sharp_angle").unwrap_or(60.0);
             if !angle.is_finite() {
                 return Err("calculate_normals: sharp_angle must be finite".into());
             }
             let mesh = build(child_of(node)?, color.clone(), d)?.into_manifold("calculate_normals")?;
-            // `normal_idx` is a USER-property slot (position at meshgl 0..2 is
-            // implicit); 0 lands the normals at meshgl slots 3..5, right where
-            // `to_ply` expects them.
             Ok(Geo::D3(mesh.calculate_normals(0, angle)))
         }
 
-        // ---- transforms (dimension-agnostic) ----
         "translate" => {
             let v = v3(node, "v").ok_or("translate: v")?;
             finite_all(&v, "translate")?;
@@ -739,7 +682,7 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             finite_all(&a, "rotate")?;
             Ok(match build(child_of(node)?, color, d)? {
                 Geo::D3(m) => Geo::D3(m.rotate(a[0], a[1], a[2])),
-                Geo::D2(c, col) => Geo::D2(c.rotate(a[2]), col), // 2D rotates about Z
+                Geo::D2(c, col) => Geo::D2(c.rotate(a[2]), col),
             })
         }
         "scale" => {
@@ -765,7 +708,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             })
         }
         "multmatrix" => {
-            // 4x4 (or 4x3) row-major affine matrix; missing entries = identity.
             let rows = node.get("m").and_then(Json::as_arr).ok_or("multmatrix: m")?;
             let mut m = [[0f64; 4]; 4];
             for (i, mi) in m.iter_mut().enumerate() {
@@ -779,14 +721,12 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
                 }
             }
             Ok(match build(child_of(node)?, color, d)? {
-                // Manifold transform is column-major 3x4: [col0, col1, col2, translation].
                 Geo::D3(me) => Geo::D3(me.transform(&[
-                    m[0][0], m[1][0], m[2][0], //
-                    m[0][1], m[1][1], m[2][1], //
-                    m[0][2], m[1][2], m[2][2], //
+                    m[0][0], m[1][0], m[2][0],
+                    m[0][1], m[1][1], m[2][1],
+                    m[0][2], m[1][2], m[2][2],
                     m[0][3], m[1][3], m[2][3],
                 ])),
-                // CrossSection transform is column-major 2x3: [col0, col1, translation].
                 Geo::D2(c, col) => Geo::D2(
                     c.transform(&[m[0][0], m[1][0], m[0][1], m[1][1], m[0][3], m[1][3]]),
                     col,
@@ -794,8 +734,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             })
         }
         "resize" => {
-            // Scale a 3D solid so its bounding box matches the target; a 0
-            // component leaves that axis unscaled.
             let target = v3(node, "v").ok_or("resize: v")?;
             let mesh = build(child_of(node)?, color.clone(), d)?.into_manifold("resize")?;
             let (mn, mx) = match mesh.bounding_box() {
@@ -815,7 +753,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             let dist = num(node, "d").ok_or("offset: d")?;
             bounded_all(&[dist], "offset")?;
             let (cs, col) = build(child_of(node)?, color, d)?.into_cross("offset")?;
-            // OpenSCAD offset(r=..) uses rounded joins; approximate with Round.
             Ok(Geo::D2(cs.offset(dist, JoinType::Round, 2.0, seg_i32(node, d)), col))
         }
         "color" => {
@@ -831,16 +768,13 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             } else {
                 255
             };
-            // color() replaces the inherited color for its subtree (inner wins).
             build(child_of(node)?, Rgb([f2u8(c[0]), f2u8(c[1]), f2u8(c[2]), a]), d)
         }
 
-        // ---- booleans ----
         "union" => boolean(node, color, d, Bop::Union),
         "difference" => boolean(node, color, d, Bop::Diff),
         "intersection" => boolean(node, color, d, Bop::Inter),
 
-        // ---- hull / minkowski ----
         "hull" => {
             let cs = children(node)?;
             let first = cs.first().ok_or("hull: needs >=1 child")?;
@@ -873,9 +807,6 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
                     }
                     Ok(Geo::D3(register(acc, &color)))
                 }
-                // Manifold has no native 2D minkowski, so compute it via thin-slab
-                // 3D minkowski then project back to the plane — correct for
-                // arbitrary (incl. non-convex) 2D operands.
                 Geo::D2(c0, col) => {
                     let mut acc = c0.extrude(1.0);
                     for c in it {
@@ -917,11 +848,6 @@ fn boolean(node: &Json, color: Rgb, d: &Defaults, op: Bop) -> Result<Geo, String
     let first = it.next().ok_or("boolean: needs >=1 child")?;
     match build(first, color.clone(), d)? {
         Geo::D3(first_m) => {
-            // Build all 3D operands, then batch. Manifold's batch_union/
-            // batch_difference build a balanced, lazily-evaluated CSG tree and
-            // evaluate once — faster than a sequential fold for the many-child
-            // unions in real assemblies. Empty operands are dropped first: a
-            // union/difference with ∅ would otherwise poison the whole result.
             let mut ms = vec![first_m];
             for c in it {
                 ms.push(build(c, color.clone(), d)?.into_manifold("boolean")?);
@@ -939,7 +865,7 @@ fn boolean(node: &Json, color: Rgb, d: &Defaults, op: Bop) -> Result<Geo, String
                     let mut it = ms.into_iter();
                     let head = it.next().unwrap();
                     if head.is_empty() {
-                        head // ∅ - anything = ∅
+                        head
                     } else {
                         let mut all = vec![head];
                         all.extend(it.filter(|m| !m.is_empty()));
@@ -947,7 +873,6 @@ fn boolean(node: &Json, color: Rgb, d: &Defaults, op: Bop) -> Result<Geo, String
                     }
                 }
                 Bop::Inter => {
-                    // No batch intersection in Manifold; fold with an ∅ short-circuit.
                     let mut acc: Option<Manifold> = None;
                     for m in ms {
                         if m.is_empty() {
@@ -998,7 +923,6 @@ fn boolean(node: &Json, color: Rgb, d: &Defaults, op: Bop) -> Result<Geo, String
     }
 }
 
-// --- mesh asset ingestion (import) ---
 
 /// Weld a triangle soup (flat xyz verts, flat u64 tri indices into it) into a
 /// Manifold, returning None if the result isn't a valid 2-manifold. Coincident
@@ -1031,7 +955,6 @@ fn weld(soup: &[[f64; 3]]) -> (Vec<f64>, Vec<u64>) {
 
 /// Parse binary or ASCII STL into welded (verts, tri-indices).
 fn parse_stl(data: &[u8]) -> Option<(Vec<f64>, Vec<u64>)> {
-    // ASCII STL starts with "solid" and contains "facet"; binary is 84+ bytes.
     let looks_ascii = data.starts_with(b"solid")
         && data.windows(5).take(512).any(|w| w == b"facet");
     let mut soup: Vec<[f64; 3]> = Vec::new();
@@ -1055,7 +978,6 @@ fn parse_stl(data: &[u8]) -> Option<(Vec<f64>, Vec<u64>)> {
             if off + 50 > data.len() {
                 break;
             }
-            // skip 12-byte normal; read 3 vertices (9 f32)
             let rd = |o: usize| f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]) as f64;
             for k in 0..3 {
                 let b = off + 12 + k * 12;
@@ -1127,7 +1049,6 @@ fn to_ply(mesh: &Manifold) -> Vec<u8> {
     let ntri = mg.num_tri();
     let has_normals = np >= 6;
 
-    // Per-triangle color from the run/original-ID table (unchanged).
     let mut tri_col: Vec<[u8; 4]> = vec![DEFAULT_RGB.0; ntri];
     let run_index = mg.run_index();
     let run_oid = mg.run_original_id();
@@ -1143,13 +1064,7 @@ fn to_ply(mesh: &Manifold) -> Vec<u8> {
         }
     });
 
-    // Deduplicate corners by (manifold vertex id, color). Vertices that
-    // straddle a color boundary get split, so per-face color survives.
     let n_mvert = mg.num_vert();
-    // Small-alphabet color map: `first_seen[mvert]` is `Some(unique_id)` for
-    // the first color that lands on that mvert; a second, different color
-    // falls back to the FxHashMap. Cheap fast path — most SCAD parts have
-    // large monochrome regions, so almost every vertex resolves via the Vec.
     let mut first_col: Vec<Option<[u8; 4]>> = vec![None; n_mvert];
     let mut first_uid: Vec<u32> = vec![u32::MAX; n_mvert];
     let mut spill: FxHashMap<(u64, [u8; 4]), u32> = FxHashMap::default();
@@ -1243,7 +1158,6 @@ fn opt_smooth_normals(opts: &[u8]) -> Option<f64> {
 /// a thin plate so it renders (OpenSCAD shows 2D output flat in the XY plane).
 fn finish(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
     PALETTE.with(|p| p.borrow_mut().clear());
-    // Precompute subtree hashes and reset the memo cache for this compile.
     NODE_HASH.with(|m| {
         let mut m = m.borrow_mut();
         m.clear();
@@ -1296,8 +1210,6 @@ fn finish_svg(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
 fn cross_section_to_svg(cs: &CrossSection, color: Rgb) -> String {
     let rings = cs.to_polygons();
     if rings.is_empty() {
-        // Empty input still yields a well-formed empty SVG so callers can
-        // paint a placeholder / detect no-geometry without a parse error.
         return String::from(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\" \
              width=\"1\" height=\"1\"></svg>"
@@ -1317,7 +1229,7 @@ fn cross_section_to_svg(cs: &CrossSection, color: Rgb) -> String {
     let h = (ymax - ymin).max(1e-6);
     let pad = (w.max(h) * 0.02).max(0.5);
     let vb_x = xmin - pad;
-    let vb_y = -(ymax) - pad;      // Y-flip: SVG top corresponds to OpenSCAD ymax
+    let vb_y = -(ymax) - pad;
     let vb_w = w + 2.0 * pad;
     let vb_h = h + 2.0 * pad;
 
@@ -1325,8 +1237,6 @@ fn cross_section_to_svg(cs: &CrossSection, color: Rgb) -> String {
     for ring in &rings {
         if ring.is_empty() { continue; }
         for (i, &[x, y]) in ring.iter().enumerate() {
-            // 4 decimal places — matches OpenSCAD's usual round-to-µm scale
-            // and keeps SVG size reasonable on high-poly outputs.
             let cmd = if i == 0 { 'M' } else { 'L' };
             if !d.is_empty() { d.push(' '); }
             d.push(cmd);

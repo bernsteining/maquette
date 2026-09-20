@@ -148,8 +148,6 @@ impl<'a> Parser<'a> {
     }
     fn string(&mut self) -> Result<String, String> {
         self.expect(b'"')?;
-        // Accumulate raw bytes so multibyte UTF-8 sequences pass through intact,
-        // then validate once at the end.
         let mut buf: Vec<u8> = Vec::new();
         loop {
             let c = self.peek().ok_or("json: unterminated string")?;
@@ -186,7 +184,6 @@ impl<'a> Parser<'a> {
                         _ => return Err("json: unknown escape".into()),
                     }
                 }
-                // Raw byte of a (possibly multibyte) UTF-8 sequence.
                 _ => buf.push(c),
             }
         }

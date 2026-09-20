@@ -7,10 +7,10 @@
 /// Parameters for SSAO computation.
 #[derive(Clone)]
 pub struct SSAOParams {
-    pub samples: usize,      // Number of samples per pixel
-    pub radius: f64,         // Sampling radius in screen space
-    pub bias: f64,           // Depth bias to prevent self-occlusion
-    pub strength: f64,       // AO effect strength (0.0-2.0)
+    pub samples: usize,
+    pub radius: f64,
+    pub bias: f64,
+    pub strength: f64,
 }
 
 impl Default for SSAOParams {
@@ -64,11 +64,6 @@ pub fn precompute_sample_offsets(
 ) -> Vec<Vec<SampleOffset>> {
     use std::f64::consts::TAU;
 
-    // Golden-angle sunflower distribution — samples spaced by 137.508°
-    // (2π · (1 − 1/φ)). No two lie on the same ray. Uniform 2π/N spacing
-    // (what we used before) gave every pixel the same 16-ray rosette, and
-    // rotating by a fraction of 2π/N kept sample rays aligned across
-    // neighbouring pixels.
     const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653;
     let mut kernel = Vec::with_capacity(samples);
     for i in 0..samples {
@@ -83,9 +78,6 @@ pub fn precompute_sample_offsets(
 
     let mut offsets = Vec::with_capacity(NOISE_ROTATIONS);
     for n in 0..NOISE_ROTATIONS {
-        // Bit-reverse the index so consecutive n values scatter over the
-        // full hemisphere — combined with the hash lookup, adjacent pixels
-        // always draw visually distinct rotations.
         let br = (n as u32).reverse_bits() >> (32 - 8);
         let angle = (br as f64 / NOISE_ROTATIONS as f64) * TAU;
         let (sin_a, cos_a) = angle.sin_cos();
@@ -135,7 +127,6 @@ pub fn bilateral_blur_separable(
     let n = width * height;
     let r = blur_radius;
 
-    // Compute depth range for normalizing depth weights
     let mut zmin = f32::MAX;
     let mut zmax = f32::MIN;
     for &d in depth_buffer {
@@ -147,7 +138,6 @@ pub fn bilateral_blur_separable(
     let inv_depth_range = 1.0 / (zmax - zmin).max(0.001);
     let depth_factor = 50.0 * inv_depth_range;
 
-    // Pre-compute 1D spatial weights (symmetric, only depends on |d|)
     let inv_r2 = 1.0 / (r * r) as f32;
     let ksize = (2 * r + 1) as usize;
     let mut spatial_w = vec![0.0f32; ksize];
@@ -164,10 +154,7 @@ pub fn bilateral_blur_separable(
     let one_v = f32x4_splat(1.0);
     let df_v = f32x4_splat(depth_factor);
 
-    // --- Horizontal pass ---
     let mut h_buf = vec![1.0f32; n];
-    // SIMD safe x range: x+dx..x+dx+3 in [0, width) for all dx in [-r, r]
-    // → x >= r and x+r+3 < width → x < width-r-3
     let hx_simd_start = ru;
     let hx_simd_raw_end = if width > 2 * ru + 3 { width - ru - 3 } else { 0 };
     let hx_simd_end = if hx_simd_raw_end > hx_simd_start {
@@ -180,7 +167,6 @@ pub fn bilateral_blur_separable(
         let ap = unsafe { ao_buffer.as_ptr().add(row) };
         let hp = unsafe { h_buf.as_mut_ptr().add(row) };
 
-        // Left boundary: scalar
         for x in 0..hx_simd_start.min(width) {
             let cd = unsafe { *dp.add(x) };
             if cd == f32::NEG_INFINITY { continue; }
@@ -200,7 +186,6 @@ pub fn bilateral_blur_separable(
             else { unsafe { *hp.add(x) = *ap.add(x); } }
         }
 
-        // Interior: SIMD 4 pixels per iteration
         let mut x = hx_simd_start;
         while x < hx_simd_end {
             let cd4 = unsafe { v128_load(dp.add(x) as *const v128) };
@@ -228,7 +213,6 @@ pub fn bilateral_blur_separable(
             x += 4;
         }
 
-        // Right boundary + remainder: scalar
         for x in hx_simd_end.max(hx_simd_start)..width {
             let cd = unsafe { *dp.add(x) };
             if cd == f32::NEG_INFINITY { continue; }
@@ -249,12 +233,9 @@ pub fn bilateral_blur_separable(
         }
     }
 
-    // --- Vertical pass ---
     let mut v_buf = vec![1.0f32; n];
-    // SIMD x range: just need x+3 < width
     let vx_simd_end = (width / 4) * 4;
 
-    // Top boundary rows: scalar
     for y in 0..ru.min(height) {
         for x in 0..width {
             let idx = y * width + x;
@@ -277,12 +258,10 @@ pub fn bilateral_blur_separable(
         }
     }
 
-    // Interior rows: SIMD over x, all dy in [-r, r] valid
     let vy_end = if height > ru { height - ru } else { 0 };
     for y in ru..vy_end {
         let row = y * width;
 
-        // SIMD: 4 consecutive x values
         let mut x = 0usize;
         while x < vx_simd_end {
             let idx = row + x;
@@ -311,7 +290,6 @@ pub fn bilateral_blur_separable(
             x += 4;
         }
 
-        // Scalar remainder for x
         for x in vx_simd_end..width {
             let idx = row + x;
             let cd = unsafe { *depth_buffer.get_unchecked(idx) };
@@ -331,7 +309,6 @@ pub fn bilateral_blur_separable(
         }
     }
 
-    // Bottom boundary rows: scalar
     for y in vy_end..height {
         for x in 0..width {
             let idx = y * width + x;

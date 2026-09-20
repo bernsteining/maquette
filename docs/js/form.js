@@ -5,19 +5,16 @@ import { onChange, copyText } from "./render.js";
 import { triggerRecompile } from "./models.js";
 
 const controlRefs = {};
-const searchItems = [];   // {node, section, text}
-const searchSections = []; // {el, open}
+const searchItems = [];
+const searchSections = [];
 
-const conds = []; // {node, when, local} for visibility refresh
+const conds = [];
 
 const VEC_AXES = ["X", "Y", "Z", "W"];
 
 function ctl(f, slot, local) {
   const wrap = document.createElement("div");
   wrap.className = "ctl";
-  // Fields flagged `recompile: "scad" | "mol"` re-run the source-plugin
-  // (maquette-scad or molfig) to regenerate the mesh before the maquette
-  // render call — otherwise the change wouldn't be visible in the output.
   const set = (v) => { slot[f.k] = v; if (f.onSet) f.onSet(v); onChange(); if (f.recompile) triggerRecompile(f.recompile); };
   const cur = slot[f.k];
   let labelEl, sync = null;
@@ -26,8 +23,6 @@ function ctl(f, slot, local) {
     labelEl = document.createElement("label"); labelEl.className = "chk";
     const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = !!cur;
     cb.onchange = () => { set(cb.checked); };
-    // The <label> wraps text + input, so the checkbox is properly labelled
-    // for screen readers already — no extra aria-label needed.
     labelEl.append(cb, document.createTextNode(f.label)); wrap.append(labelEl);
     sync = (v) => { cb.checked = !!v; };
   } else {
@@ -44,9 +39,6 @@ function ctl(f, slot, local) {
     } else if (f.t === "rng") {
       valEl = document.createElement("span"); valEl.className = "val"; valEl.textContent = (+cur).toFixed(2); labelEl.append(valEl);
       input = document.createElement("input"); input.type = "range"; input.min = f.min; input.max = f.max; input.step = f.step; input.value = cur;
-      // A11y: name + spoken value. `aria-valuetext` beats aria-valuenow for
-      // fractional values because SRs read the raw number otherwise ("point
-      // eight five" instead of the rounded 0.85 shown next to the slider).
       input.setAttribute("aria-label", f.label);
       input.setAttribute("aria-valuetext", (+cur).toFixed(2));
       input.oninput = () => {
@@ -111,8 +103,6 @@ function groupNode(f) {
   return box;
 }
 
-// Dynamic array editor shared by extra-lights / palette / materials-map. `arr` is
-// mutated in place (push/splice); `renderItem(item, i, rerender)` builds one row.
 function dynList(arr, addLabel, newItem, renderItem, wrapRow = false) {
   const box = document.createElement("div");
   const rerender = () => {
@@ -128,7 +118,7 @@ function dynList(arr, addLabel, newItem, renderItem, wrapRow = false) {
   return box;
 }
 
-function listNode(f) {   // extra lights
+function listNode(f) {
   const mk = (label, el) => { const d = document.createElement("div"); d.className = "ctl"; const lb = document.createElement("label"); lb.innerHTML = `<span>${label}</span>`; d.append(lb, el); return d; };
   return dynList(state.lights, "+ add light",
     () => ({ type: "directional", vector: [1,2,3], color: "#ffffff", intensity: 1, cast_shadow: true, size: 0 }),
@@ -137,7 +127,7 @@ function listNode(f) {   // extra lights
       const sel = document.createElement("select");
       [["directional","Directional"],["positional","Positional"],["area","Area"]].forEach(([v,t]) => { const o = document.createElement("option"); o.value=v; o.textContent=t; sel.append(o); });
       sel.value = L.type; sel.onchange = () => { L.type = sel.value; onChange(); };
-      const vec = document.createElement("div"); // per-axis slider + precise number box
+      const vec = document.createElement("div");
       ["X","Y","Z"].forEach((axis, j) => {
         const row = document.createElement("div"); row.style.cssText = "display:flex;gap:6px;align-items:center;margin:2px 0";
         const tag = document.createElement("span"); tag.textContent = axis; tag.style.cssText = "width:1em;color:var(--muted);font-size:12px";
@@ -170,7 +160,7 @@ function paletteNode(f) {
 
 function mapNode(f) {
   const rm = (i, rerender) => { const b = document.createElement("button"); b.className="rm"; b.textContent="✕"; b.title="remove"; b.onclick=()=>{ state[f.k].splice(i,1); rerender(); onChange(); }; return b; };
-  if (f.rich) return dynList(state[f.k], "+ entry",       // group → {color, stroke, stroke_width, opacity}
+  if (f.rich) return dynList(state[f.k], "+ entry",
     () => ["", { color: "#88ccff", stroke: "", stroke_width: 0, opacity: 1 }],
     (row, i, rerender) => {
       const v = row[1];
@@ -219,9 +209,6 @@ function buildForm() {
     const d = document.createElement("details"); if (sec.open) d.open = true;
     const sum = document.createElement("summary"); sum.textContent = sec.s; d.append(sum);
     const body = document.createElement("div"); body.className = "body";
-    // Per-section list wired straight into the section entry so filterForm
-    // can check "does this section have any match?" in O(items-in-section)
-    // instead of scanning the full searchItems array per section.
     const secItems = [];
     for (const f of sec.fields) {
       let node;
@@ -241,8 +228,6 @@ function buildForm() {
   }
 }
 
-// Filter the form by a query — hides non-matching fields/sections, expands
-// sections that contain a match. Composes with when-visibility (CSS !important).
 function filterForm(query) {
   const q = (query || "").trim().toLowerCase();
   for (const it of searchItems) it.node.classList.toggle("search-hidden", !!q && !it.text.includes(q));
@@ -253,7 +238,6 @@ function filterForm(query) {
   }
 }
 
-// Rebuild the whole form from current state (used by reset & shared-link restore).
 function rebuildForm() {
   buildForm(); refreshVisibility(); filterForm($("search").value);
 }
@@ -269,9 +253,6 @@ function refreshVisibility() {
   for (const c of conds) c.node.style.display = c.when(state, c.local) ? "" : "none";
 }
 
-// ─────────────────────── hover descriptions (tooltips) ─────────────────────
-// Tag an element with its help text; a single delegated listener shows an
-// immediate, styled tooltip on hover (native `title` is too slow/subtle).
 function attachTip(el, tip) { if (!tip) return; el.dataset.tip = tip; el.classList.add("has-tip"); }
 const tipEl = $("tip");
 function positionTip(target) {
@@ -279,7 +260,7 @@ function positionTip(target) {
   const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
   let x = Math.min(r.left, innerWidth - tw - m);
   let y = r.bottom + 6;
-  if (y + th > innerHeight - m) y = r.top - th - 6;   // flip above when no room below
+  if (y + th > innerHeight - m) y = r.top - th - 6;
   tipEl.style.left = Math.max(m, x) + "px";
   tipEl.style.top = Math.max(m, y) + "px";
 }

@@ -52,8 +52,8 @@ pub struct IblCfg {
 impl Default for IblCfg {
     fn default() -> Self {
         Self {
-            sky:    [0.65, 0.75, 0.95],  // pale sky blue
-            ground: [0.20, 0.15, 0.10],  // warm earth
+            sky:    [0.65, 0.75, 0.95],
+            ground: [0.20, 0.15, 0.10],
             intensity: 1.0,
             hdr_bytes: None,
             rotation: 0.0,
@@ -128,12 +128,10 @@ impl Default for ShadowCfg {
 
 #[derive(Clone)]
 pub struct RenderConfig {
-    // Viewport
     pub width: usize,
     pub height: usize,
     pub background: String,
 
-    // Camera
     pub camera: Option<[f64; 3]>,
     pub center: [f64; 3],
     pub up: [f64; 3],
@@ -163,7 +161,6 @@ pub struct RenderConfig {
     /// typically ship separate clips (idle/walk/run/...); set this to pick one.
     pub animation_index: Option<usize>,
 
-    // Shading
     pub light_dir: [f64; 3],
     pub ambient: f64,
     pub cull_backface: bool,
@@ -184,7 +181,6 @@ pub struct RenderConfig {
     /// `bbox_radius * scale`.
     pub ground: Option<GroundCfg>,
 
-    // Post-process
     /// SSAO: `false` to disable, `true` for defaults, or object with
     /// `{ samples, radius, bias, strength }` overrides.
     pub ssao: Option<SsaoCfg>,
@@ -201,8 +197,6 @@ pub struct RenderConfig {
     /// effect when `tone_mapping = ""`).
     pub exposure: f64,
 
-    // Texture-load knobs (see docs on decode cost: JPEG in wasm is ~1 MB/s,
-    // so a 3 MB glTF can cost 3 s cold-decode).
     /// Skip all texture decoding — draft/preview mode. All textures fall back
     /// to their material factors. Sub-100 ms renders regardless of asset.
     pub no_textures: bool,
@@ -231,7 +225,7 @@ impl Default for RenderConfig {
             background: "#f0f0f0".to_string(),
             camera: None,
             center: [0.0, 0.0, 0.0],
-            up: [0.0, 1.0, 0.0], // glTF is Y-up by default (unlike STL/OBJ/CAD → Z-up in maquette)
+            up: [0.0, 1.0, 0.0],
             azimuth: 30.0,
             elevation: 20.0,
             distance: None,
@@ -274,12 +268,9 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
 
     let mut cfg = RenderConfig::default();
     for (key, v) in map.iter() {
-        // Accept `none` (JSON null) and the string "none" for any setting: they
-        // mean "unset" — clear optionals, disable features, transparent
-        // background. Scalar fields with a fixed default are left untouched.
         if v.is_null() || v.as_str() == Some("none") {
             match key.as_str() {
-                "background"       => cfg.background = String::new(),   // "" = transparent
+                "background"       => cfg.background = String::new(),
                 "tone_mapping"     => cfg.tone_mapping = String::new(),
                 "camera"           => cfg.camera = None,
                 "distance"         => cfg.distance = None,
@@ -329,7 +320,7 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
             "texture_max_size" => cfg.texture_max_size = as_usize(v).map(|n| n as u32).filter(|&n| n >= 4),
             "time"          => if let Some(f) = v.as_f64() { cfg.time = f.max(0.0); }
             "material_variant" => if let Some(n) = as_usize(v) { cfg.material_variant = n as u32; }
-            _ => {} // Unknown keys silently ignored, forward-compatible with v2.
+            _ => {}
         }
     }
     Ok(cfg)
@@ -360,8 +351,6 @@ fn parse_ibl(v: &Value) -> Option<IblCfg> {
             if let Some(f) = o.get("rotation").and_then(|x| x.as_f64()) {
                 c.rotation = f as f32;
             }
-            // HDR bytes come from Typst's `read(..., encoding: none)`, encoded
-            // as an array of integers in JSON. Copy them out to owned Vec.
             if let Some(arr) = o.get("hdr").and_then(|x| x.as_array()) {
                 let mut bytes = Vec::with_capacity(arr.len());
                 for v in arr {

@@ -79,7 +79,6 @@ fn parse_type(s: &str) -> Result<PT, String> {
     }
 }
 
-// -- Property & element layout --
 
 enum Prop { Scalar(PT), List(PT, PT) }
 
@@ -112,7 +111,6 @@ struct VertexLayout {
     props: Vec<PT>,
     prop_offsets: Vec<usize>,
     stride: usize,
-    // Pre-resolved slot indices (X/Y/Z validated present in finalize_element)
     sx: usize, sy: usize, sz: usize,
     has_normals: bool,
     snx: usize, sny: usize, snz: usize,
@@ -147,12 +145,12 @@ struct FaceColorLayout {
 
 struct FaceLayout {
     count: usize,
-    pre_count: usize,  // number of scalar props before list (for ASCII)
-    pre_size: usize,   // byte size of pre-list scalars (for binary)
+    pre_count: usize,
+    pre_size: usize,
     count_type: PT,
     index_type: PT,
     post_size: usize,
-    post_count: usize,  // number of scalar props after list (for ASCII)
+    post_count: usize,
     /// Per-face color/alpha props found in the pre-list region.
     pre_col: FaceColorLayout,
     /// Per-face color/alpha props found in the post-list region.
@@ -170,7 +168,6 @@ struct Header {
     elements: Vec<Element>,
 }
 
-// -- Header parsing --
 
 fn find_header_end(data: &[u8]) -> Result<usize, String> {
     let marker = b"end_header";
@@ -219,13 +216,6 @@ fn finalize_element(name: &str, count: usize, props: Vec<(String, Prop)>, wanted
             } else { (0, 0, 0) };
             let has_alpha = slots[A].is_some();
             let sa = slots[A].unwrap_or(0);
-            // Pick the vertex property used for `color_map: "ply_scalar"`:
-            //   - If `wanted_scalar` is set (from `config.color_map_property`)
-            //     and matches a property name, use that — lets the user pick
-            //     between `quality` / `confidence` / `curvature` etc. when
-            //     a scan carries multiple.
-            //   - Else fall back to the first non-standard numeric property
-            //     (backward-compatible behaviour).
             let mut scalar = None;
             if let Some(wanted) = wanted_scalar.filter(|w| !w.is_empty()) {
                 for (i, (pname, _)) in props.iter().enumerate() {
@@ -256,10 +246,6 @@ fn finalize_element(name: &str, count: usize, props: Vec<(String, Prop)>, wanted
             let mut list: Option<(PT, PT)> = None;
             let mut pre_col = FaceColorLayout::default();
             let mut post_col = FaceColorLayout::default();
-            // Walk scalar props twice-through-once so we can note byte offsets
-            // AND token indices for per-face color/alpha channels — MeshLab et
-            // al. emit them as face-level `red/green/blue[/alpha]` (usually
-            // post-list, hence the split trackers).
             for (pname, prop) in &props {
                 match prop {
                     Prop::Scalar(pt) => {
@@ -268,8 +254,6 @@ fn finalize_element(name: &str, count: usize, props: Vec<(String, Prop)>, wanted
                         } else {
                             (&mut pre_col, pre_size, pre_count)
                         };
-                        // Record color/alpha positions if the name matches.
-                        // Binary reads use byte_off; ASCII reads use tok_off.
                         let slot = ColorSlot {
                             byte_off: byte_off as u32,
                             tok_off: tok_off as u32,
@@ -367,7 +351,6 @@ fn parse_header(data: &[u8], wanted_scalar: Option<&str>) -> Result<(Header, usi
     Ok((Header { format: format.ok_or("PLY: missing format line")?, elements }, end))
 }
 
-// -- Triangulation helper --
 
 fn triangulate(
     indices: &[usize],
@@ -388,19 +371,12 @@ fn triangulate(
     for i in 1..indices.len() - 1 {
         let (i0, i1, i2) = (indices[0], indices[i], indices[i + 1]);
         let (v0, v1, v2) = (positions[i0], positions[i1], positions[i2]);
-        // Face normal always comes from the geometry (cross product). When
-        // per-vertex normals are present, they ship separately in
-        // `vertex_normals` and take over during smooth shading — using
-        // vertex-0's normal as the face normal (as we did before) both drops
-        // information and produces wrong flat-shaded results.
         let normal = Vec3::face_normal(v0, v1, v2).unwrap_or(Vec3::new(0.0, 0.0, 0.0));
         let vertex_normals = if has_n {
             Some([normals[i0], normals[i1], normals[i2]])
         } else {
             None
         };
-        // Per-face color wins if the file supplies one (MeshLab / scanner
-        // convention); otherwise average vertex colors, otherwise config.
         let (color, vertex_colors) = if let Some(fc) = face_color {
             (Some(fc), None)
         } else if has_c {
@@ -409,8 +385,6 @@ fn triangulate(
         } else {
             (None, None)
         };
-        // Per-face alpha wins over per-vertex alpha, same reasoning.
-        // Fully-opaque (255) stays None so opaque triangles keep the fast render path.
         let alpha = if let Some(fa) = face_alpha {
             if fa < 255 { Some(fa as f32 / 255.0) } else { None }
         } else if has_a {
@@ -490,7 +464,6 @@ fn pick_binary_face_alpha<const BE: bool>(
     Some(color_byte(v, a.pt))
 }
 
-// -- Face index collection (shared by ASCII and binary paths) --
 
 fn collect_face_indices<'a>(
     face_n: usize,
@@ -517,12 +490,8 @@ fn collect_face_indices<'a>(
     }
 }
 
-// -- ASCII body parsing --
 
 fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
-    // Parse the ASCII body straight from bytes: split on '\n', trim ASCII
-    // whitespace (handles trailing '\r'), skip blanks — no whole-buffer
-    // from_utf8 / Unicode .lines().
     let mut lines = data.split(|&c| c == b'\n').map(|l| l.trim_ascii()).filter(|l| !l.is_empty());
 
     let mut positions: Vec<Vec3> = Vec::new();
@@ -537,7 +506,6 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
             Element::Vertex(vl) => {
                 positions.reserve(vl.count);
                 let n_props = vl.props.len().min(16);
-                // Only parse properties we actually need
                 let mut needed = [false; 16];
                 needed[vl.sx] = true; needed[vl.sy] = true; needed[vl.sz] = true;
                 if vl.has_normals { needed[vl.snx] = true; needed[vl.sny] = true; needed[vl.snz] = true; }
@@ -589,8 +557,6 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
                 for _ in 0..fl.count {
                     let line = lines.next().ok_or("PLY: unexpected end of face data")?;
                     let mut tokens = AsciiTokens::new(line);
-                    // Collect pre-list scalars — we need them to look up any
-                    // per-face color that comes before the vertex list.
                     pre_toks.clear();
                     for _ in 0..fl.pre_count {
                         pre_toks.push(tokens.next().ok_or("PLY: face line too short (pre)")?);
@@ -602,7 +568,6 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
                             .ok_or_else(|| "PLY: bad index".into())
                             .map(|v| v as usize)
                     })?;
-                    // Collect post-list scalars (usually where face RGB lives).
                     post_toks.clear();
                     for _ in 0..fl.post_count {
                         post_toks.push(tokens.next().ok_or("PLY: face line too short (post)")?);
@@ -626,7 +591,6 @@ fn parse_ascii(header: &Header, data: &[u8]) -> Result<PlyData, String> {
     }
 }
 
-// -- Binary body parsing (specialized per endianness to eliminate runtime branch) --
 
 fn parse_binary(header: &Header, data: &[u8], be: bool) -> Result<PlyData, String> {
     if be {
@@ -646,7 +610,6 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
     let mut scalars: Vec<f64> = Vec::new();
     let mut triangles: Vec<Triangle> = Vec::new();
 
-    // Inline reader that uses const generic to eliminate runtime branch
     #[inline(always)]
     fn read<const BE: bool>(pt: PT, d: &[u8], o: usize) -> f64 {
         if BE { pt.read_be(d, o) } else { pt.read_le(d, o) }
@@ -724,7 +687,6 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
                 let nv = positions.len();
                 let isz = fl.index_type.size();
                 let csz = fl.count_type.size();
-                // Specialize index reader to avoid per-index match
                 let read_idx: fn(&[u8], usize) -> usize = match (fl.index_type, BE) {
                     (PT::U8, _) => |d, o| d[o] as usize,
                     (PT::I8, _) => |d, o| d[o] as i8 as usize,
@@ -744,8 +706,6 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
                 let mut stack_buf = [0usize; 8];
                 let mut heap_buf = Vec::new();
                 for _ in 0..fl.count {
-                    // Grab per-face color/alpha from the pre-list scalars
-                    // BEFORE stepping over them (needs the base offset).
                     let face_color_pre = pick_binary_face_color::<BE>(data, off, &fl.pre_col);
                     let face_alpha_pre = pick_binary_face_alpha::<BE>(data, off, &fl.pre_col);
                     off += fl.pre_size;
@@ -763,7 +723,6 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
                         off += isz;
                         Ok(idx)
                     })?;
-                    // Now `off` sits at the start of the post-list scalars.
                     let face_color_post = pick_binary_face_color::<BE>(data, off, &fl.post_col);
                     let face_alpha_post = pick_binary_face_alpha::<BE>(data, off, &fl.post_col);
                     off += fl.post_size;
@@ -794,7 +753,6 @@ fn parse_binary_endian<const BE: bool>(header: &Header, data: &[u8]) -> Result<P
     }
 }
 
-// -- Public API --
 
 /// Parse a PLY file.
 ///

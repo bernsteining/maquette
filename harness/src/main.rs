@@ -115,15 +115,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let elapsed = start.elapsed();
         times.push(elapsed);
 
-        // If the wasm trapped, ask the plugin's panic hook for the message.
         if let Err(e) = call_result {
             eprintln!("[diag] trap: {:?}", e);
             match instance.get_func(&store, "get_last_panic") {
                 Some(panic_fn) => {
                     eprintln!("[diag] found get_last_panic");
-                    // wasm-minimal-protocol wraps every #[wasm_func] to return
-                    // an i32 (0 = ok, negative = err), so we need a 1-slot
-                    // results buffer even for a zero-arg getter.
                     let mut r = [Val::I32(0)];
                     store.data_mut().args = Vec::new();
                     match panic_fn.call(&mut store, &[], &mut r) {
@@ -159,10 +155,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         last_result = result_bytes;
     }
 
-    // Write result to stdout
     std::io::stdout().write_all(&last_result)?;
 
-    // Report to stderr
     if bench.is_some() {
         let min = times.iter().min().unwrap();
         let avg = times.iter().sum::<std::time::Duration>() / times.len() as u32;

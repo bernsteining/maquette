@@ -2,10 +2,6 @@
 //! time. Sibling to the `maquette` plugin (STL/OBJ/PLY); shares the format-
 //! agnostic render primitives via `maquette-core`.
 
-// The PBR path ships a scalar reference implementation kept for clarity next to
-// the SIMD one, plus a handful of not-yet-wired material fields (iridescence /
-// anisotropy texcoords, light range) — hence `dead_code`. `static mut` scene
-// caches are sound here: Typst runs the plugin on a single thread.
 #![allow(dead_code, static_mut_refs)]
 
 use wasm_minimal_protocol::*;
@@ -19,15 +15,6 @@ mod pbr;
 mod render;
 mod scene;
 
-// ── panic diagnostics ─────────────────────────────────────────────────────
-//
-// Rust's `panic = "abort"` on `wasm32-unknown-unknown` compiles a panic into
-// the `unreachable` wasm instruction — the host sees a bare `TrapCode
-// (UnreachableCodeReached)` and nothing else. We install a hook (once, at
-// wasm-func entry) that captures the panic location + message into a
-// thread-local buffer, and expose `get_last_panic` so callers can retrieve
-// it after a trap. Between entry-point installation and the trap the buffer
-// gets populated; the trap itself doesn't clear it.
 use std::cell::RefCell;
 use std::sync::Once;
 thread_local! {
@@ -97,7 +84,6 @@ fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_b
     maquette_core::color::init_color_luts();
     let mut config = config::parse(config_json)?;
     if !hdr_data.is_empty() {
-        // Third-arg HDR always wins over any config-embedded HDR bytes.
         if let Some(ref mut ibl) = config.ibl {
             ibl.hdr_bytes = Some(hdr_data.to_vec());
         } else {
@@ -179,8 +165,6 @@ fn max_animation_endpoint(loaded: &gltf_loader::LoadedGltf) -> f32 {
     max_t
 }
 
-// Off-wasm stand-ins for the protocol glue that `initiate_protocol!` provides on
-// wasm (gated out here), so the `#[wasm_func]` export wrappers still type-check.
 #[cfg(not(target_arch = "wasm32"))]
 unsafe fn __write_args_to_buffer(_ptr: *mut u8) {}
 #[cfg(not(target_arch = "wasm32"))]

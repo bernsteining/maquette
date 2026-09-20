@@ -56,11 +56,7 @@ impl IblEnvironment {
                 let u = (i as f32 + 0.5) / SIDE as f32;
                 let v = (j as f32 + 0.5) / SIDE as f32;
                 let (dx, dy, dz) = octahedral_decode(u, v);
-                // Rotate around +Y — spec-canonical HDR orientation control.
                 let (rx, rz) = (rc * dx + rs * dz, -rs * dx + rc * dz);
-                // Convert unit dir → equirect UV. `atan2` is only paid at
-                // build time (one-shot), not per-pixel. Standard convention:
-                //   u = 0.5 + atan2(z, x) / (2π); v = 0.5 − asin(y) / π.
                 let phi = rz.atan2(rx);
                 let theta = dy.clamp(-1.0, 1.0).asin();
                 let eu = (0.5 + phi / (2.0 * std::f32::consts::PI)).rem_euclid(1.0);
@@ -86,10 +82,6 @@ impl IblEnvironment {
             mips.push(downsample_2x(cur));
         }
         let max_lod = mips.len().saturating_sub(1) as f32;
-        // Convolve the mid-chain mip with a cosine hemisphere to get the
-        // diffuse irradiance map. Using a coarse source mip (32² or 16²)
-        // keeps the convolution O(2K samples per output texel) which is
-        // ~5 ms one-shot at DIFFUSE_SIDE = 32.
         let diffuse = build_diffuse_irradiance(&mips);
         Self { mips, max_lod, diffuse }
     }
@@ -99,35 +91,17 @@ impl IblEnvironment {
         let sun = sun_dir.normalized();
         for j in 0..SIDE {
             for i in 0..SIDE {
-                // Texel center in UV space.
                 let u = (i as f32 + 0.5) / SIDE as f32;
                 let v = (j as f32 + 0.5) / SIDE as f32;
                 let (dx, dy, dz) = octahedral_decode(u, v);
 
-                // Hemispheric sky/ground blend by dir.y (up axis).
                 let t = ((dy + 1.0) * 0.5).clamp(0.0, 1.0);
                 let mut r = (ground[0] + t * (sky[0] - ground[0])) * intensity;
                 let mut g = (ground[1] + t * (sky[1] - ground[1])) * intensity;
                 let mut b = (ground[2] + t * (sky[2] - ground[2])) * intensity;
 
-                // HDR sun-region highlight — a large, smoothly-falling
-                // radiance bump so metals get pop from a directional
-                // "sun". A previous impl used a 5.7° hard disc at 8×
-                // intensity, but the sharp step aliases badly through
-                // the 2×2 box-filter mip chain: mid-roughness samples
-                // saw the sun spike echoed across mip texels, showing
-                // as a visible grid/hex pattern on smooth surfaces.
-                //
-                // Cosine-squared falloff over a wide angle spreads the
-                // energy over enough texels that the mip chain no
-                // longer aliases. Peak intensity reduced (3× instead of
-                // 8×) to keep the total energy roughly equivalent to
-                // the old hard disc.
                 let d = dx * sun.x as f32 + dy * sun.y as f32 + dz * sun.z as f32;
                 if d > 0.0 {
-                    // `d²` grows sun-ward; `d^32` keeps it fairly tight
-                    // (~10° half-angle FWHM) while staying C¹-smooth
-                    // and mip-safe.
                     let d2 = d * d;
                     let d8 = d2 * d2 * d2 * d2;
                     let d32 = d8 * d8 * d8 * d8;
@@ -198,20 +172,12 @@ fn octahedral_encode(dx: f32, dy: f32, dz: f32) -> (f32, f32) {
 /// keeps this ~2K env samples × 32² outputs = ~2M ops. One-shot, ~5 ms.
 fn build_diffuse_irradiance(mips: &[MipF32]) -> MipF32 {
     const OUT_SIDE: u32 = 32;
-    // Pick a source mip small enough to keep the double loop cheap but
-    // large enough to preserve the sun-region highlight direction. 16²
-    // (~256 texels) is a good compromise.
     let src = mips.iter().min_by_key(|m| {
-        // Prefer the largest mip whose linear dimension is ≤ 16.
         if m.width > 16 { u32::MAX } else { 16 - m.width }
     }).unwrap_or(mips.last().unwrap());
     let sw = src.width as usize;
     let sh = src.height as usize;
 
-    // Precompute src texel direction + solid-angle weight. Solid angle
-    // for an octahedral texel scales with 1 / |dv/du × dv/dv| but for a
-    // coarse map the differences are small; a plain 1.0 weight is close
-    // enough and this stays a one-shot cost.
     let mut src_dirs = Vec::with_capacity(sw * sh);
     for j in 0..sh {
         for i in 0..sw {
@@ -301,8 +267,6 @@ fn sample_seam_aware(mip: &MipF32, dx: f32, dy: f32, dz: f32) -> [f32; 3] {
     let y0 = y0i.clamp(0, hi - 1);
     let y1 = (y0i + 1).clamp(0, hi - 1);
 
-    // Normalise query dir once — dot product is scale-independent but
-    // callers may pass unnormalised reflection vectors.
     let inv_len = 1.0 / (dx * dx + dy * dy + dz * dz).sqrt().max(1e-14);
     let qx = dx * inv_len;
     let qy = dy * inv_len;
@@ -312,9 +276,6 @@ fn sample_seam_aware(mip: &MipF32, dx: f32, dy: f32, dz: f32) -> [f32; 3] {
     let inv_mw = 1.0 / mw;
     let inv_mh = 1.0 / mh;
 
-    // Per-tap: decode texel's direction, dot with query, weight = dot × bilinear.
-    // Inlined four times to avoid the closure that made wasmi's translator
-    // fail with "cmp+branch fusion must succeed".
     let ix = 1.0 - fx;
     let iy = 1.0 - fy;
 
@@ -340,8 +301,6 @@ fn sample_seam_aware(mip: &MipF32, dx: f32, dy: f32, dz: f32) -> [f32; 3] {
 
     let sum_w = w00 + w10 + w01 + w11;
     if sum_w < 1e-6 {
-        // All four taps disagree with the query direction — fall back
-        // to nearest. Rare, mostly near polar singularities.
         let off = if fx < 0.5 {
             if fy < 0.5 { off00 } else { off01 }
         } else {

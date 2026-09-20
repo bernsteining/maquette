@@ -66,7 +66,7 @@ pub fn ibl_for_hdr(hdr_bytes: &[u8], intensity: f32, rotation: f32) -> Result<&'
 fn ibl_hash_procedural(sky: [f32; 3], ground: [f32; 3], intensity: f32, sun_dir: Vec3) -> u64 {
     use std::hash::Hasher;
     let mut h = maquette_core::math::FxHasher::default();
-    h.write_u8(0); // domain tag: procedural
+    h.write_u8(0);
     for v in [sky[0], sky[1], sky[2], ground[0], ground[1], ground[2], intensity,
               sun_dir.x as f32, sun_dir.y as f32, sun_dir.z as f32] {
         h.write_u32(v.to_bits());
@@ -77,7 +77,7 @@ fn ibl_hash_procedural(sky: [f32; 3], ground: [f32; 3], intensity: f32, sun_dir:
 fn ibl_hash_hdr(bytes: &[u8], intensity: f32, rotation: f32) -> u64 {
     use std::hash::Hasher;
     let mut h = maquette_core::math::FxHasher::default();
-    h.write_u8(1); // domain tag: HDR
+    h.write_u8(1);
     h.write(bytes);
     h.write_u32(intensity.to_bits());
     h.write_u32(rotation.to_bits());

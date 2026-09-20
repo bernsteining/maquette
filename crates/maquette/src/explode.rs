@@ -48,22 +48,18 @@ pub fn explode_triangles(triangles: &mut [Triangle], center: Vec3, factor: f64) 
         return;
     }
 
-    // Check if triangles have OBJ group IDs
     let has_groups = triangles.iter().any(|t| t.group_id.is_some());
 
     let groups: FxHashMap<usize, Vec<usize>> = if has_groups {
-        // Use OBJ groups directly: group_id → list of triangle indices
         let mut g: FxHashMap<u32, Vec<usize>> = fx_hashmap_cap(16);
         for (ti, tri) in triangles.iter().enumerate() {
             let gid = tri.group_id.unwrap_or(u32::MAX);
             g.entry(gid).or_default().push(ti);
         }
-        // Re-key as usize for uniform handling
         let mut out = fx_hashmap_cap(g.len());
         for (k, v) in g { out.insert(k as usize, v); }
         out
     } else {
-        // Fall back to union-find on shared edges
         let n = triangles.len();
         let mut uf = UnionFind::new(n);
         let mut edge_map: FxHashMap<((i64, i64, i64), (i64, i64, i64)), usize> = fx_hashmap_cap(triangles.len() * 3 / 2);
@@ -92,7 +88,6 @@ pub fn explode_triangles(triangles: &mut [Triangle], center: Vec3, factor: f64) 
         g
     };
 
-    // Compute per-component centroid and apply offset
     for (_comp, indices) in &groups {
         let mut sum = Vec3::new(0.0, 0.0, 0.0);
         let mut count = 0usize;

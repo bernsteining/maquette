@@ -1,8 +1,3 @@
-// Native repro harness for the csgrs panic hit by the Cyclone-PCB-Factory
-// X-carriage. Running on x86 (not wasm) means a panic prints its message +
-// location + backtrace — which wasmi swallows. Point it at a checkout:
-//   git clone --depth 1 https://github.com/carlosgs/Cyclone-PCB-Factory /tmp/cyclone
-//   RUST_BACKTRACE=1 cargo run --example repro
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;

@@ -97,7 +97,6 @@ fn fxaa_pixel(idx: usize, x: usize, y: usize, w: usize, h: usize,
     let lsw = *luma.get_unchecked(idx + w - 1) as i16;
     let lse = *luma.get_unchecked(idx + w + 1) as i16;
 
-    // Edge direction: vertical 2nd derivs → horizontal edge
     let eh = (ln + ls - 2 * m).abs() * 2
            + (lnw + lsw - 2 * lw).abs()
            + (lne + lse - 2 * le).abs();
@@ -106,17 +105,14 @@ fn fxaa_pixel(idx: usize, x: usize, y: usize, w: usize, h: usize,
            + (lsw + lse - 2 * ls).abs();
     let horiz = eh >= ev;
 
-    // Perpendicular gradient
     let (l_neg, l_pos) = if horiz { (ln, ls) } else { (lw, le) };
     let g_neg = (l_neg - m).abs();
     let g_pos = (l_pos - m).abs();
     let neg_side = g_neg >= g_pos;
 
-    // Edge boundary luma ×2 (avoids /2), gradient threshold = g/2 (×2 scale)
     let l_edge2 = if neg_side { l_neg + m } else { l_pos + m };
     let g_thr = ((if neg_side { g_neg } else { g_pos }) + 1) >> 1;
 
-    // Walk offsets as linear indices
     let wi = w as i32;
     let along = if horiz { 1i32 } else { wi };
     let perp = if horiz {
@@ -125,14 +121,12 @@ fn fxaa_pixel(idx: usize, x: usize, y: usize, w: usize, h: usize,
         if neg_side { -1i32 } else { 1i32 }
     };
 
-    // Max safe walk distance
     let (max_n, max_p) = if horiz {
         (x as i32, w as i32 - 1 - x as i32)
     } else {
         (y as i32, h as i32 - 1 - y as i32)
     };
 
-    // Edge walk with variable step sizes
     let start = idx as i32;
     let mut dn = 1i32;
     let mut dp = 1i32;
@@ -169,18 +163,15 @@ fn fxaa_pixel(idx: usize, x: usize, y: usize, w: usize, h: usize,
         if done_n && done_p { break; }
     }
 
-    // Edge blend: (0.5 - min/span) scaled to 0-64 (in 0-128 space)
     let span = dn + dp;
     let dmin = dn.min(dp);
     let e_raw = ((span - 2 * dmin) as u32 * 64 / span as u32) as u16;
 
-    // Good span check
     let closer = if dn < dp { en } else { ep };
     let m_side = 2 * m - l_edge2;
     let good = (closer < 0) != (m_side < 0);
     let e_blend = if good { e_raw } else { 0 };
 
-    // Sub-pixel blend via LUT
     let avg12 = 2 * (ln + ls + lw + le) + lnw + lne + lsw + lse;
     let sub_num = (avg12 - 12 * m).unsigned_abs() as u32;
     let sub_den = (12 * range) as u32;
@@ -190,15 +181,12 @@ fn fxaa_pixel(idx: usize, x: usize, y: usize, w: usize, h: usize,
     let blend = e_blend.max(s_blend);
     if blend == 0 { return; }
 
-    // Read neighbor RGB from the correct source:
-    // neg_side = true → neighbor already processed → saved row buffer
-    // neg_side = false → neighbor not yet processed → pixels directly
     let (nr, ng, nb) = if neg_side {
         if horiz {
-            let o = x * 3; // north neighbor, same x, row y-1
+            let o = x * 3;
             (*prev_row.get_unchecked(o), *prev_row.get_unchecked(o + 1), *prev_row.get_unchecked(o + 2))
         } else {
-            let o = (x - 1) * 3; // west neighbor, x-1, same row
+            let o = (x - 1) * 3;
             (*curr_row.get_unchecked(o), *curr_row.get_unchecked(o + 1), *curr_row.get_unchecked(o + 2))
         }
     } else {
@@ -206,13 +194,12 @@ fn fxaa_pixel(idx: usize, x: usize, y: usize, w: usize, h: usize,
         (*pixels.get_unchecked(n3), *pixels.get_unchecked(n3 + 1), *pixels.get_unchecked(n3 + 2))
     };
 
-    // Center pixel not yet modified — read directly, then write blend
     let p = pixels.as_mut_ptr().add(idx * 3);
     let iv = 128 - blend;
     *p     = ((*p as u16 * iv + nr as u16 * blend + 64) >> 7) as u8;
     *p.add(1) = ((*p.add(1) as u16 * iv + ng as u16 * blend + 64) >> 7) as u8;
     *p.add(2) = ((*p.add(2) as u16 * iv + nb as u16 * blend + 64) >> 7) as u8;
-    } // unsafe
+    }
 }
 
 /// Apply FXAA 3.11 to an RGB pixel buffer in-place.
@@ -224,12 +211,9 @@ pub fn apply_fxaa(pixels: &mut [u8], width: usize, height: usize) {
     let h = height;
     let row_bytes = w * 3;
 
-    // Two-row ring buffer: original RGB for already-processed rows
-    // prev_row: originals of row y-1, curr_row: originals of row y
     let mut prev_row = vec![0u8; row_bytes];
     let mut curr_row = vec![0u8; row_bytes];
 
-    // Row 0 is never modified (loop starts at y=1), save for north neighbor reads
     prev_row.copy_from_slice(&pixels[0..row_bytes]);
 
     for y in 1..h - 1 {
@@ -238,7 +222,6 @@ pub fn apply_fxaa(pixels: &mut [u8], width: usize, height: usize) {
         let mut x = 1usize;
         let mut row_saved = false;
 
-        // SIMD batch: check 16 pixels at once with both thresholds
         unsafe {
             let edge_thr = u8x16_splat(EDGE_MIN - 1);
             let zero = u8x16_splat(0);
@@ -257,14 +240,12 @@ pub fn apply_fxaa(pixels: &mut [u8], width: usize, height: usize) {
                 let vmax = u8x16_max(u8x16_max(c, north), u8x16_max(south, u8x16_max(west, east)));
                 let range = u8x16_sub(vmax, vmin);
 
-                // Absolute threshold: range >= EDGE_MIN
                 let above_abs = u8x16_sub_sat(range, edge_thr);
                 if !v128_any_true(above_abs) {
                     x += 16;
                     continue;
                 }
 
-                // Relative threshold: range >= vmax >> 3
                 let thr_lo = u16x8_shr(u16x8_extend_low_u8x16(vmax), 3);
                 let thr_hi = u16x8_shr(u16x8_extend_high_u8x16(vmax), 3);
                 let thr_rel = u8x16_narrow_i16x8(thr_lo, thr_hi);
@@ -279,7 +260,6 @@ pub fn apply_fxaa(pixels: &mut [u8], width: usize, height: usize) {
                     continue;
                 }
 
-                // Lazy row copy: only save originals when first edge is found
                 if !row_saved {
                     curr_row.copy_from_slice(&pixels[row_start..row_start + row_bytes]);
                     row_saved = true;
@@ -297,7 +277,6 @@ pub fn apply_fxaa(pixels: &mut [u8], width: usize, height: usize) {
             }
         }
 
-        // Scalar remainder
         while x < w - 1 {
             let idx = row + x;
             let m = unsafe { *luma.get_unchecked(idx) };
@@ -319,12 +298,9 @@ pub fn apply_fxaa(pixels: &mut [u8], width: usize, height: usize) {
             x += 1;
         }
 
-        // Rotate: current row becomes previous for next iteration
         if row_saved {
             std::mem::swap(&mut prev_row, &mut curr_row);
         } else {
-            // No edges on this row — prev_row for next iteration is the
-            // unmodified pixels row, copy directly
             prev_row.copy_from_slice(&pixels[row_start..row_start + row_bytes]);
         }
     }

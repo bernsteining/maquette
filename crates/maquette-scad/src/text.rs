@@ -19,8 +19,8 @@ pub const DEFAULT_FONT: &[u8] = include_bytes!("../assets/DejaVuSans-Subset.ttf"
 /// Parameters mirroring OpenSCAD's `text(...)` module.
 pub struct TextParams<'a> {
     pub text: &'a str,
-    pub size: f64,        // capital-M height (OpenSCAD default 10)
-    pub spacing: f64,     // advance-width multiplier (1.0 = font-native)
+    pub size: f64,
+    pub spacing: f64,
     pub halign: HAlign,
     pub valign: VAlign,
     /// Points on each quadratic / cubic Bezier segment. Higher = smoother
@@ -51,9 +51,6 @@ pub fn to_polygons(font_bytes: &[u8], params: &TextParams) -> Vec<Vec<[f64; 2]>>
         Ok(f) => f,
         Err(_) => return Vec::new(),
     };
-    // OpenSCAD's `size` = cap height. We approximate by taking the font's
-    // units-per-em as the "size 1" reference — a widely-accepted convention
-    // for CAD text (matches OpenSCAD's own liboverflow behavior).
     let upem = face.units_per_em() as f64;
     let scale = params.size / upem;
 
@@ -62,8 +59,6 @@ pub fn to_polygons(font_bytes: &[u8], params: &TextParams) -> Vec<Vec<[f64; 2]>>
 
     for ch in params.text.chars() {
         let Some(gid) = face.glyph_index(ch) else {
-            // Missing glyph: skip, but still advance by the mean advance so
-            // later characters don't collide back onto the missing one.
             cursor_x += (upem as f32 * 0.5) as f64 * scale * params.spacing;
             continue;
         };
@@ -80,7 +75,6 @@ pub fn to_polygons(font_bytes: &[u8], params: &TextParams) -> Vec<Vec<[f64; 2]>>
         cursor_x += adv * scale * params.spacing;
     }
 
-    // Alignment: shift the assembled ring set. Cheaper than re-emitting.
     let total_w = cursor_x;
     let dx = match params.halign {
         HAlign::Left => 0.0,
@@ -91,7 +85,7 @@ pub fn to_polygons(font_bytes: &[u8], params: &TextParams) -> Vec<Vec<[f64; 2]>>
     let desc = face.descender() as f64 * scale;
     let dy = match params.valign {
         VAlign::Baseline => 0.0,
-        VAlign::Bottom => -desc,             // desc is negative
+        VAlign::Bottom => -desc,
         VAlign::Center => -(asc + desc) / 2.0,
         VAlign::Top => -asc,
     };
@@ -128,8 +122,6 @@ impl OutlineCollector {
         self.done
     }
     fn push(&mut self, p: [f32; 2]) {
-        // Drop duplicate consecutive points — Manifold rejects zero-length
-        // edges when clipping.
         if self.cur.last().map_or(false, |&q| (q[0] - p[0]).abs() < 1e-6 && (q[1] - p[1]).abs() < 1e-6) {
             return;
         }
@@ -171,8 +163,6 @@ impl OutlineBuilder for OutlineCollector {
         }
     }
     fn close(&mut self) {
-        // A ring that starts at the same point as the first move_to needs
-        // no extra edge; Manifold's polygon builder closes automatically.
         if !self.cur.is_empty() {
             self.done.push(std::mem::take(&mut self.cur));
         }

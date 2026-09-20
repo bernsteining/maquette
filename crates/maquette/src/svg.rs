@@ -1,6 +1,3 @@
-// ---------------------------------------------------------------------------
-// Minimal number→string helpers (replaces core::fmt for SVG output)
-// ---------------------------------------------------------------------------
 
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
@@ -32,7 +29,6 @@ fn push_fn(s: &mut String, v: f64, decimals: u32) {
     let frac_part = scaled % mul as u64;
     push_u64(s, int_part);
     s.push('.');
-    // Zero-pad fractional part
     let frac_digits = decimals as usize;
     let mut buf = [b'0'; 4];
     let mut f = frac_part;

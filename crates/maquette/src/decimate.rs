@@ -29,9 +29,6 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
     }
     let s = strength.min(1.0);
 
-    // Geometric map strength → grid resolution along the longest axis.
-    // s→0 ≈ 256 cells (near no-op), s = 1 ≈ 6 cells (aggressive). Capped at 256
-    // so the packed key stays within 24 bits (256³ = 2²⁴) → only 3 radix passes.
     const N_FINE: f64 = 256.0;
     const N_COARSE: f64 = 6.0;
     let res = (N_FINE * (N_COARSE / N_FINE).powf(s)).round().clamp(2.0, 256.0) as i32;
@@ -45,12 +42,9 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
 
     let nv = triangles.len() * 3;
 
-    // --- Compact f32 SOA of every vertex: feeds the SIMD key pack AND the
-    //     cluster averaging (4 bytes/coord vs gathering the fat Triangle). ---
     let mut xs: Vec<f32> = Vec::with_capacity(nv);
     let mut ys: Vec<f32> = Vec::with_capacity(nv);
     let mut zs: Vec<f32> = Vec::with_capacity(nv);
-    // Optional compact color SOA, only when the mesh carries per-vertex colors.
     let (mut cr8, mut cg8, mut cb8) = (Vec::new(), Vec::new(), Vec::new());
     if has_vcolors {
         cr8 = Vec::with_capacity(nv);
@@ -71,7 +65,6 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
         }
     }
 
-    // --- SIMD: pack each vertex into a cell key kx + ky*res + kz*res² (≤ 2²⁴). ---
     let mut keys = vec![0u32; nv];
     let bx = bmin.x as f32;
     let by = bmin.y as f32;
@@ -87,7 +80,6 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
     let res4 = i32x4_splat(res);
     let res2_4 = i32x4_splat(res * res);
 
-    // cell index per axis, clamped to [0, res-1]: floor(clamp((v - b) * inv))
     #[inline(always)]
     fn cell_axis(v: v128, b: v128, inv: v128, zero: v128, maxi: v128) -> v128 {
         let f = f32x4_mul(f32x4_sub(v, b), inv);
@@ -115,11 +107,8 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
         keys[v] = (kx + ky * res + kz * res * res) as u32;
     }
 
-    // --- Radix-sort vertex indices by key (3 passes; keys are ≤ 24 bits). ---
     let order = radix_sort_indices(&keys);
 
-    // --- Linear scan over sorted runs: average each cluster (from the f32 SOA),
-    //     scatter the representative back to every member vertex. ---
     let mut rep_x = vec![0f32; nv];
     let mut rep_y = vec![0f32; nv];
     let mut rep_z = vec![0f32; nv];
@@ -163,11 +152,9 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
         i = j;
     }
 
-    // --- Emit: drop degenerate triangles, rebuild surviving ones. ---
     let mut out = Vec::with_capacity(triangles.len());
     for (t, tri) in triangles.iter().enumerate() {
         let (a, b2, c) = (3 * t, 3 * t + 1, 3 * t + 2);
-        // Two or more corners in the same cell → collapsed to a sliver/point.
         if keys[a] == keys[b2] || keys[b2] == keys[c] || keys[a] == keys[c] {
             continue;
         }
@@ -178,7 +165,7 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
 
         let normal = match Vec3::face_normal(pa, pb, pc) {
             Some(n) => n,
-            None => continue, // collinear after clustering
+            None => continue,
         };
 
         let vertex_colors = if has_vcolors {
@@ -194,15 +181,9 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
             vertex_colors,
             group_id: tri.group_id,
             alpha: tri.alpha,
-            // Decimation collapses vertices — the source per-corner normals
-            // no longer correspond to output corners, so drop them and let
-            // smooth shading fall back to face-normal averaging on the
-            // simplified mesh.
             vertex_normals: None,
             smoothing_group: None,
             vertex_scalars: None,
-            // Decimation produces new corner positions; drop UVs/texture
-            // binding and fall back to the untextured shading path.
             uvs: None,
             tex: None,
         });

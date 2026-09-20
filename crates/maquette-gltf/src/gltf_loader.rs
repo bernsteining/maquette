@@ -43,24 +43,14 @@ pub fn parse_split(bytes: &[u8], sidecars_bundle: &[u8]) -> Result<LoadedGltf, S
 }
 
 fn parse_impl(bytes: &[u8], sidecars: HashMap<String, Vec<u8>>) -> Result<LoadedGltf, String> {
-    // Draco pre-processing: `KHR_draco_mesh_compression` allows accessors to
-    // omit their `bufferView` (the values live in the Draco stream, not in
-    // a real bufferView). gltf-rs can't consume such accessors, so before
-    // handing the JSON off we synthesise the missing bufferViews + a
-    // placeholder buffer the Draco pass fills in below.
     let patched;
     let mut draco_cache: DracoCache = HashMap::new();
     let bytes: &[u8] = match preprocess_draco_json(bytes, &sidecars, &mut draco_cache) {
         Ok(Some(p)) => { patched = p; &patched }
-        Ok(None) => bytes,      // no Draco primitives → pass through untouched
+        Ok(None) => bytes,
         Err(e) => return Err(e),
     };
 
-    // `from_slice_without_validation` skips the `extensionsRequired`
-    // whitelist check — otherwise gltf-rs rejects files declaring
-    // EXT_meshopt_compression or KHR_mesh_quantization since they're not in
-    // its ENABLED_EXTENSIONS list. We handle meshopt below and quantization
-    // is transparent (accessor `.into_f32()` converts from any format).
     let Gltf { document, blob } = Gltf::from_slice_without_validation(bytes)
         .map_err(|e| format!("glTF parse error: {}", e))?;
 
@@ -68,23 +58,17 @@ fn parse_impl(bytes: &[u8], sidecars: HashMap<String, Vec<u8>>) -> Result<Loaded
     for buffer in document.buffers() {
         match buffer.source() {
             gltf::buffer::Source::Bin => {
-                // GLB internal chunk. Present exactly once, as buffer index 0.
                 let blob = blob.as_ref().ok_or_else(||
                     "glTF references BIN buffer but the input is not a GLB".to_string())?;
                 buffers.push(blob.clone());
             }
             gltf::buffer::Source::Uri(uri) => {
                 if let Some(n) = uri.strip_prefix(DRACO_PLACEHOLDER_URI_PREFIX) {
-                    // Placeholder buffer we injected during Draco preprocess;
-                    // `decompress_draco` overwrites the zero contents below.
                     let n: usize = n.parse().map_err(|_| "draco: bad placeholder size")?;
                     buffers.push(vec![0u8; n]);
                 } else if let Some(bytes) = decode_data_uri(uri) {
                     buffers.push(bytes);
                 } else if let Some(bytes) = sidecars.get(uri) {
-                    // External `.bin` — resolved via the sidecar bundle the
-                    // wrapper packed. Clone into an owned Vec (matches the
-                    // storage of the other two branches).
                     buffers.push(bytes.clone());
                 } else {
                     return Err(format!(
@@ -99,18 +83,8 @@ fn parse_impl(bytes: &[u8], sidecars: HashMap<String, Vec<u8>>) -> Result<Loaded
         }
     }
 
-    // EXT_meshopt_compression: bufferViews may carry a compressed source
-    // pointing at a different buffer region. Decompress into the target
-    // bufferView's placeholder location so accessor reads see raw data.
-    // Runs before scene traversal — gltf-rs never sees the compressed bytes.
     decompress_meshopt(&document, &mut buffers)?;
 
-    // KHR_draco_mesh_compression: per-primitive Draco payloads. Same idea
-    // as meshopt above — decode up front, write the vertex attributes +
-    // indices into the accessors' fallback bufferView locations so scene
-    // traversal never has to know Draco existed. `draco_cache` was
-    // populated by preprocess above (one decode per primitive); when it
-    // holds the mesh already, `decompress_draco` skips the second decode.
     decompress_draco(&document, &mut buffers, bytes, &mut draco_cache)?;
 
     Ok(LoadedGltf { document, buffers, sidecars })
@@ -156,9 +130,6 @@ fn preprocess_draco_json(
     sidecars: &HashMap<String, Vec<u8>>,
     cache: &mut DracoCache,
 ) -> Result<Option<Vec<u8>>, String> {
-    // Split JSON out of whichever container we got. Also remember the tail
-    // (chunk-1 BIN block for GLB) so we can rebuild the container after +
-    // slice the raw BIN bytes for Draco source lookup below.
     let (json_bytes, glb_bin_tail, glb_bin_data): (Vec<u8>, Vec<u8>, Vec<u8>) = if raw.starts_with(b"glTF") {
         if raw.len() < 20 { return Err("GLB: truncated header".into()); }
         let json_len = u32::from_le_bytes(raw[12..16].try_into().unwrap()) as usize;
@@ -166,7 +137,6 @@ fn preprocess_draco_json(
         if json_type != 0x4E4F534A { return Err("GLB: chunk 0 is not JSON".into()); }
         if 20 + json_len > raw.len() { return Err("GLB: JSON chunk overruns file".into()); }
         let tail = raw[20 + json_len..].to_vec();
-        // BIN chunk = 8-byte chunk header (length + type) then payload.
         let bin_data = if tail.len() >= 8 {
             let bin_len = u32::from_le_bytes(tail[0..4].try_into().unwrap()) as usize;
             let bin_type = u32::from_le_bytes(tail[4..8].try_into().unwrap());
@@ -178,17 +148,11 @@ fn preprocess_draco_json(
         (raw.to_vec(), Vec::new(), Vec::new())
     };
 
-    // Fast reject: the vast majority of glTF assets don't use Draco. A
-    // linear substring scan over the JSON chunk skips the serde_json parse
-    // when the extension marker is absent. Kept scoped to the JSON slice
-    // (not `raw`) — scanning the GLB's BIN chunk noise dwarfs the JSON
-    // parse it would replace.
     if !contains_bytes(&json_bytes, DRACO_MARKER) { return Ok(None); }
 
     let mut json: serde_json::Value = serde_json::from_slice(&json_bytes)
         .map_err(|e| format!("draco preprocess: bad JSON: {}", e))?;
 
-    // Quick "is there any Draco at all" scan — bail out cheaply on the common case.
     let meshes = match json.get("meshes").and_then(|v| v.as_array()) {
         Some(m) if !m.is_empty() => m.clone(),
         _ => return Ok(None),
@@ -198,23 +162,11 @@ fn preprocess_draco_json(
     ).any(|p| p.get("extensions").and_then(|e| e.get("KHR_draco_mesh_compression")).is_some());
     if !has_draco { return Ok(None); }
 
-    // Draco spec: the accessors' `count` field is IGNORED for compressed
-    // accessors — the decoder decides how many vertices the mesh has.
-    // Some encoders set count to num-face-corners, others to n-unique-
-    // positions; either way it may disagree with what our decoder produces.
-    // Peek at each Draco payload up front, extract num_points + num_faces,
-    // and overwrite the JSON's count fields so downstream reads slice the
-    // right window of the placeholder bufferView. Without this the reader
-    // panics on small meshes whose declared count is < num_points, and
-    // silently reads garbage on ones where it's larger.
     let bin_data_slice: &[u8] = &glb_bin_data;
     patch_draco_accessor_counts(&mut json, bin_data_slice, sidecars, cache)?;
     let meshes = json.get("meshes").and_then(|v| v.as_array())
         .ok_or("draco preprocess: meshes vanished after count patch")?.clone();
 
-    // Gather the accessors that need a fabricated bufferView + compute the
-    // total placeholder-buffer size. Same accessor may be referenced by
-    // multiple primitives — coalesce so we don't allocate twice.
     let accessors = json.get("accessors").and_then(|v| v.as_array())
         .ok_or("draco preprocess: no accessors")?.clone();
     let mut acc_to_new_bv: std::collections::HashMap<usize, (usize, usize)> = std::collections::HashMap::new();
@@ -223,8 +175,6 @@ fn preprocess_draco_json(
         if acc_to_new_bv.contains_key(&acc_idx) { return Ok(()); }
         let acc = accessors.get(acc_idx)
             .ok_or_else(|| format!("draco preprocess: accessor {} out of range", acc_idx))?;
-        // If the accessor already has a bufferView, gltf-rs can read it
-        // directly — skip; decompress_draco writes into that bv location.
         if acc.get("bufferView").is_some() { return Ok(()); }
         let size = accessor_byte_size(acc)?;
         acc_to_new_bv.insert(acc_idx, (cursor, size));
@@ -237,9 +187,6 @@ fn preprocess_draco_json(
             let attrs = ext.get("attributes").and_then(|v| v.as_object())
                 .ok_or("draco preprocess: extension missing attributes map")?;
             for (name, _id) in attrs {
-                // `_id` is the Draco-internal attribute id, consumed at decode
-                // time by `decompress_draco`; here we only need the mapping
-                // back to the glTF accessor via the primitive's own attributes.
                 let acc_idx = prim.get("attributes").and_then(|v| v.as_object())
                     .and_then(|o| o.get(name)).and_then(|v| v.as_u64())
                     .ok_or_else(|| format!("draco preprocess: primitive missing accessor for '{}'", name))?
@@ -252,10 +199,6 @@ fn preprocess_draco_json(
         }
     }
 
-    // Insert the new buffer entry with our placeholder URI (zero-length
-    // decode inside gltf-rs, but our parse_impl catches the prefix and
-    // allocates the real byte count). No `byteLength` mismatch worry —
-    // gltf-rs isn't strict about it under `from_slice_without_validation`.
     let new_buffer_idx = json.get("buffers").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
     let buffers_arr = json.as_object_mut().unwrap()
         .entry("buffers").or_insert_with(|| serde_json::Value::Array(Vec::new()))
@@ -265,15 +208,11 @@ fn preprocess_draco_json(
         "uri": format!("{}{}", DRACO_PLACEHOLDER_URI_PREFIX, cursor),
     }));
 
-    // Append one bufferView per synthesised accessor. Assign the new indices
-    // as we go; `acc_to_new_bv` now holds (offset, size) — we track the new
-    // bv index alongside so we can point accessors at them below.
     let existing_bv_len = json.get("bufferViews").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
     let mut bv_index_for_acc: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     let bv_arr = json.as_object_mut().unwrap()
         .entry("bufferViews").or_insert_with(|| serde_json::Value::Array(Vec::new()))
         .as_array_mut().unwrap();
-    // Deterministic insertion order → sort acc indices ascending.
     let mut sorted_accs: Vec<usize> = acc_to_new_bv.keys().copied().collect();
     sorted_accs.sort_unstable();
     for acc_idx in &sorted_accs {
@@ -286,27 +225,20 @@ fn preprocess_draco_json(
         bv_index_for_acc.insert(*acc_idx, existing_bv_len + bv_index_for_acc.len());
     }
 
-    // Patch each accessor to reference its new bufferView.
     let acc_arr = json.as_object_mut().unwrap()
         .get_mut("accessors").unwrap().as_array_mut().unwrap();
     for (acc_idx, bv_idx) in &bv_index_for_acc {
         let acc = acc_arr.get_mut(*acc_idx).unwrap().as_object_mut().unwrap();
         acc.insert("bufferView".into(), serde_json::json!(*bv_idx));
-        // Ensure byteOffset is 0 (we own the whole bv region).
         acc.insert("byteOffset".into(), serde_json::json!(0));
     }
 
-    // Serialise the patched JSON.
     let new_json = serde_json::to_vec(&json)
         .map_err(|e| format!("draco preprocess: reserialise failed: {}", e))?;
 
-    // Rebuild container.
     if glb_bin_tail.is_empty() {
-        // Plain .gltf — just the patched JSON.
         Ok(Some(new_json))
     } else {
-        // GLB — 12 B header + [json chunk] + tail (unchanged BIN chunk).
-        // JSON chunk length must be 4-byte aligned; pad with spaces (0x20).
         let mut json_padded = new_json;
         while json_padded.len() % 4 != 0 { json_padded.push(0x20); }
         let json_len = json_padded.len();
@@ -316,7 +248,7 @@ fn preprocess_draco_json(
         out.extend_from_slice(&2u32.to_le_bytes());
         out.extend_from_slice(&(total_len as u32).to_le_bytes());
         out.extend_from_slice(&(json_len as u32).to_le_bytes());
-        out.extend_from_slice(&0x4E4F534Au32.to_le_bytes());   // "JSON"
+        out.extend_from_slice(&0x4E4F534Au32.to_le_bytes());
         out.extend_from_slice(&json_padded);
         out.extend_from_slice(&glb_bin_tail);
         Ok(Some(out))
@@ -337,7 +269,6 @@ fn resolve_buffer_bytes<'a>(
 ) -> Option<Vec<u8>> {
     let bufs = json.get("buffers").and_then(|v| v.as_array())?;
     let b = bufs.get(buf_idx)?;
-    // GLB internal chunk: buffer 0, no `uri` field.
     if buf_idx == 0 && b.get("uri").is_none() { return Some(glb_bin.to_vec()); }
     let uri = b.get("uri").and_then(|v| v.as_str())?;
     if let Some(bytes) = decode_data_uri(uri) {
@@ -364,8 +295,6 @@ fn patch_draco_accessor_counts(
     let bvs = json.get("bufferViews").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let meshes = json.get("meshes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
 
-    // For each primitive → (Vec of accessor idxs to set count = num_points,
-    // Some(indices_accessor_idx) for face-count patching, num_points, num_faces).
     let mut patches: Vec<(Vec<usize>, Option<usize>, usize, usize)> = Vec::new();
 
     let mut data_uri_cache: HashMap<usize, Vec<u8>> = HashMap::new();
@@ -392,15 +321,11 @@ fn patch_draco_accessor_counts(
 
             let decoded = Decoder::new().decode_mesh(&src)
                 .map_err(|e| format!("draco preprocess decode error: {:?}", e))?;
-            // num_points = length of any attribute's point_map (identical
-            // across attrs for a given Draco mesh). Fall back to 0 for the
-            // pathological empty-mesh case.
             let num_points = decoded.attributes.iter()
                 .find_map(|a| a.point_map_as_slice().map(|m| m.len()))
                 .unwrap_or(0);
             let num_faces = decoded.faces.len();
 
-            // Collect the attribute-accessor indices from the primitive.
             let mut attr_accs: Vec<usize> = Vec::new();
             if let Some(a) = prim.get("attributes").and_then(|v| v.as_object()) {
                 for (_name, v) in a {
@@ -409,13 +334,10 @@ fn patch_draco_accessor_counts(
             }
             let idx_acc = prim.get("indices").and_then(|v| v.as_u64()).map(|v| v as usize);
             patches.push((attr_accs, idx_acc, num_points, num_faces));
-            // Stash the decoded mesh — `decompress_draco` will reuse it
-            // rather than decode the same payload a second time.
             cache.insert((mesh_idx, prim_idx), decoded);
         }
     }
 
-    // Apply all count / componentType patches.
     let accs = json.get_mut("accessors").and_then(|v| v.as_array_mut())
         .ok_or("draco preprocess: no accessors array")?;
     for (attr_accs, idx_acc, num_points, num_faces) in patches {
@@ -427,8 +349,6 @@ fn patch_draco_accessor_counts(
         if let Some(a) = idx_acc {
             if let Some(acc) = accs.get_mut(a).and_then(|v| v.as_object_mut()) {
                 acc.insert("count".into(), serde_json::json!(num_faces * 3));
-                // Face indices reference [0, num_points). If they can't
-                // fit in the declared componentType, widen it.
                 let ct = acc.get("componentType").and_then(|v| v.as_u64()).unwrap_or(5123);
                 if num_points > 65535 && ct == 5123 {
                     acc.insert("componentType".into(), serde_json::json!(5125_u64));
@@ -459,10 +379,10 @@ fn accessor_byte_size(acc: &serde_json::Value) -> Result<usize, String> {
     let ct = acc.get("componentType").and_then(|v| v.as_u64())
         .ok_or("accessor: missing componentType")? as u32;
     let c = match ct {
-        5120 | 5121 => 1,       // BYTE / UNSIGNED_BYTE
-        5122 | 5123 => 2,       // SHORT / UNSIGNED_SHORT
-        5125        => 4,       // UNSIGNED_INT
-        5126        => 4,       // FLOAT
+        5120 | 5121 => 1,
+        5122 | 5123 => 2,
+        5125        => 4,
+        5126        => 4,
         other => return Err(format!("accessor: unknown componentType {}", other)),
     };
     Ok(count * n * c)
@@ -514,10 +434,6 @@ fn decompress_draco(
 ) -> Result<(), String> {
     use draco_oxide_decoder::Decoder;
 
-    // Collect target (buffer_idx, offset, bytes) triples first, then apply
-    // them below — the accessor's bufferView often lives in the same buffer
-    // as the Draco source, so we can't hold `&mut buffers[..]` inside the
-    // primitive loop.
     let mut patches: Vec<(usize, usize, Vec<u8>)> = Vec::new();
 
     for (mesh_idx, mesh) in document.meshes().enumerate() {
@@ -528,12 +444,6 @@ fn decompress_draco(
             let attr_map = ext.get("attributes").and_then(|v| v.as_object())
                 .ok_or("draco: missing attributes map")?;
 
-            // Hot path: preprocess already decoded this primitive for the
-            // accessor.count patch — take the cached mesh instead of a
-            // second decode (Draco decode is ~ half the total Draco parse
-            // cost on tokyo). Cold path (cache miss) only fires if the
-            // preprocess couldn't reach this primitive, e.g. a `.gltf` with
-            // an external buffer we didn't have at preprocess time.
             let decoded = if let Some(m) = cache.remove(&(mesh_idx, prim_idx)) {
                 m
             } else {
@@ -549,19 +459,6 @@ fn decompress_draco(
                     .map_err(|e| format!("draco decode error: {:?}", e))?
             };
 
-            // Emit per-point (`num_points` values per attribute), indexed by
-            // each attribute's OWN `point_to_att_val_map`. Face indices are
-            // direct Draco point indices into that array. This preserves UV
-            // seams and per-attribute dedup axes — Draco allows each attr
-            // to dedup independently (positions on (x,y,z), UVs on (u,v),
-            // etc.), and per-point emit is the only representation with
-            // enough resolution for a single-index-buffer glTF primitive
-            // to reproduce every point exactly.
-            //
-            // The count-patch pass in `preprocess_draco_json` set each
-            // referenced accessor's `count` to `num_points` and widened the
-            // indices componentType if necessary, so the reader will slice
-            // exactly the window we write here.
             let num_points = decoded.attributes.iter()
                 .find_map(|a| a.point_map_as_slice().map(|m| m.len()))
                 .unwrap_or(0);
@@ -587,9 +484,6 @@ fn decompress_draco(
                 patches.push((target_bv.buffer().index(), target_bv.offset() + accessor.offset(), bytes));
             }
 
-            // Face indices: direct Draco point indices, serialised in the
-            // accessor's componentType. `preprocess_draco_json` may have
-            // widened U16 → U32 when num_points > 65535.
             if let Some(idx_accessor) = prim.indices() {
                 let target_bv = idx_accessor.view()
                     .ok_or("draco: indices accessor has no bufferView")?;
@@ -620,9 +514,6 @@ fn decompress_draco(
         }
     }
 
-    // Apply all patches. Grow the destination buffer if the placeholder was
-    // shorter than the decoded payload (encoders sometimes emit zero-length
-    // fallback buffers).
     for (buf_idx, offset, bytes) in patches {
         let buf = &mut buffers[buf_idx];
         if offset + bytes.len() > buf.len() {
@@ -655,8 +546,6 @@ fn gather_per_point<T: Copy + Into<usize>>(
     let out_len = num_points * value_size;
     let mut out = vec![0u8; out_len];
     let Some(tm) = map else {
-        // No map — attribute stored per-point directly; copy the relevant
-        // prefix. Shouldn't happen for Draco but the decoder API allows it.
         let n = out_len.min(unique.len()).min(n_unique * value_size);
         out[..n].copy_from_slice(&unique[..n]);
         return out;
@@ -684,9 +573,6 @@ fn fill_specialized<T: Copy + Into<usize>, const VS: usize>(
     for (p, chunk) in tm[..n].iter().zip(out.chunks_exact_mut(VS)) {
         let ui = (*p).into().min(last);
         let src = &unique[ui * VS .. ui * VS + VS];
-        // `copy_from_slice` on `chunk` (known length VS) and `src` (bounds-
-        // checked to length VS) collapses to an unrolled load/store pair
-        // in the optimized wasm.
         chunk.copy_from_slice(src);
     }
 }
@@ -707,9 +593,6 @@ fn fill_generic<T: Copy + Into<usize>>(
         let ui = (*p).into().min(last);
         let src_off = ui * value_size;
         let dst_off = i * value_size;
-        // SAFETY: caller pre-sized `out` to num_points * value_size, and
-        // `ui` is clamped to `n_unique - 1` above so `src_off + value_size`
-        // stays within the unique-values pool.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 src_base.add(src_off),
@@ -731,9 +614,6 @@ fn fill_generic<T: Copy + Into<usize>>(
 /// region typically comes from a "fallback" (zero-filled) buffer whose
 /// `extensions.EXT_meshopt_compression.fallback` flag is `true`.
 fn decompress_meshopt(document: &gltf::Document, buffers: &mut Vec<Vec<u8>>) -> Result<(), String> {
-    // Collect the (target_buffer, target_offset, target_length, decoded_bytes)
-    // triples first, then apply them — avoids double-borrowing `buffers` when
-    // source and target buffer indices happen to match.
     let mut patches: Vec<(usize, usize, Vec<u8>)> = Vec::new();
     for view in document.views() {
         let Some(ext) = view.extension_value("EXT_meshopt_compression") else { continue; };
@@ -755,11 +635,6 @@ fn decompress_meshopt(document: &gltf::Document, buffers: &mut Vec<Vec<u8>>) -> 
         let mut decoded = vec![0u8; decoded_len];
         match mode {
             "ATTRIBUTES" => {
-                // The pure-Rust decoder's `decode_vertex_buffer` treats the
-                // destination as a slice of typed vertices. We use `[u8; N]`
-                // sized by stride — but generic const N means we'd need one
-                // path per stride. Cheat: hand-fill via a wrapper vertex type
-                // dispatched by stride.
                 decode_attributes(stride, count, src_bytes, &mut decoded)?;
             }
             "TRIANGLES" => {
@@ -771,10 +646,8 @@ fn decompress_meshopt(document: &gltf::Document, buffers: &mut Vec<Vec<u8>>) -> 
             _ => return Err(format!("meshopt: unknown mode {}", mode)),
         }
 
-        // Apply per-filter post-processing in place.
         apply_meshopt_filter(filter, stride, count, &mut decoded)?;
 
-        // Target region — where the bufferView says its data lives.
         let target_buffer = view.buffer().index();
         let target_offset = view.offset();
         patches.push((target_buffer, target_offset, decoded));
@@ -783,8 +656,6 @@ fn decompress_meshopt(document: &gltf::Document, buffers: &mut Vec<Vec<u8>>) -> 
     for (buf_idx, offset, decoded) in patches {
         let buf = &mut buffers[buf_idx];
         if offset + decoded.len() > buf.len() {
-            // Grow the target buffer if the placeholder is shorter than the
-            // decoded output — some encoders declare a zero-length fallback.
             buf.resize(offset + decoded.len(), 0);
         }
         buf[offset .. offset + decoded.len()].copy_from_slice(&decoded);
@@ -793,9 +664,6 @@ fn decompress_meshopt(document: &gltf::Document, buffers: &mut Vec<Vec<u8>>) -> 
 }
 
 fn decode_attributes(stride: usize, count: usize, src: &[u8], dst: &mut [u8]) -> Result<(), String> {
-    // meshopt-rs's decoder is generic over the vertex type. Dispatch on
-    // stride to a fixed-size `[u8; N]` slice view — covers the strides that
-    // meshopt actually emits (multiples of 4, up to 64 for typical assets).
     macro_rules! try_stride { ($n:literal) => { if stride == $n {
         let dest: &mut [[u8; $n]] = unsafe {
             std::slice::from_raw_parts_mut(dst.as_mut_ptr() as *mut [u8; $n], count)
@@ -811,9 +679,6 @@ fn decode_attributes(stride: usize, count: usize, src: &[u8], dst: &mut [u8]) ->
 }
 
 fn decode_triangles(stride: usize, count: usize, src: &[u8], dst: &mut [u8]) -> Result<(), String> {
-    // `meshopt-rs` decode requires `T: From<u32>` — that's fine for u32 but
-    // not u16 (potential overflow). Decode to u32 always, then downcast per
-    // stride. Cost: extra 2× temp allocation for u16 indices, negligible.
     let mut tmp = vec![0u32; count];
     meshopt_rs::index::buffer::decode_index_buffer(&mut tmp, src)
         .map_err(|e| format!("meshopt triangles decode: {:?}", e))?;
@@ -847,8 +712,6 @@ fn apply_meshopt_filter(filter: &str, stride: usize, count: usize, buf: &mut [u8
     match filter {
         "NONE" => Ok(()),
         "OCTAHEDRAL" => {
-            // Octahedral filter operates on 4-tuples (xy encoded pair + w).
-            // Stride 4 → u8 quads, stride 8 → u16 quads.
             if stride == 4 {
                 let data: &mut [[u8; 4]] = unsafe {
                     std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut [u8; 4], count)
@@ -875,7 +738,6 @@ fn apply_meshopt_filter(filter: &str, stride: usize, count: usize, buf: &mut [u8
             Ok(())
         }
         "EXPONENTIAL" => {
-            // Operates on u32 words. Element count = count * stride / 4.
             if stride % 4 != 0 {
                 return Err(format!("meshopt EXPONENTIAL: stride {} not a multiple of 4", stride));
             }
@@ -897,8 +759,6 @@ fn apply_meshopt_filter(filter: &str, stride: usize, count: usize, buf: &mut [u8
 pub(crate) fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
     let rest = uri.strip_prefix("data:")?;
     let (_media, payload) = rest.split_once(',')?;
-    // Expect the media prefix to end in `;base64`. Non-base64 payloads
-    // (URL-encoded text) fall through as None.
     if !_media.split(';').any(|p| p.eq_ignore_ascii_case("base64")) {
         return None;
     }
@@ -919,9 +779,9 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
             b'0'..=b'9' => 52 + (b - b'0') as u32,
             b'+' | b'-' => 62,
             b'/' | b'_' => 63,
-            b'=' => break, // padding — stop consuming
+            b'=' => break,
             b' ' | b'\t' | b'\n' | b'\r' => continue,
-            _ => return None, // invalid character
+            _ => return None,
         };
         buf = (buf << 6) | v;
         bits += 6;

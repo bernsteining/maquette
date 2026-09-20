@@ -52,12 +52,11 @@ pub fn clip_triangles(triangles: &[Triangle], plane: [f64; 4], cap: bool, base: 
 
         match count_inside {
             3 => result.push(*tri),
-            0 => {} // fully clipped
+            0 => {}
             _ => clip_triangle(tri, &dists, &inside, &mut result, &mut cap_edges, base),
         }
     }
 
-    // Generate cap faces to close the cross-section
     if cap && !cap_edges.is_empty() {
         let cap_normal = Vec3::new(-plane[0], -plane[1], -plane[2]).normalized();
         generate_cap(&cap_edges, cap_normal, &mut result);
@@ -75,7 +74,6 @@ fn clip_triangle(
     base: Color3,
 ) {
     if inside.iter().filter(|&&b| b).count() == 1 {
-        // One vertex inside — produces 1 triangle
         let lone = unsafe { inside.iter().position(|&b| b).unwrap_unchecked() };
         let i0 = lone;
         let i1 = (lone + 1) % 3;
@@ -107,11 +105,10 @@ fn clip_triangle(
         });
         cap_edges.push(CapEdge { v0: v1, v1: v2, c0: c1, c1: c2 });
     } else {
-        // Two vertices inside — produces 2 triangles (a quad)
         let lone = unsafe { inside.iter().position(|&b| !b).unwrap_unchecked() };
-        let i0 = lone; // outside
-        let i1 = (lone + 1) % 3; // inside
-        let i2 = (lone + 2) % 3; // inside
+        let i0 = lone;
+        let i1 = (lone + 1) % 3;
+        let i2 = (lone + 2) % 3;
 
         let t_a = dists[i0] / (dists[i0] - dists[i1]);
         let t_b = dists[i0] / (dists[i0] - dists[i2]);
@@ -185,7 +182,6 @@ fn triangulate_loop(chain: &[(Vec3, Color3)], cap_normal: Vec3, out: &mut Vec<Tr
     let nv = chain.len();
     if nv < 3 { return; }
 
-    // Project onto the cap plane using a right-handed basis (u, v, cap_normal).
     let (u, vv) = cap_normal.tangent_basis();
     let p: Vec<(f64, f64)> = chain.iter().map(|&(pt, _)| (pt.dot(u), pt.dot(vv))).collect();
 
@@ -199,7 +195,6 @@ fn triangulate_loop(chain: &[(Vec3, Color3)], cap_normal: Vec3, out: &mut Vec<Tr
         !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
     }
 
-    // Signed area → make the working index list counter-clockwise in (u, v).
     let mut signed = 0.0;
     for i in 0..nv { let j = (i + 1) % nv; signed += p[i].0 * p[j].1 - p[j].0 * p[i].1; }
     let mut idx: Vec<usize> = (0..nv).collect();
@@ -212,8 +207,7 @@ fn triangulate_loop(chain: &[(Vec3, Color3)], cap_normal: Vec3, out: &mut Vec<Tr
         for k in 0..m {
             let (ip, ic, inx) = (idx[(k + m - 1) % m], idx[k], idx[(k + 1) % m]);
             let (a2, b2, c2) = (p[ip], p[ic], p[inx]);
-            if cross2(a2, b2, c2) <= 0.0 { continue; } // reflex vertex — not an ear
-            // Reject if any other vertex falls inside the candidate ear.
+            if cross2(a2, b2, c2) <= 0.0 { continue; }
             if idx.iter().any(|&io| io != ip && io != ic && io != inx && in_tri(p[io], a2, b2, c2)) {
                 continue;
             }
@@ -224,7 +218,6 @@ fn triangulate_loop(chain: &[(Vec3, Color3)], cap_normal: Vec3, out: &mut Vec<Tr
         }
         guard += 1;
         if !clipped || guard > nv * nv + 8 {
-            // Degenerate/self-intersecting input: fan the remainder as a fallback.
             for k in 1..idx.len() - 1 { push_cap_tri(out, chain, idx[0], idx[k], idx[k + 1], cap_normal); }
             return;
         }
@@ -237,7 +230,6 @@ fn triangulate_loop(chain: &[(Vec3, Color3)], cap_normal: Vec3, out: &mut Vec<Tr
 fn chain_edges(edges: &[CapEdge]) -> Vec<Vec<(Vec3, Color3)>> {
     type VKey = (i64, i64, i64);
 
-    // Build adjacency: quantized vertex → list of edge indices touching it
     let mut adj: FxHashMap<VKey, Vec<usize>> = fx_hashmap_cap(edges.len());
     let mut edge_data: Vec<(VKey, VKey, Vec3, Vec3, Color3, Color3)> = Vec::with_capacity(edges.len());
     for (i, e) in edges.iter().enumerate() {
@@ -260,13 +252,11 @@ fn chain_edges(edges: &[CapEdge]) -> Vec<Vec<(Vec3, Color3)>> {
         let mut cur_key = kb;
 
         loop {
-            // Check if loop is closed
             if chain.len() > 2 && cur_key == start_key {
                 chain.pop();
                 break;
             }
 
-            // Find next unused edge at cur_key (O(1) lookup)
             let mut found = false;
             if let Some(neighbors) = adj.get(&cur_key) {
                 for &ei in neighbors {

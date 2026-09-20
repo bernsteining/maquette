@@ -78,10 +78,6 @@ type ModuleDef = (Vec<Parameter>, Vec<Statement>);
 
 #[derive(Clone)]
 struct Env {
-    // `vars` is a persistent map: cloning an Env (every call scope) shares it in
-    // O(1), and a binding copies only the changed trie path. `funcs`/`modules` are
-    // effectively write-once (top-level defs / library imports) and Rc-shared, with
-    // copy-on-write on a nested `function`/`module` definition.
     vars: Vars,
     funcs: Rc<FxHashMap<String, FuncDef>>,
     modules: Rc<FxHashMap<String, ModuleDef>>,
@@ -99,9 +95,6 @@ struct Env {
     root: Rc<RefCell<Option<Json>>>,
 }
 
-// Manual Debug: the Fx `BuildHasher` in `Vars` isn't `Debug`, and a full var dump
-// is noise anyway — summarize sizes instead. (Needed because `Value::Func` holds an
-// `Env` closure and `Value` derives `Debug`.)
 impl std::fmt::Debug for Env {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Env")
@@ -180,7 +173,7 @@ fn strip_block_comments(src: &str) -> String {
                     }
                     i += 1;
                 }
-                i = (i + 2).min(b.len()); // consume the closing */
+                i = (i + 2).min(b.len());
                 out.push(b' ');
             }
             c => {
@@ -204,13 +197,8 @@ pub fn scad_to_dsl(src: &str, files: HashMap<String, String>) -> Result<Json, St
     let sf = parse_scad(src).map_err(|e| format!("scad parse error: {e}"))?;
     let mut env = Env::new();
     env.files = Rc::new(files);
-    // Built-in special variables/constants (OpenSCAD defaults). $fn=0 means
-    // "resolve tessellation from $fa/$fs" — libraries like dotSCAD read these
-    // directly (e.g. its __frags() helper), so they must be defined. Our own
-    // primitive builder still falls back to the caller's `fn` default when a
-    // node carries no explicit $fn (fn_default() filters out $fn<3, incl. 0).
     env.vars.insert_mut("PI".into(), Value::Num(std::f64::consts::PI));
-    env.vars.insert_mut("$t".into(), Value::Num(0.0)); // animation time (static render)
+    env.vars.insert_mut("$t".into(), Value::Num(0.0));
     env.vars.insert_mut("$preview".into(), Value::Bool(true));
     env.vars.insert_mut("$fn".into(), Value::Num(0.0));
     env.vars.insert_mut("$fa".into(), Value::Num(12.0));
@@ -306,9 +294,6 @@ fn import_defs(path: &str, env: &mut Env, with_vars: bool) -> Result<(), String>
                     let v = eval_expr(expr, env)?;
                     env.vars.insert_mut(name.clone(), v);
                 }
-                // `use` imports the file's top-level variables too — real
-                // libraries rely on their own config globals being visible to
-                // their modules (OpenSCAD keeps them in the module's file scope).
                 Statement::Use { path, .. } => import_defs(path, env, true)?,
                 Statement::Include { path, .. } => import_defs(path, env, with_vars)?,
                 _ => {}
@@ -324,9 +309,6 @@ fn import_defs(path: &str, env: &mut Env, with_vars: bool) -> Result<(), String>
 /// Evaluate a statement list, threading assignments/definitions into `env` and
 /// collecting the geometry nodes produced.
 fn eval_body(stmts: &[Statement], env: &mut Env) -> Result<Vec<Json>, String> {
-    // OpenSCAD hoists definitions and uses last-assignment-wins within a scope;
-    // we approximate with a pre-pass for defs + assignments, then a geometry
-    // pass. Good enough for the vast majority of real files.
     for s in stmts {
         match s {
             Statement::Assignment { name, expr, .. } => {
@@ -339,9 +321,6 @@ fn eval_body(stmts: &[Statement], env: &mut Env) -> Result<Vec<Json>, String> {
             Statement::FunctionDefinition { name, params, body, .. } => {
                 env.def_func(name.clone(), params.clone(), body.clone());
             }
-            // `use <lib>` imports modules, functions AND the lib's top-level
-            // variables (its modules depend on them); `include <lib>` also runs
-            // the lib's top-level geometry (handled in the geometry pass below).
             Statement::Use { path, .. } => import_defs(path, env, true)?,
             Statement::Include { path, .. } => import_defs(path, env, true)?,
             _ => {}
@@ -350,7 +329,6 @@ fn eval_body(stmts: &[Statement], env: &mut Env) -> Result<Vec<Json>, String> {
     let mut out = Vec::new();
     for s in stmts {
         match s {
-            // `include <lib>` also contributes the library's top-level geometry.
             Statement::Include { path, .. } => {
                 let (dir, file_stmts) = load_scad_file(path, env)?;
                 let saved_dir = std::mem::replace(&mut env.cur_dir, dir);
@@ -362,11 +340,9 @@ fn eval_body(stmts: &[Statement], env: &mut Env) -> Result<Vec<Json>, String> {
             }
             Statement::ModuleInstantiation { name, args, children, modifiers, .. } => {
                 if modifiers.disable {
-                    continue; // `*` disables the subtree
+                    continue;
                 }
                 if let Some(node) = instantiate(name, args, children, env)? {
-                    // `%` (background) → translucent gray ghost; `#` (highlight) →
-                    // translucent red. Mirrors OpenSCAD's preview modifiers.
                     let node = if modifiers.background {
                         ghost(node, [0.6, 0.6, 0.6], 0.22)
                     } else if modifiers.highlight {
@@ -486,7 +462,6 @@ fn vec3_of(v: &Value) -> Result<[f64; 3], String> {
 /// `r` directly, or `d`/2 (diameter). Returns None if neither present.
 fn radius(a: &Args, env: &Env) -> Option<f64> {
     a.num(0, "r").or_else(|| a.named_num("d").map(|d| d / 2.0)).or_else(|| {
-        // allow bare positional for r on sphere/circle
         let _ = env;
         None
     })
@@ -525,21 +500,15 @@ fn instantiate(
     children: &[Statement],
     env: &mut Env,
 ) -> Result<Option<Json>, String> {
-    // `for`/`if`/`let` bind before their children are evaluated, so they read
-    // raw args, not pre-evaluated ones.
     match name {
         "for" => return eval_for(args, children, env),
         "intersection_for" => return eval_intersection_for(args, children, env),
         "if" => {
-            // `if` can appear as a module instantiation too.
             let a = eval_args(args, env)?;
             let cond = a.pos.first().map(Value::truthy).unwrap_or(false);
             return Ok(if cond { group(eval_body(children, env)?) } else { None });
         }
-        // Diagnostics: no geometry, just render any children (e.g. `echo(x) cube();`).
         "echo" | "assert" => return Ok(group(eval_body(children, env)?)),
-        // `let(a=…) { … }` and the deprecated `assign(a=…) { … }` — bind the
-        // (evaluated) named args as locals, then render the children in that scope.
         "let" | "assign" => {
             let a = eval_args(args, env)?;
             let mut local = env.clone();
@@ -548,8 +517,6 @@ fn instantiate(
             }
             return Ok(group(eval_body(children, &mut local)?));
         }
-        // `children()` / `children(i)` / `children([i,j,…])` — the geometry the
-        // current module was called with (set by instantiate_user).
         "children" | "child" => {
             let a = eval_args(args, env)?;
             let kids = env.children.as_ref().clone();
@@ -573,7 +540,6 @@ fn instantiate(
     let a = eval_args(args, env)?;
 
     let node = match name {
-        // ---- 3D primitives ----
         "cube" => {
             let size = match a.get(0, "size") {
                 Some(Value::Vec(_)) => vec3_of(a.get(0, "size").unwrap())?,
@@ -584,7 +550,6 @@ fn instantiate(
             obj(&[("op", Json::Str("cube".into())), ("size", jvec3(size)), ("center", Json::Bool(center))])
         }
         "sphere" => {
-            // OpenSCAD defaults an argument-less primitive to size 1.
             let r = radius(&a, env).unwrap_or(1.0);
             with_fn(vec![("op", Json::Str("sphere".into())), ("r", jnum(r))], &a, env)
         }
@@ -612,7 +577,6 @@ fn instantiate(
             obj(&[("op", Json::Str("polyhedron".into())), ("points", points), ("faces", faces)])
         }
 
-        // ---- 2D primitives ----
         "square" => {
             let size = a.get(0, "size").cloned().unwrap_or(Value::Num(1.0));
             let center = a.bool("center").unwrap_or(false);
@@ -657,7 +621,6 @@ fn instantiate(
             obj_owned(e)
         }
 
-        // ---- transforms (a transform of nothing is nothing) ----
         "translate" => return wrap_transform("translate", "v", vec3_of(a.get(0, "v").ok_or("translate: v")?)?, group(eval_body(children, env)?)),
         "scale" => {
             let v = match a.get(0, "v").ok_or("scale: v")? {
@@ -678,7 +641,6 @@ fn instantiate(
             obj(&[("op", Json::Str("resize".into())), ("v", jvec3(v)), ("child", child)])
         }
         "offset" => {
-            // offset(r=…) or offset(delta=…) → a single signed distance.
             let dist = a
                 .num(0, "r")
                 .or_else(|| a.named.get("delta").and_then(|x| x.as_num().ok()))
@@ -687,12 +649,10 @@ fn instantiate(
             obj(&[("op", Json::Str("offset".into())), ("d", jnum(dist)), ("child", child)])
         }
         "projection" => {
-            // Shadow projection onto Z=0 (the `cut` flag is not distinguished).
             let child = match group(eval_body(children, env)?) { Some(c) => c, None => return Ok(None) };
             obj(&[("op", Json::Str("projection".into())), ("child", child)])
         }
         "rotate" => {
-            // scalar => rotate about Z; vector => euler xyz.
             let deg = match a.get(0, "a").or_else(|| a.get(0, "v")).ok_or("rotate: a")? {
                 Value::Num(n) => [0.0, 0.0, *n],
                 other => vec3_of(other)?,
@@ -700,8 +660,6 @@ fn instantiate(
             return wrap_transform("rotate", "deg", deg, group(eval_body(children, env)?));
         }
         "color" => {
-            // color(c) where c is [r,g,b], [r,g,b,a], or a name; optional 2nd arg
-            // / `alpha=` sets/overrides alpha (OpenSCAD's color(c, alpha) form).
             let cval = a.get(0, "c");
             let rgb = match cval {
                 Some(Value::Vec(_)) => vec3_of(cval.unwrap())?,
@@ -711,7 +669,6 @@ fn instantiate(
             let alpha = a
                 .num(1, "alpha")
                 .or_else(|| match cval {
-                    // 4th component of an [r,g,b,a] vector
                     Some(Value::Vec(v)) if v.len() >= 4 => v[3].as_num().ok(),
                     _ => None,
                 })
@@ -728,7 +685,6 @@ fn instantiate(
             obj_owned(e)
         }
 
-        // ---- extrudes ----
         "linear_extrude" => {
             let h = a.num(0, "height").or_else(|| a.num(0, "h")).ok_or("linear_extrude: height")?;
             let center = a.bool("center").unwrap_or(false);
@@ -760,7 +716,6 @@ fn instantiate(
             with_fn(vec![("op", Json::Str("rotate_extrude".into())), ("angle", jnum(angle)), ("child", child)], &a, env)
         }
 
-        // ---- booleans / grouping ----
         "union" | "difference" | "intersection" | "hull" | "minkowski" => {
             let kids = eval_body(children, env)?;
             if kids.is_empty() {
@@ -768,14 +723,10 @@ fn instantiate(
             }
             obj(&[("op", Json::Str(name.into())), ("children", Json::Arr(kids))])
         }
-        // `render()` (force-CGAL) and bare `{ }` groups are just grouping here.
         "group" | "render" => return Ok(group(eval_body(children, env)?)),
 
-        // ---- user-defined module ----
         other => {
             if let Some((params, body)) = env.modules.get(other).cloned() {
-                // The `{ … }` block passed to the module is evaluated in the
-                // CALLER's scope and made available via `children()`.
                 let child_nodes = eval_body(children, env)?;
                 return instantiate_user(&params, &body, &a, env, child_nodes);
             }
@@ -786,7 +737,6 @@ fn instantiate(
 }
 
 fn wrap_transform(op: &str, key: &str, v: [f64; 3], child: Option<Json>) -> Result<Option<Json>, String> {
-    // A transform of nothing is nothing (OpenSCAD semantics).
     Ok(child.map(|c| obj(&[("op", Json::Str(op.into())), (key, jvec3(v)), ("child", c)])))
 }
 
@@ -950,7 +900,6 @@ fn bind_params(params: &[Parameter], a: &Args, env: &mut Env) -> Result<(), Stri
     Ok(())
 }
 
-// ---- expression evaluation ----
 
 fn eval_expr(expr: &Expr, env: &Env) -> Result<Value, String> {
     match &expr.kind {
@@ -959,12 +908,8 @@ fn eval_expr(expr: &Expr, env: &Env) -> Result<Value, String> {
         ExprKind::BoolTrue => Ok(Value::Bool(true)),
         ExprKind::BoolFalse => Ok(Value::Bool(false)),
         ExprKind::Undef => Ok(Value::Undef),
-        // OpenSCAD treats a read of an undefined variable as `undef` (with a
-        // warning), not an error — real code and libraries rely on this.
         ExprKind::Identifier(name) => Ok(env.vars.get(name).cloned().unwrap_or(Value::Undef)),
         ExprKind::Vector(items) => {
-            // Vectors and list comprehensions share this path: each element is
-            // flattened, so `for`/`if`/`let`/`each` elements expand in place.
             let mut out = Vec::new();
             for it in items {
                 flatten_lc(it, env, &mut out)?;
@@ -981,13 +926,11 @@ fn eval_expr(expr: &Expr, env: &Env) -> Result<Value, String> {
             Ok(Value::Vec(out))
         }
         ExprKind::Range { start, step, end } => {
-            // A range used as a value materializes to a vector.
             Ok(Value::Vec(expand_range(start, step.as_deref(), end, env)?))
         }
         ExprKind::UnaryOp { op, operand } => {
             let v = eval_expr(operand, env)?;
             match op {
-                // Unary -/+ negate/copy a number OR every element of a vector/matrix.
                 UnaryOp::Negate => match &v {
                     Value::Vec(a) => Ok(scale_seq(a, -1.0)),
                     _ => Ok(Value::Num(-v.as_num()?)),
@@ -1009,7 +952,6 @@ fn eval_expr(expr: &Expr, env: &Env) -> Result<Value, String> {
             }
         }
         ExprKind::Index { object, index } => {
-            // OpenSCAD: out-of-range / non-indexable / non-numeric index → undef.
             let o = eval_expr(object, env)?;
             let i = match eval_expr(index, env)? {
                 Value::Num(n) if n >= 0.0 && n.is_finite() => n as usize,
@@ -1022,7 +964,6 @@ fn eval_expr(expr: &Expr, env: &Env) -> Result<Value, String> {
             })
         }
         ExprKind::MemberAccess { object, member } => {
-            // `.x/.y/.z` (and `.r/.g/.b`) → index into a vector; else undef.
             let idx = match member.as_str() {
                 "x" | "r" => 0,
                 "y" | "g" => 1,
@@ -1046,12 +987,8 @@ fn eval_expr(expr: &Expr, env: &Env) -> Result<Value, String> {
             eval_expr(body, &local)
         }
         ExprKind::AnonymousFunction { params, body } => {
-            // Capture the current environment (closure).
             Ok(Value::Func(Rc::new((params.clone(), (**body).clone(), env.clone()))))
         }
-        // `assert(cond) expr` / `echo(...) expr` in expression position: we don't
-        // enforce the assertion or print, just evaluate the trailing expression
-        // (undef if there is none). This matches how they thread through functions.
         ExprKind::Assert { body, .. } | ExprKind::Echo { body, .. } => match body {
             Some(b) => eval_expr(b, env),
             None => Ok(Value::Undef),
@@ -1064,7 +1001,7 @@ fn call_value(f: Value, args: &[Argument], caller_env: &Env) -> Result<Value, St
     match f {
         Value::Func(rc) => {
             let (params, body, captured) = &*rc;
-            let a = eval_args(args, caller_env)?; // args evaluated in caller scope
+            let a = eval_args(args, caller_env)?;
             let mut local = captured.clone();
             bind_params(params, &a, &mut local)?;
             eval_expr(body, &local)
@@ -1100,7 +1037,6 @@ fn expand_range(
 }
 
 fn eval_binop(op: BinaryOp, left: &Expr, right: &Expr, env: &Env) -> Result<Value, String> {
-    // Short-circuit logicals.
     if matches!(op, BinaryOp::LogicalAnd) {
         return Ok(Value::Bool(eval_expr(left, env)?.truthy() && eval_expr(right, env)?.truthy()));
     }
@@ -1109,22 +1045,15 @@ fn eval_binop(op: BinaryOp, left: &Expr, right: &Expr, env: &Env) -> Result<Valu
     }
     let l = eval_expr(left, env)?;
     let r = eval_expr(right, env)?;
-    // ---- OpenSCAD operator overloading ----
     match (op, &l, &r) {
-        // Elementwise +/- recurse into nested vectors, so they cover matrices and
-        // higher-rank arrays, not just flat vectors.
         (BinaryOp::Add, Value::Vec(a), Value::Vec(b)) => return Ok(elementwise(a, b, &|x, y| x + y)),
         (BinaryOp::Subtract, Value::Vec(a), Value::Vec(b)) => return Ok(elementwise(a, b, &|x, y| x - y)),
-        // scalar · vector/matrix (recurse) and vector/matrix / scalar.
         (BinaryOp::Multiply, Value::Num(s), Value::Vec(a)) => return Ok(scale_seq(a, *s)),
         (BinaryOp::Multiply, Value::Vec(a), Value::Num(s)) => return Ok(scale_seq(a, *s)),
         (BinaryOp::Divide, Value::Vec(a), Value::Num(s)) => return Ok(scale_seq(a, 1.0 / *s)),
-        // vec·vec = dot; vec×matrix, matrix×vec, matrix×matrix products.
         (BinaryOp::Multiply, Value::Vec(a), Value::Vec(b)) => return vec_mul(a, b),
-        // Equality works on any types (vectors, strings, undef).
         (BinaryOp::Equal, _, _) if !both_num(&l, &r) => return Ok(Value::Bool(value_eq(&l, &r))),
         (BinaryOp::NotEqual, _, _) if !both_num(&l, &r) => return Ok(Value::Bool(!value_eq(&l, &r))),
-        // Ordered comparison on strings is lexicographic; numbers fall through.
         (
             BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual,
             Value::Str(x),
@@ -1132,9 +1061,6 @@ fn eval_binop(op: BinaryOp, left: &Expr, right: &Expr, env: &Env) -> Result<Valu
         ) => return Ok(Value::Bool(ordered_ok(op, x.cmp(y)))),
         _ => {}
     }
-    // Any op reaching here with a non-numeric operand yields undef — OpenSCAD is
-    // permissive: undef or type-mismatched operands propagate as undef, they don't
-    // error. (Bool coerces to 0/1, so it counts as numeric.)
     if !numlike(&l) || !numlike(&r) {
         return Ok(Value::Undef);
     }
@@ -1241,16 +1167,13 @@ fn vec_mul(a: &[Value], b: &[Value]) -> Result<Value, String> {
     }
     let (am, bm) = (as_matrix(a), as_matrix(b));
     match (&av, &am, &bv, &bm) {
-        // row-vector (len n) × matrix (n×p) -> vector (len p)
         (Some(x), _, None, Some(m)) if x.len() == m.len() => {
             let p = m[0].len();
             Ok(numvec((0..p).map(|j| (0..x.len()).map(|i| x[i] * m[i][j]).sum()).collect()))
         }
-        // matrix (n×k) × column-vector (len k) -> vector (len n)
         (None, Some(m), Some(y), _) if m[0].len() == y.len() => {
             Ok(numvec(m.iter().map(|row| row.iter().zip(y).map(|(a, b)| a * b).sum()).collect()))
         }
-        // matrix (n×k) × matrix (k×p) -> matrix (n×p)
         (None, Some(ma), None, Some(mb)) if ma[0].len() == mb.len() => {
             let (k, p) = (mb.len(), mb[0].len());
             let out: Vec<Value> = ma
@@ -1271,16 +1194,14 @@ fn vec_mul(a: &[Value], b: &[Value]) -> Result<Value, String> {
 fn eval_call(callee: &Expr, args: &[Argument], env: &Env) -> Result<Value, String> {
     let name = match &callee.kind {
         ExprKind::Identifier(n) => n.as_str(),
-        // callee is an expression (e.g. `(function(x) x)(3)`) → call its value
         _ => return call_value(eval_expr(callee, env)?, args, env),
     };
-    let d2r = std::f64::consts::PI / 180.0; // OpenSCAD trig is in DEGREES
+    let d2r = std::f64::consts::PI / 180.0;
     let argv = |i: usize| -> Result<Value, String> {
         eval_expr(&args.get(i).ok_or("function: missing argument")?.value, env)
     };
     let argn = |i: usize| -> Result<f64, String> { argv(i)?.as_num() };
 
-    // --- structural / non-numeric builtins ---
     match name {
         "str" => {
             let mut s = String::new();
@@ -1390,7 +1311,6 @@ fn eval_call(callee: &Expr, args: &[Argument], env: &Env) -> Result<Value, Strin
             let min = argn(0)?;
             let max = argn(1)?;
             let count = argn(2)?.max(0.0) as usize;
-            // Deterministic LCG (seeded) so renders are reproducible.
             let mut state = args.get(3).map(|_| argn(3)).transpose()?.map(|s| s as u64).unwrap_or(0x2545_F491_4F6C_DD1D);
             let mut out = Vec::with_capacity(count);
             for _ in 0..count {
@@ -1403,7 +1323,6 @@ fn eval_call(callee: &Expr, args: &[Argument], env: &Env) -> Result<Value, Strin
         _ => {}
     }
 
-    // --- pure-numeric builtins ---
     let v = match name {
         "sin" => (argn(0)? * d2r).sin(),
         "cos" => (argn(0)? * d2r).cos(),
@@ -1421,7 +1340,6 @@ fn eval_call(callee: &Expr, args: &[Argument], env: &Env) -> Result<Value, Strin
         "log" => argn(0)?.log10(),
         "exp" => argn(0)?.exp(),
         "pow" => argn(0)?.powf(argn(1)?),
-        // user-defined function
         other => {
             if let Some((params, body)) = env.funcs.get(other) {
                 let a = eval_args(args, env)?;
@@ -1429,7 +1347,6 @@ fn eval_call(callee: &Expr, args: &[Argument], env: &Env) -> Result<Value, Strin
                 bind_params(params, &a, &mut local)?;
                 return eval_expr(body, &local);
             }
-            // A variable holding a function literal.
             if let Some(f @ Value::Func(_)) = env.vars.get(other) {
                 return call_value(f.clone(), args, env);
             }
@@ -1514,7 +1431,6 @@ fn search_fn(needle: Value, haystack: Value) -> Result<Value, String> {
     let mut hits = Vec::new();
     match (&needle, &haystack) {
         (Value::Str(n), Value::Str(h)) => {
-            // For each char of needle, first index in haystack (OpenSCAD-ish).
             for nc in n.chars() {
                 if let Some(i) = h.chars().position(|c| c == nc) {
                     hits.push(Value::Num(i as f64));
@@ -1535,7 +1451,6 @@ fn search_fn(needle: Value, haystack: Value) -> Result<Value, String> {
 
 /// A tiny table of common OpenSCAD color names -> linear-ish 0..1 rgb.
 fn named_color(name: &str) -> [f64; 3] {
-    // Hex: #rgb or #rrggbb
     if let Some(hex) = name.strip_prefix('#') {
         let parse = |s: &str| u8::from_str_radix(s, 16).ok().map(|v| v as f64 / 255.0);
         if hex.len() == 6 {

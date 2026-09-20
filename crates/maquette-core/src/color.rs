@@ -1,4 +1,4 @@
-#![allow(dead_code)] // srgb_to_linear + linear_rgb_to_srgb land with PBR/texture sampling in v2.
+#![allow(dead_code)]
 
 //! sRGB ↔ linear conversion and color utilities. Ported verbatim from maquette.
 

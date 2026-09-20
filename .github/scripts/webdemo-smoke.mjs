@@ -1,13 +1,3 @@
-// Load-smoke for the webdemo module graph: stub a browser environment, import
-// the entry (or bundle) named on argv, and run boot(). Passes only if the whole
-// graph evaluates and boot() runs with no import / TDZ / reference error. It
-// does NOT exercise interactive behavior — that still needs a real browser.
-//
-//   node .github/scripts/webdemo-smoke.mjs <path-to-esm-entry>
-//
-// The path must be an ES module Node can import (a .mjs file, or a .js under a
-// package.json with "type":"module"). CI points it at the bundled app.bundle.js
-// copied to a .mjs.
 
 const target = process.argv[2];
 if (!target) { console.error("usage: webdemo-smoke.mjs <esm-entry>"); process.exit(2); }

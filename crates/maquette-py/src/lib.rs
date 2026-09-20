@@ -4,11 +4,6 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes};
 
-// The plugin crates keep their `#[wasm_func]` export wrappers even off-wasm
-// (to keep the shipped wasm byte-identical). In this cdylib those wrappers are
-// exported and reference the two Typst host-protocol imports, which don't exist
-// natively — provide no-op stand-ins so the module loads. They are never
-// called (Python goes through the `native::` API).
 #[no_mangle]
 pub extern "C" fn wasm_minimal_protocol_write_args_to_buffer(_ptr: *mut u8) {}
 #[no_mangle]
@@ -18,8 +13,6 @@ fn err(e: String) -> PyErr {
     PyValueError::new_err(e)
 }
 
-// A config may be a dict (JSON-serialised via Python's json), a JSON string, or
-// None (empty). Reuses Python's json so no serde/pythonize dependency is needed.
 fn config_json(py: Python<'_>, config: Option<&Bound<'_, PyAny>>) -> PyResult<Vec<u8>> {
     match config {
         None => Ok(b"{}".to_vec()),
@@ -34,9 +27,6 @@ fn config_json(py: Python<'_>, config: Option<&Bound<'_, PyAny>>) -> PyResult<Ve
     }
 }
 
-// The renderer's PNG entry points return a raw framebuffer, not an encoded PNG:
-// [0x00|0x02][w u32 LE][h u32 LE][rgba8 …]. Encode it to a real PNG (a 0x02
-// vector overlay is dropped — use fmt="svg" to keep annotations). 0x3C is SVG.
 fn encode_png(raw: &[u8]) -> Result<Vec<u8>, String> {
     let marker = *raw.first().ok_or("empty render output")?;
     match marker {

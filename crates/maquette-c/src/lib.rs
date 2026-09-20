@@ -8,9 +8,6 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::slice;
 
-// The plugin crates keep their `#[wasm_func]` export wrappers off-wasm (to keep
-// the shipped wasm byte-identical); in this cdylib they reference the two Typst
-// host-protocol imports, absent natively. No-op stand-ins so the library loads.
 #[no_mangle]
 pub extern "C" fn wasm_minimal_protocol_write_args_to_buffer(_ptr: *mut u8) {}
 #[no_mangle]

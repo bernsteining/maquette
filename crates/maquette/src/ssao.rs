@@ -22,7 +22,6 @@ pub fn precompute_sample_offsets(
 ) -> Vec<Vec<SampleOffset>> {
     use std::f64::consts::{PI, TAU};
 
-    // Generate hemisphere kernel (same math as before, stored as tuples)
     let mut kernel = Vec::with_capacity(samples);
     for i in 0..samples {
         let u = (i as f64 + 0.5) / samples as f64;
@@ -35,7 +34,6 @@ pub fn precompute_sample_offsets(
         kernel.push(((x * scale) as f32, (y * scale) as f32, (z * scale) as f32));
     }
 
-    // 16 noise rotations (4x4 tiled pattern)
     const PERM: [usize; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
 
     let mut offsets = Vec::with_capacity(16);

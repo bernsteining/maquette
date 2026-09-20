@@ -1,4 +1,4 @@
-#![allow(dead_code)] // FxHash + transform_vector are kept for v2 (vertex de-dup, normal transforms).
+#![allow(dead_code)]
 
 //! Minimal 3D vector math and utilities — no external dependency needed.
 //!
@@ -258,8 +258,6 @@ impl Mat4 {
             return Mat3::identity();
         }
         let inv_det = 1.0 / det;
-        // Cofactor matrix; the transpose of the inverse equals the cofactor
-        // matrix divided by the determinant.
         Mat3([
             [ (e * i - f * h) * inv_det, -(d * i - f * g) * inv_det,  (d * h - e * g) * inv_det],
             [-(b * i - c * h) * inv_det,  (a * i - c * g) * inv_det, -(a * h - b * g) * inv_det],

@@ -29,9 +29,6 @@ fn sample_palette(palette: &[(u8, u8, u8)], t: f64) -> (u8, u8, u8) {
     lerp_color(palette[i], palette[i + 1].min(palette[palette.len() - 1]), frac)
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers: smoothing, vertex coloring
-// ---------------------------------------------------------------------------
 
 /// Laplacian smoothing of per-vertex scalar values.
 fn smooth_values(
@@ -60,7 +57,6 @@ fn smooth_values(
             write.insert(*key, smoothed);
         }
     }
-    // After even iteration count: last write went to buf; odd: to values
     if iterations % 2 != 0 {
         *values = buf;
     }
@@ -110,9 +106,6 @@ fn apply_uniform_color(triangles: &mut [Triangle], palette: &[(u8, u8, u8)]) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Public color map functions
-// ---------------------------------------------------------------------------
 
 /// Overhang color mapping. Green for upward-facing, red for overhanging faces.
 pub fn apply_overhang_map(triangles: &mut [Triangle], up: Vec3, threshold_deg: f64) {
@@ -140,7 +133,6 @@ pub fn apply_curvature_map(triangles: &mut [Triangle], palette: &[(u8, u8, u8)],
     let normal_map = crate::smooth::build_vertex_normal_map(triangles);
     let adjacency = build_adjacency(triangles);
 
-    // Compute curvature per vertex (average angle to neighbors)
     let mut curvature_map: FxHashMap<VertexKey, f64> = fx_hashmap_cap(normal_map.len());
     for (key, normal) in &normal_map {
         if let Some(neighbors) = adjacency.get(key) {
@@ -175,8 +167,6 @@ pub fn apply_curvature_map(triangles: &mut [Triangle], palette: &[(u8, u8, u8)],
 /// scalars (STL/OBJ, or a PLY without extra properties).
 pub fn apply_ply_scalar_map(triangles: &mut [Triangle], palette: &[(u8, u8, u8)]) {
     let pal = resolve_palette(palette);
-    // Find the value range across every corner of every triangle that
-    // actually has a scalar. Untagged triangles fall through unchanged.
     let mut vmin = f64::INFINITY;
     let mut vmax = f64::NEG_INFINITY;
     for tri in triangles.iter() {
@@ -190,8 +180,6 @@ pub fn apply_ply_scalar_map(triangles: &mut [Triangle], palette: &[(u8, u8, u8)]
         }
     }
     if !vmin.is_finite() || vmax <= vmin {
-        // Flat mesh or no scalars — colour every carrier tri with the
-        // palette's midpoint so the render still visibly changes.
         for tri in triangles.iter_mut() {
             if tri.vertex_scalars.is_some() {
                 let c = sample_palette(pal, 0.5);
@@ -207,9 +195,6 @@ pub fn apply_ply_scalar_map(triangles: &mut [Triangle], palette: &[(u8, u8, u8)]
             let c1 = sample_palette(pal, (vs[1] - vmin) / span);
             let c2 = sample_palette(pal, (vs[2] - vmin) / span);
             tri.vertex_colors = Some([c0, c1, c2]);
-            // Also set the face colour to the triangle's average scalar so
-            // flat-shading paths (which ignore vertex_colors) render as
-            // heatmap-ish tones instead of the config's base colour.
             let avg = (vs[0] + vs[1] + vs[2]) / 3.0;
             tri.color = Some(sample_palette(pal, ((avg - vmin) / span).clamp(0.0, 1.0)));
         }

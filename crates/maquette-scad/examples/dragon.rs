@@ -1,8 +1,3 @@
-// Render the dotSCAD "dragon and pearl" example (JustinSDK/dotSCAD) — a heavy
-// test of the evaluator (bezier/sweep/path_extrude/L-systems, list comprehensions)
-// and the Manifold kernel (lots of polyhedron() from swept sections + convex hull).
-//   git clone --depth 1 https://github.com/JustinSDK/dotSCAD /tmp/dotscad
-//   cargo run --release --example dragon
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -23,10 +18,6 @@ fn main() {
     collect(root, root, &mut files);
     println!("loaded {} files", files.len());
     let driver = "include <examples/dragon/torus_knot_dragon_low_poly.scad>\n";
-    // dotSCAD's recursive helpers (convex_hull3, bezier_smooth, fibonacci_lattice)
-    // recurse deep enough to overflow the default 8 MB stack, so run the compile on
-    // a thread with a large stack. (The wasm plugin can't grow its stack, so heavy
-    // recursive models are native-harness-only — same split as the big meshes.)
     let handle = std::thread::Builder::new()
         .stack_size(1024 * 1024 * 1024)
         .spawn(move || maquette_scad::compile_scad(driver, files, 32, HashMap::new()))

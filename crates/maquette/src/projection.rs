@@ -1,6 +1,3 @@
-// ---------------------------------------------------------------------------
-// Camera setup, projection modes, and view transforms
-// ---------------------------------------------------------------------------
 
 use crate::config::RenderConfig;
 use crate::math::Vec3;
@@ -17,9 +14,6 @@ pub(crate) enum Projection {
     Cylindrical, Pannini, TinyPlanet, Perspective,
 }
 
-// ---------------------------------------------------------------------------
-// Camera resolution
-// ---------------------------------------------------------------------------
 
 pub(crate) fn resolve_config_view(config: &RenderConfig, bc: Vec3, br: f64) -> ViewParams {
     let center = if config.auto_center
@@ -34,14 +28,12 @@ pub(crate) fn resolve_config_view(config: &RenderConfig, bc: Vec3, br: f64) -> V
 
     let up = Vec3::from(config.up);
 
-    // Cartesian camera overrides spherical when explicitly set
     let camera = if let Some(cam) = config.camera {
         let raw_camera = Vec3::from(cam);
         let dist = raw_camera.sub(center).length();
         let dist = if dist < 1e-6 { br * 3.0 } else { dist };
         axonometric_camera(center, dist, &config.projection).unwrap_or(raw_camera)
     } else {
-        // Spherical coordinates (default): build orthonormal basis from `up`
         let az = config.azimuth.to_radians();
         let el = config.elevation.to_radians();
         let dist = config.distance.filter(|&d| d > 0.0).unwrap_or(br * 3.0);
@@ -74,7 +66,7 @@ pub(crate) fn named_view(name: &str, bc: Vec3, br: f64) -> ViewParams {
         "left"         => (Vec3::new(bc.x - dist, bc.y, bc.z), z_up),
         "top"          => (Vec3::new(bc.x, bc.y, bc.z + dist), Vec3::new(0.0, 1.0, 0.0)),
         "bottom"       => (Vec3::new(bc.x, bc.y, bc.z - dist), Vec3::new(0.0, -1.0, 0.0)),
-        _              => (front, z_up), // front, cabinet, cavalier, unknown
+        _              => (front, z_up),
     };
     ViewParams { camera, center: bc, up }
 }
@@ -101,9 +93,6 @@ fn axonometric_camera(center: Vec3, dist: f64, projection: &str) -> Option<Vec3>
     }
 }
 
-// ---------------------------------------------------------------------------
-// Projection setup and application
-// ---------------------------------------------------------------------------
 
 #[inline]
 fn ortho_scale(config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64) -> f64 {
@@ -132,9 +121,6 @@ pub(crate) fn resolve_projection(s: &str) -> Projection {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Precomputed projection setup — avoids recomputing scale/d/aspect per triangle
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy)]
 pub(crate) enum ProjectionSetup {
@@ -212,14 +198,8 @@ fn focal_stereographic(config: &RenderConfig, view: &ViewParams, hw: f64, hh: f6
 pub(crate) fn setup_projection(proj: Projection, config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64) -> ProjectionSetup {
     let hw = vw / 2.0;
     let hh = vh / 2.0;
-    // `zoom` magnifies the projected image: applied as a direct multiplier on the
-    // projection scale *after* the fit is computed, so it enlarges the model even
-    // when auto-fit has already clamped it to the field of view. (Folding zoom into
-    // the bounding radius did nothing once the perspective fit hit the FOV clamp.)
     let setup = setup_projection_inner(proj, config, view, vw, vh, br, hw, hh)
         .magnified(config.zoom.max(1e-6));
-    // `pan` recentres the model in screen space: [right, up] as a fraction of the
-    // viewport, applied to the stored screen origin after scale is computed.
     setup.panned(config.pan[0] * vw, -config.pan[1] * vh)
 }
 

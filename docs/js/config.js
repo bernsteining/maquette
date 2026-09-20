@@ -3,17 +3,14 @@ import { state, model, getSchema, num, fmtT, eq, group, ambientCfg, bgCfg, hlCol
 
 function buildConfig() {
   const c = {};
-  // For glTF the ambient/background fields are plain scalars — they come out of
-  // the SCHEMA walk directly, no polymorphic hemispheric-ambient / transparent-
-  // background handling needed. For maquette they're polymorphic and set below.
   const gltf = model._gltf;
   for (const sec of getSchema()) {
-    if (sec.when && !sec.when(state, state)) continue;   // Molfig / point-cloud sections gate here
+    if (sec.when && !sec.when(state, state)) continue;
     for (const f of sec.fields) {
     if (f.when && !f.when(state, state)) continue;
-    if (f.k[0] === "_") continue;                     // UI-only fields
-    if (f.k.startsWith("mol_") || f.k.startsWith("scad_")) continue;  // source-plugin state — not maquette config
-    if (!gltf && (f.k === "ambient" || f.k === "background")) continue; // polymorphic — set below
+    if (f.k[0] === "_") continue;
+    if (f.k.startsWith("mol_") || f.k.startsWith("scad_")) continue;
+    if (!gltf && (f.k === "ambient" || f.k === "background")) continue;
     if (f.omitIf && f.omitIf(state[f.k])) continue;
     switch (f.t) {
       case "grp":
@@ -29,14 +26,13 @@ function buildConfig() {
   }
   }
   if (!gltf) {
-    c.ambient = ambientCfg();          // number, or hemisphere {intensity,sky,ground}
-    c.background = bgCfg();             // color, or "none" (transparent)
+    c.ambient = ambientCfg();
+    c.background = bgCfg();
   }
   return c;
 }
 
 function buildTypst() {
-  // Different Typst function name + import path for glTF (a different plugin).
   const gltf = model._gltf;
   const fn = gltf ? "render-gltf"
     : ({ obj: "render-obj", stl: "render-stl", ply: "render-ply" }[model._ext] || "render-obj");
@@ -47,11 +43,8 @@ function buildTypst() {
     for (const f of sec.fields) {
     if (f.when && !f.when(state, state)) continue;
     if (f.noExport || f.k === "_cam" || f.k === "width" || f.k === "height") continue;
-    if (f.k.startsWith("mol_") || f.k.startsWith("scad_")) continue;   // handled by the source-plugin's own snippet block
+    if (f.k.startsWith("mol_") || f.k.startsWith("scad_")) continue;
     if (f.omitIf && f.omitIf(state[f.k])) continue;
-    // The polymorphic ambient / background handling is maquette-only. For
-    // glTF, ambient/background are plain scalars and go through the default
-    // branch below.
     if (!gltf) {
       if (f.k === "background") { const b = bgCfg(); if (b !== f.def) push("background", b === "none" ? "none" : fmtT(b)); continue; }
       if (f.k === "_bgNone") continue;
@@ -62,10 +55,10 @@ function buildTypst() {
     switch (f.t) {
       case "grp": {
         if (f.toggle && !state[f.k].__on) break;
-        if (f.build === "clip") { push(f.k, fmtT(group(f, "cfg"))); break; } // clip always needs its dict
+        if (f.build === "clip") { push(f.k, fmtT(group(f, "cfg"))); break; }
         if (f.build === "turntable") { const s = state[f.k]; push("turntable", s.elevation === f.def.elevation ? num(s.iterations) : fmtT({ iterations: s.iterations, elevation: s.elevation })); break; }
         const d = group(f, "diff");
-        if (Object.keys(d).length === 0) { if (f.toggle && f.bool) push(f.k, "true"); break; } // enabled-at-defaults → `key: true`; always-on group unchanged → omit
+        if (Object.keys(d).length === 0) { if (f.toggle && f.bool) push(f.k, "true"); break; }
         push(f.k, fmtT(d));
         break;
       }
@@ -76,9 +69,6 @@ function buildTypst() {
         const rows = state[f.k].filter(r => r[0]);
         if (!rows.length) break;
         const entries = rows.map(([n, v]) => `"${n}": ${fmtT(f.rich ? hlCollapse(v) : v)}`);
-        // Wrap the dict across multiple lines once the joined single-line
-        // form would push the containing snippet line past a screen-width
-        // budget (`k: (...),` prefix ~15 chars + 4-space body indent).
         const oneLine = `(${entries.join(", ")})`;
         push(f.k, oneLine.length + f.k.length + 4 <= 80
           ? oneLine
@@ -104,8 +94,6 @@ function buildTypst() {
     return `#import "@preview/maquette-gltf:0.1.0": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
   }
   if (model._mol) {
-    // Same option surface as buildMolOpts — drop mesh-format (molfig.render
-    // owns it) and format the rest as Typst named args.
     const opts = buildMolOpts(state, model._molFmt);
     delete opts["mesh-format"];
     if (opts.format === "auto") delete opts.format;
@@ -120,8 +108,6 @@ function buildTypst() {
   return `#import "@preview/maquette:0.1.3": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
 }
 
-// Tiny Typst highlighter — the generated snippet has a small, known grammar, so a
-// hand-rolled tokenizer beats pulling in a library and keeps the demo self-contained.
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const HL_RULES = [
   ["ws", /^\s+/], ["comment", /^\/\/[^\n]*/],
@@ -136,12 +122,12 @@ function highlightLine(line) {
       const m = re.exec(s);
       if (!m) continue;
       const txt = m[0];
-      if (type === "ident" && /^\s*:/.test(s.slice(txt.length))) type = "key"; // `key:` → property
+      if (type === "ident" && /^\s*:/.test(s.slice(txt.length))) type = "key";
       out += (type === "ws") ? esc(txt) : `<span class="t-${type}">${esc(txt)}</span>`;
       s = s.slice(txt.length);
       continue outer;
     }
-    out += esc(s[0]); s = s.slice(1); // fallback: emit one char
+    out += esc(s[0]); s = s.slice(1);
   }
   return out || "&nbsp;";
 }
@@ -151,10 +137,6 @@ function renderCode() {
   ).join("");
 }
 
-// OpenSCAD highlighter for the editable source panel. Hand-rolled (same rationale
-// as the Typst one) and block-comment aware (`/* … */` can span lines), reusing
-// the shared .t-* token classes. Keywords vs built-in modules/functions get
-// distinct colors; `$fn`/`$fa`/… render like directives.
 const SCAD_KW = new Set(["module", "function", "if", "else", "for", "let", "each",
   "true", "false", "undef", "echo", "assert", "include", "use", "intersection_for", "return"]);
 const SCAD_BUILTIN = new Set(["cube", "sphere", "cylinder", "polyhedron", "square", "circle",
@@ -169,7 +151,7 @@ function highlightScad(text) {
   return text.split("\n").map((line) => {
     let s = line, out = "", m;
     while (s.length) {
-      if (inBlock) {                                   // inside /* … */
+      if (inBlock) {
         const end = s.indexOf("*/");
         const seg = end === -1 ? s : s.slice(0, end + 2);
         out += `<span class="t-comment">${esc(seg)}</span>`;
@@ -201,7 +183,6 @@ function highlightScad(text) {
   }).join("\n");
 }
 function updateScadHighlight() {
-  // trailing newline so the final line and the caret past it stay visible
   $("scad-hl").innerHTML = highlightScad($("scad-src").value) + "\n";
 }
 
@@ -220,7 +201,6 @@ function buildMolOpts(s, format) {
   }
   return o;
 }
-// Bundle framing: "%08d%08d" (materials_len, info_len) || materials-json || info-json || mesh.
 
 
 export { buildConfig, buildTypst, renderCode, updateScadHighlight, buildMolOpts, esc, highlightScad, highlightLine };

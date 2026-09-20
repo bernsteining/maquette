@@ -1,5 +1,3 @@
-// Validate the Manifold backend: watertightness, per-region color through
-// booleans, and revolve/twist orientation. Writes PLYs to /tmp for analysis.
 use std::collections::HashMap;
 fn main() {
     let cases: &[(&str, &str)] = &[

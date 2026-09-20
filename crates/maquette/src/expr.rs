@@ -5,19 +5,17 @@ use std::f64::consts;
 
 #[derive(Clone)]
 enum Expr {
-    Var(char),                    // x, y, z
-    Num(f64),                     // 3.14
-    BinOp(Box<Expr>, Op, Box<Expr>), // a + b
-    UnOp(UnOp, Box<Expr>),        // -a
-    Call(Func, Vec<Expr>),        // sin(x)
+    Var(char),
+    Num(f64),
+    BinOp(Box<Expr>, Op, Box<Expr>),
+    UnOp(UnOp, Box<Expr>),
+    Call(Func, Vec<Expr>),
 }
 
 #[derive(Clone, Copy)]
 enum Op {
     Add, Sub, Mul, Div, Pow,
-    // Comparison
     Lt, Gt, Le, Ge, Eq, Ne,
-    // Logical
     And, Or,
 }
 
@@ -29,16 +27,12 @@ enum UnOp {
 
 #[derive(Clone, Copy)]
 enum Func {
-    // Essential
     Abs, Sqrt, Min, Max, Clamp,
     Sin, Cos, Tan, Asin, Acos, Atan, Atan2,
     Floor, Ceil, Round,
-    // Nice to have
     Exp, Ln, Log10, Log2,
     Fract, Mod, Sign,
-    // Hyperbolic
     Sinh, Cosh, Tanh,
-    // Graphics/utility
     Step, Smoothstep, Mix, Lerp, Length, Pow,
 }
 
@@ -64,14 +58,12 @@ fn eval(expr: &Expr, x: f64, y: f64, z: f64) -> f64 {
                 Op::Mul => lv * rv,
                 Op::Div => lv / rv,
                 Op::Pow => lv.powf(rv),
-                // Comparison operators return 0.0 or 1.0
                 Op::Lt => if lv < rv { 1.0 } else { 0.0 },
                 Op::Gt => if lv > rv { 1.0 } else { 0.0 },
                 Op::Le => if lv <= rv { 1.0 } else { 0.0 },
                 Op::Ge => if lv >= rv { 1.0 } else { 0.0 },
                 Op::Eq => if (lv - rv).abs() < 1e-10 { 1.0 } else { 0.0 },
                 Op::Ne => if (lv - rv).abs() >= 1e-10 { 1.0 } else { 0.0 },
-                // Logical operators (non-zero = true)
                 Op::And => if lv != 0.0 && rv != 0.0 { 1.0 } else { 0.0 },
                 Op::Or => if lv != 0.0 || rv != 0.0 { 1.0 } else { 0.0 },
             }
@@ -111,7 +103,6 @@ fn eval(expr: &Expr, x: f64, y: f64, z: f64) -> f64 {
                 Func::Sinh => vals[0].sinh(),
                 Func::Cosh => vals[0].cosh(),
                 Func::Tanh => vals[0].tanh(),
-                // Graphics/utility functions
                 Func::Step => if vals[0] < vals[1] { 0.0 } else { 1.0 },
                 Func::Smoothstep => {
                     let edge0 = vals[0];
@@ -128,9 +119,6 @@ fn eval(expr: &Expr, x: f64, y: f64, z: f64) -> f64 {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Lexer
-// ────────────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq)]
 enum Token<'a> {
@@ -138,9 +126,7 @@ enum Token<'a> {
     Ident(&'a str),
     Plus, Minus, Star, Slash, Caret,
     LParen, RParen, Comma,
-    // Comparison operators
     Lt, Gt, Le, Ge, Eq, Ne,
-    // Logical operators
     And, Or, Not,
     Eof,
 }
@@ -265,9 +251,6 @@ impl<'a> Lexer<'a> {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Parser (recursive descent)
-// ────────────────────────────────────────────────────────────────────────────
 
 struct Parser<'a> {
     lexer: Lexer<'a>,
@@ -293,12 +276,10 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    // expr = logical_or
     fn expr(&mut self) -> Result<Expr, String> {
         self.logical_or()
     }
 
-    // logical_or = logical_and ('||' logical_and)*
     fn logical_or(&mut self) -> Result<Expr, String> {
         let mut left = self.logical_and()?;
         while matches!(&self.current, Token::Or) {
@@ -309,7 +290,6 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    // logical_and = comparison ('&&' comparison)*
     fn logical_and(&mut self) -> Result<Expr, String> {
         let mut left = self.comparison()?;
         while matches!(&self.current, Token::And) {
@@ -320,7 +300,6 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    // comparison = addition (('<' | '>' | '<=' | '>=' | '==' | '!=') addition)*
     fn comparison(&mut self) -> Result<Expr, String> {
         let mut left = self.addition()?;
         loop {
@@ -340,7 +319,6 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    // addition = term (('+' | '-') term)*
     fn addition(&mut self) -> Result<Expr, String> {
         let mut left = self.term()?;
         loop {
@@ -361,7 +339,6 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    // term = factor (('*' | '/') factor)*
     fn term(&mut self) -> Result<Expr, String> {
         let mut left = self.factor()?;
         loop {
@@ -382,18 +359,16 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    // factor = unary ('^' factor)*  (right-associative)
     fn factor(&mut self) -> Result<Expr, String> {
         let mut left = self.unary()?;
         if matches!(&self.current, Token::Caret) {
             self.advance();
-            let right = self.factor()?; // right-associative
+            let right = self.factor()?;
             left = Expr::BinOp(Box::new(left), Op::Pow, Box::new(right));
         }
         Ok(left)
     }
 
-    // unary = '-' unary | '!' unary | primary
     fn unary(&mut self) -> Result<Expr, String> {
         match &self.current {
             Token::Minus => {
@@ -410,7 +385,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // primary = number | ident | ident '(' args ')' | '(' expr ')'
     fn primary(&mut self) -> Result<Expr, String> {
         match self.current.clone() {
             Token::Num(n) => {
@@ -419,7 +393,6 @@ impl<'a> Parser<'a> {
             }
             Token::Ident(name) => {
                 self.advance();
-                // Check for function call
                 if matches!(&self.current, Token::LParen) {
                     self.advance();
                     let args = self.args()?;
@@ -463,7 +436,6 @@ impl<'a> Parser<'a> {
                     };
                     Ok(Expr::Call(func, args))
                 } else {
-                    // Variable or constant
                     match name {
                         "x" => Ok(Expr::Var('x')),
                         "y" => Ok(Expr::Var('y')),
@@ -488,7 +460,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // args = expr (',' expr)*
     fn args(&mut self) -> Result<Vec<Expr>, String> {
         let mut args = vec![];
         if matches!(&self.current, Token::RParen) {

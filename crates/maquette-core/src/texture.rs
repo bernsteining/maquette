@@ -50,9 +50,6 @@ impl Texture {
         let lod = lod.clamp(0.0, max_level);
         let u = wrap_coord(uv[0], self.wrap_s);
         let v = wrap_coord(uv[1], self.wrap_t);
-        // Mag path (lod ≤ 0 ≈ oversampling) uses mag_filter — mag is either
-        // Nearest or Linear per spec, no mipmap variant. Min path picks
-        // min_filter with its full mipmap semantics.
         let filter = if lod <= 0.5 { self.mag_filter } else { self.min_filter };
         match filter {
             Filter::Nearest => sample_nearest(&self.mips[lod.round() as usize], u, v),
@@ -133,9 +130,6 @@ fn downsample_2x(src: &MipLevel) -> MipLevel {
     MipLevel { width: nw, height: nh, rgba: out }
 }
 
-// ---------------------------------------------------------------------------
-// Sampling
-// ---------------------------------------------------------------------------
 
 #[inline]
 fn sample_nearest(mip: &MipLevel, u: f32, v: f32) -> [f32; 4] {
@@ -156,12 +150,6 @@ fn sample_bilinear(mip: &MipLevel, u: f32, v: f32, wrap_s: Wrap, wrap_t: Wrap) -
     let (x0, x1) = neighbour_indices(x0, mip.width  as i32, wrap_s);
     let (y0, y1) = neighbour_indices(y0, mip.height as i32, wrap_t);
 
-    // Load 4 texels as `v128` (RGBA8→f32×4 in one op chain per texel), then
-    // do the bilinear weighted sum fully in SIMD. Was scalar per-channel:
-    // 4 texels × 4 chans × 3 lerp ops (`p·ix + p·fx`, then y-lerp) = 48+
-    // scalar ops. SIMD collapses that to ~15 f32x4 ops. Hot for any textured
-    // material — this is called ~5-10 times per pixel with a typical PBR
-    // asset (base, MR, normal, emissive, occlusion, [transmission]) bound.
     #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
     let p00 = load_texel_simd(mip, x0 as u32, y0 as u32);
     let p10 = load_texel_simd(mip, x1 as u32, y0 as u32);
@@ -191,15 +179,10 @@ fn load_texel_simd(mip: &MipLevel, x: u32, y: u32) -> v128 {
     #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
     let off = ((y * mip.width + x) * 4) as usize;
     unsafe {
-        // Load the 4-byte RGBA texel as a u32 into the low lane of v128 (the
-        // remaining 12 bytes are don't-care — they get shifted out below).
         let bytes = std::ptr::read_unaligned(mip.rgba.as_ptr().add(off) as *const u32);
         let v = i32x4(bytes as i32, 0, 0, 0);
-        // Widen bytes → u16 → u32 via two unsigned extends: byte 0..3 of `v`
-        // become the four u32 lanes.
         let u16s = u16x8_extend_low_u8x16(v);
         let u32s = u32x4_extend_low_u16x8(u16s);
-        // Convert to f32x4 (unsigned) and normalise to [0, 1].
         let f = f32x4_convert_u32x4(u32s);
         f32x4_mul(f, f32x4_splat(1.0 / 255.0))
     }

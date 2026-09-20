@@ -79,8 +79,6 @@ impl SplattedLight {
         Self {
             kind: crate::scene::LightKind::Directional,
             px: f32x4_splat(0.0), py: f32x4_splat(0.0), pz: f32x4_splat(0.0),
-            // glTF directional light shines toward its -Z; our config `light_dir`
-            // is FROM surface TO light. So the "toward" direction is -light_dir.
             dx: f32x4_splat(-dir.x as f32),
             dy: f32x4_splat(-dir.y as f32),
             dz: f32x4_splat(-dir.z as f32),
@@ -104,9 +102,9 @@ pub enum ToneMap { None, Reinhard, Aces }
 
 /// Everything a shader call needs that doesn't vary per pixel.
 pub struct PbrContext {
-    pub light_dir: Vec3,        // world-space, points FROM surface TO light (unit) — fallback only
-    pub light_color: [f32; 3],  // linear RGB — fallback only
-    pub ambient: [f32; 3],      // linear RGB (constant sky ambient — fallback when IBL is None)
+    pub light_dir: Vec3,
+    pub light_color: [f32; 3],
+    pub ambient: [f32; 3],
     pub camera_pos: Vec3,
     pub tone_map: ToneMap,
     pub exposure: f32,
@@ -168,8 +166,6 @@ impl PbrContext {
         }
 
         let alpha_g = (roughness * roughness).max(0.001);
-        // Dielectric F0 from IOR (glTF KHR_materials_ior), tinted + scaled by
-        // KHR_materials_specular. Metals still use base color as F0.
         let ior_f0 = {
             let n = material.ior;
             let x = (n - 1.0) / (n + 1.0);
@@ -192,9 +188,6 @@ impl PbrContext {
         normalize_in_place(&mut v);
         let n_dot_v = dot3(n, v).max(0.0);
 
-        // Accumulate direct-lighting + per-light clearcoat + per-light sheen
-        // across every splatted light in the scene (fallback path in render.rs
-        // ensures at least one entry).
         let mut r = 0.0_f32;
         let mut g = 0.0_f32;
         let mut b = 0.0_f32;
@@ -241,8 +234,6 @@ impl PbrContext {
             let mut dg = (diffuse_term[1] + specular[1]) * atten[1] * n_dot_l;
             let mut db = (diffuse_term[2] + specular[2]) * atten[2] * n_dot_l;
 
-            // KHR_materials_clearcoat — layered on top of this light's base
-            // contribution. Attenuates base then adds clearcoat spec.
             if has_clearcoat {
                 let d_cc = ggx_d(n_dot_h, alpha_cc);
                 let v_cc = smith_v(n_dot_v, n_dot_l, alpha_cc);
@@ -255,7 +246,6 @@ impl PbrContext {
                 db = db * cc_atten + spec_cc * cc * atten[2];
             }
 
-            // KHR_materials_sheen — additive per light.
             if has_sheen {
                 let inv_alpha = 1.0 / alpha_s;
                 let sin2h = (1.0 - n_dot_h * n_dot_h).max(0.0);
@@ -271,7 +261,6 @@ impl PbrContext {
             r += dr; g += dg; b += db;
         }
 
-        // Ambient + emissive (light-independent) go on top.
         let inv_pi = std::f32::consts::FRAC_1_PI;
         let rough_atten = 1.0 - 0.5 * roughness;
         r += self.ambient[0] * diffuse[0] * inv_pi * occlusion
@@ -372,16 +361,12 @@ fn tone_map_4(v: v128, method: ToneMap, exp4: v128) -> v128 {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MaterialShader: per-triangle precomputed splats + texture refs
-// ---------------------------------------------------------------------------
 
 pub struct MaterialShader<'a> {
     ctx: &'a PbrContext,
     material: &'a Material,
     mask_cutoff: Option<f32>,
 
-    // Optional textures. `None` = use the corresponding factor alone.
     base_tex: Option<&'a Texture>,
     mr_tex: Option<&'a Texture>,
     emissive_tex: Option<&'a Texture>,
@@ -389,22 +374,17 @@ pub struct MaterialShader<'a> {
     normal_tex: Option<&'a Texture>,
     normal_scale: v128,
 
-    // Precomputed per-triangle LOD per texture — passed straight to
-    // `Texture::sample_lod`. Only meaningful when the texture is bound.
     lod_base: f32,
     lod_mr: f32,
     lod_emissive: f32,
     lod_occlusion: f32,
     lod_normal: f32,
 
-    // Factors — splatted once per triangle so shade4 can multiply per-lane
-    // sample × factor without re-splatting inside the inner loop.
     base_r_f: v128, base_g_f: v128, base_b_f: v128, alpha_f: v128,
     metallic_f: v128, roughness_f: v128,
     emissive_r_f: v128, emissive_g_f: v128, emissive_b_f: v128,
     occlusion_strength: v128,
 
-    // Splatted scene constants.
     cam_x: v128, cam_y: v128, cam_z: v128,
     ambient_r: v128, ambient_g: v128, ambient_b: v128,
 
@@ -423,41 +403,29 @@ pub struct MaterialShader<'a> {
     tone_map: ToneMap,
     exp4: v128,
 
-    // IBL — splatted sky/ground constants + world up. `has_ibl=false` runs
-    // the legacy fake-ambient path.
     has_ibl: bool,
     ibl_sky_r: v128, ibl_sky_g: v128, ibl_sky_b: v128,
     ibl_ground_r: v128, ibl_ground_g: v128, ibl_ground_b: v128,
     ibl_intensity: v128,
     up_x: v128, up_y: v128, up_z: v128,
 
-    // KHR_materials_clearcoat — dielectric layer on top of base.
-    clearcoat_factor: v128,      // splatted; 0 = disabled path skipped
-    clearcoat_alpha: v128,       // roughness²
+    clearcoat_factor: v128,
+    clearcoat_alpha: v128,
     has_clearcoat: bool,
     clearcoat_normal_tex: Option<&'a Texture>,
     clearcoat_normal_scale: v128,
     lod_clearcoat_normal: f32,
 
-    // KHR_materials_sheen — Charlie D + Neubelt V.
     sheen_r: v128, sheen_g: v128, sheen_b: v128,
-    sheen_inv_alpha: v128,       // 1/roughness² (scalar-per-lane pow uses this)
+    sheen_inv_alpha: v128,
     has_sheen: bool,
 
-    // KHR_materials_ior + KHR_materials_specular — precomputed dielectric F0.
-    // Metals still use base color as F0 via the metallic-blended mix below.
     dielectric_f0_r: v128, dielectric_f0_g: v128, dielectric_f0_b: v128,
 
-    // KHR_materials_transmission — dielectric transmission through a thin wall.
-    // When `has_transmission`, we sample the IBL env at the refraction direction
-    // and blend into the ambient/diffuse channel. Attenuated by base color and
-    // Beer-Lambert (from KHR_materials_volume) before blending.
     transmission_tex: Option<&'a Texture>,
     lod_transmission: f32,
-    transmission_factor: v128,   // splatted
+    transmission_factor: v128,
     has_transmission: bool,
-    // KHR_materials_volume — Beer-Lambert σ per channel (`-ln(color) / distance`).
-    // We precompute `-σ · thickness` here so shade4 does a single `exp` per lane.
     volume_attenuation_r: v128,
     volume_attenuation_g: v128,
     volume_attenuation_b: v128,
@@ -473,22 +441,16 @@ pub struct MaterialShader<'a> {
     ior_ratio_b: v128,
     has_dispersion: bool,
 
-    // KHR_materials_iridescence — thin-film interference on the specular F0.
-    // Belcour & Barla 2017 Fourier fit. When `has_iridescence`, we compute a
-    // wavelength-dependent Fresnel term and mix it into F0 based on `factor`.
     iridescence_tex: Option<&'a Texture>,
     iridescence_thickness_tex: Option<&'a Texture>,
     lod_iridescence: f32,
     lod_iridescence_thickness: f32,
     iridescence_factor:      v128,
-    iridescence_ior:         v128,   // splatted, film IOR
+    iridescence_ior:         v128,
     iridescence_thickness_min: v128,
     iridescence_thickness_max: v128,
     has_iridescence: bool,
 
-    // KHR_materials_anisotropy — directional roughness. Splits α into
-    // `α_t` (tangent) and `α_b` (bitangent) for anisotropic GGX D+V.
-    // Rotation rotates the tangent basis around N.
     anisotropy_tex: Option<&'a Texture>,
     lod_anisotropy: f32,
     anisotropy_strength: v128,
@@ -496,10 +458,6 @@ pub struct MaterialShader<'a> {
     anisotropy_sin_rot: v128,
     has_anisotropy: bool,
 
-    // KHR_materials_diffuse_transmission — matte back-side transmission (thin
-    // cloth, backlit leaves). Adds a lambertian lobe on `max(0, -N·L)` tinted
-    // by `dt_color`. Textures modulate the factor / color per pixel. Zero
-    // factor → skip the whole lobe.
     diffuse_transmission_tex:       Option<&'a Texture>,
     diffuse_transmission_color_tex: Option<&'a Texture>,
     lod_diffuse_transmission:       f32,
@@ -529,14 +487,6 @@ impl<'a> MaterialShader<'a> {
         let em_tex   = tex(material.emissive_texture);
         let oc_tex   = tex(material.occlusion_texture);
         let n_tex    = tex(material.normal_texture);
-        // Per-triangle LOD: `0.5 · log₂(lod_scale · w · h)`. Splits into
-        // `0.5 · log₂(lod_scale) + Texture::lod_bias` (the second term is
-        // precomputed at texture load — same value for every triangle that
-        // samples this texture). The `.max(1.0)` clamp on the product would
-        // matter only for lod_scale × texels < 1 (extreme minification into
-        // sub-texel territory) — in that regime the caller clamps to
-        // `[0, max_mip_level]` anyway, so a `.max(0.0)` on the sum below
-        // is enough.
         let half_log_scale = 0.5 * (lod_scale.max(1e-30)).log2();
         let lod_for = |t: Option<&Texture>| -> f32 {
             let Some(t) = t else { return 0.0; };
@@ -606,10 +556,6 @@ impl<'a> MaterialShader<'a> {
             sheen_r:          f32x4_splat(material.sheen_color[0]),
             sheen_g:          f32x4_splat(material.sheen_color[1]),
             sheen_b:          f32x4_splat(material.sheen_color[2]),
-            // All per-material precomputes (`1/α²`, dielectric F0, volume
-            // attenuation via powf, IOR reciprocals) are baked at scene
-            // flatten via `MaterialPrecomp::from_material` — this reads the
-            // cached scalars and pays only the splat cost per triangle.
             sheen_inv_alpha:  f32x4_splat(material.precomp.sheen_inv_alpha),
             has_sheen:        material.sheen_color.iter().any(|c| *c > 0.0),
             dielectric_f0_r:  f32x4_splat(material.precomp.dielectric_f0[0]),
@@ -672,13 +618,6 @@ impl<'a> MaterialShader<'a> {
         let mut occ  = [1.0f32; 4];
         let mut nrm  = [[0.0f32; 3]; 4];
         let mut trans = [1.0f32; 4];
-        // Diffuse-transmission per-pixel modulators. `dt_fac[i]` samples the
-        // `diffuseTransmissionTexture` alpha channel (spec §KHR_materials_
-        // diffuse_transmission: "the alpha component is multiplied by the
-        // factor"). `dt_col[i]` samples the `diffuseTransmissionColorTexture`
-        // RGB (linear, since it's a color modulator not a display colour).
-        // Both default to 1.0 so materials without textures get factor+color
-        // straight through.
         let mut dt_fac = [1.0f32; 4];
         let mut dt_col = [[1.0f32; 3]; 4];
 
@@ -721,12 +660,10 @@ impl<'a> MaterialShader<'a> {
                 trans[$i] = t.sample_lod(self.material.xform_transmission.apply(pick(self.material.texcoord_transmission)), self.lod_transmission)[0];
             }
             if let Some(t) = self.diffuse_transmission_tex {
-                // Spec: only the alpha channel of the DT texture modulates the factor.
                 let s = t.sample_lod(self.material.xform_diffuse_transmission.apply(pick(self.material.texcoord_diffuse_transmission)), self.lod_diffuse_transmission);
                 dt_fac[$i] = s[3];
             }
             if let Some(t) = self.diffuse_transmission_color_tex {
-                // Spec: color texture is sRGB, converted to linear for shading.
                 let s = t.sample_lod(self.material.xform_diffuse_transmission_color.apply(pick(self.material.texcoord_diffuse_transmission_color)), self.lod_diffuse_transmission_color);
                 dt_col[$i] = [
                     srgb_to_linear_f01(s[0]),
@@ -762,8 +699,6 @@ impl<'a> MaterialShader<'a> {
 
 struct Samples4 {
     base_r: v128, base_g: v128, base_b: v128, base_a: v128,
-    // roughness_tex / metallic_tex are `1.0` when no texture is bound, so
-    // multiplying with the factor works either way.
     roughness_tex: v128, metallic_tex: v128,
     emit_r: v128, emit_g: v128, emit_b: v128,
     /// occlusion sample is scalar per lane; `1.0` when no texture is bound.
@@ -783,25 +718,14 @@ struct Samples4 {
 }
 
 impl<'a> PixelShader for MaterialShader<'a> {
-    // Hot inner loop of the rasterizer — called once per 4-pixel batch, per
-    // triangle. `#[inline]` (not `always`) — with `always`, wasmi's translator
-    // panics on the resulting fused cmp+branch pattern (`cmp+branch fusion must
-    // succeed`, wasmi 1.0.9 mod.rs:1704). Plain `#[inline]` gives LLVM enough
-    // license to inline through the trait call without producing that shape.
     #[inline]
     fn shade4(&self, in_: ShadeIn4) -> ShadeOut4 {
         let zero = f32x4_splat(0.0);
         let one  = f32x4_splat(1.0);
         let default_keep = i32x4_splat(-1i32);
 
-        // Sample all textures once per 4-pixel batch (scalar gather, packed
-        // back to SIMD lanes). Textures without a binding yield the identity
-        // for the multiply that follows.
         let s = self.sample_textures4(in_.uv_u, in_.uv_v, in_.uv1_u, in_.uv1_v, in_.uv2_u, in_.uv2_v);
 
-        // Post-sample material values. glTF spec: `base = baseColorFactor
-        // · baseColorTexture · COLOR_0`. COLOR_0 splats to 1.0 when absent
-        // so this multiply is a no-op for meshes without vertex colours.
         let base_r = if self.base_tex.is_some() { f32x4_mul(s.base_r, self.base_r_f) } else { self.base_r_f };
         let base_g = if self.base_tex.is_some() { f32x4_mul(s.base_g, self.base_g_f) } else { self.base_g_f };
         let base_b = if self.base_tex.is_some() { f32x4_mul(s.base_b, self.base_b_f) } else { self.base_b_f };
@@ -823,27 +747,20 @@ impl<'a> PixelShader for MaterialShader<'a> {
         let emit_r    = if self.emissive_tex.is_some() { f32x4_mul(s.emit_r, self.emissive_r_f) } else { self.emissive_r_f };
         let emit_g    = if self.emissive_tex.is_some() { f32x4_mul(s.emit_g, self.emissive_g_f) } else { self.emissive_g_f };
         let emit_b    = if self.emissive_tex.is_some() { f32x4_mul(s.emit_b, self.emissive_b_f) } else { self.emissive_b_f };
-        // Occlusion strength: mix(1, sampled, strength) per glTF.
         let occlusion = if self.occlusion_tex.is_some() {
             f32x4_add(one, f32x4_mul(self.occlusion_strength, f32x4_sub(s.occlusion, one)))
         } else { one };
 
-        // F0 (per lane, since base varies per pixel now). Dielectric F0
-        // comes from IOR + specular tint; metals blend to base color.
         let one_minus_metallic = f32x4_sub(one, metallic);
         let f0_r = f32x4_add(f32x4_mul(self.dielectric_f0_r, one_minus_metallic), f32x4_mul(base_r, metallic));
         let f0_g = f32x4_add(f32x4_mul(self.dielectric_f0_g, one_minus_metallic), f32x4_mul(base_g, metallic));
         let f0_b = f32x4_add(f32x4_mul(self.dielectric_f0_b, one_minus_metallic), f32x4_mul(base_b, metallic));
 
-        // Diffuse albedo = base × (1 − metallic).
         let diffuse_r = f32x4_mul(base_r, one_minus_metallic);
         let diffuse_g = f32x4_mul(base_g, one_minus_metallic);
         let diffuse_b = f32x4_mul(base_b, one_minus_metallic);
 
-        // Normal perturbation from normal map (identity when no normal_tex).
-        //   n_world = T · lx + B · ly + N · lz, with B = (N × T) · w.
         let (nx_final, ny_final, nz_final) = if self.normal_tex.is_some() {
-            // Scale xy per glTF; z stays untouched then we renormalise.
             let lx = f32x4_mul(s.normal_lx, self.normal_scale);
             let ly = f32x4_mul(s.normal_ly, self.normal_scale);
             let lz = s.normal_lz;
@@ -858,21 +775,13 @@ impl<'a> PixelShader for MaterialShader<'a> {
             (in_.n_x, in_.n_y, in_.n_z)
         };
 
-        // View direction V = normalize(camera − pos). N·V is per-pixel so
-        // do it once; per-light L / H / N·L / N·H / V·H come from the loop.
         let vx_raw = f32x4_sub(self.cam_x, in_.pos_x);
         let vy_raw = f32x4_sub(self.cam_y, in_.pos_y);
         let vz_raw = f32x4_sub(self.cam_z, in_.pos_z);
         let (vx, vy, vz) = normalize_v3(vx_raw, vy_raw, vz_raw);
-        // glTF spec: doubleSided materials MUST light back faces with the
-        // *flipped* normal. Detect back-face per lane via `raw_n_dot_v < 0`
-        // and negate the normal there. Single-sided materials are back-face
-        // culled upstream so this only kicks in for the flag = true case.
         let (nx_final, ny_final, nz_final) = if self.double_sided {
             let raw = dot_v3(nx_final, ny_final, nz_final, vx, vy, vz);
             let back = f32x4_lt(raw, zero);
-            // bitselect(a, b, mask): mask bits pick from a, else b. We want
-            // −n where back is true, so pass (−n) as `a` and `n` as `b`.
             (
                 v128_bitselect(f32x4_sub(zero, nx_final), nx_final, back),
                 v128_bitselect(f32x4_sub(zero, ny_final), ny_final, back),
@@ -883,14 +792,12 @@ impl<'a> PixelShader for MaterialShader<'a> {
         };
         let n_dot_v = f32x4_max(zero, dot_v3(nx_final, ny_final, nz_final, vx, vy, vz));
 
-        // α = roughness²; α² used inside D and V terms.
         let alpha_g = f32x4_max(f32x4_mul(roughness, roughness), f32x4_splat(0.001));
         let a2 = f32x4_mul(alpha_g, alpha_g);
         let one_minus_a2 = f32x4_sub(one, a2);
         let inv_pi = f32x4_splat(std::f32::consts::FRAC_1_PI);
         let pi_v = f32x4_splat(std::f32::consts::PI);
 
-        // Per-triangle constants for the clearcoat + sheen lobes.
         let a2_cc = if self.has_clearcoat {
             f32x4_mul(self.clearcoat_alpha, self.clearcoat_alpha)
         } else { zero };
@@ -898,9 +805,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
         let sheen_inv_alpha = self.sheen_inv_alpha;
         let sheen_inv_alpha_half = f32x4_mul(sheen_inv_alpha, f32x4_splat(0.5));
 
-        // Clearcoat's normal (per glTF spec: independent of base normal
-        // perturbation). Precomputed once — used by every light inside the
-        // loop when the clearcoat lobe is active.
         let (nx_cc, ny_cc, nz_cc) = if self.has_clearcoat {
             compute_clearcoat_normal(self, &in_)
         } else {
@@ -910,15 +814,9 @@ impl<'a> PixelShader for MaterialShader<'a> {
             f32x4_max(zero, dot_v3(nx_cc, ny_cc, nz_cc, vx, vy, vz))
         } else { zero };
 
-        // Sum direct + clearcoat + sheen contributions across all lights.
-        // Per glTF layered-material math, clearcoat Fresnel attenuates the
-        // base direct term for each light (not the sum), so both belong inside
-        // the loop. Sheen is additive per light.
         let mut direct_r = zero;
         let mut direct_g = zero;
         let mut direct_b = zero;
-        // Unused since ambient clearcoat now uses N·V Fresnel; kept as a
-        // placeholder in case future code wants it back.
         let primary_f_cc = f32x4_splat(0.04);
 
         for (light_idx, light) in self.lights.iter().enumerate() {
@@ -934,13 +832,7 @@ impl<'a> PixelShader for MaterialShader<'a> {
             let n_dot_h = f32x4_max(zero, dot_v3(nx_final, ny_final, nz_final, hx, hy, hz));
             let v_dot_h = f32x4_max(zero, dot_v3(vx, vy, vz, hx, hy, hz));
 
-            // GGX D — isotropic OR anisotropic (KHR_materials_anisotropy).
-            // Anisotropic path: split α into (α_t, α_b) per glTF spec:
-            //   α_t = mix(α, 1, strength²)   (stretched in tangent dir)
-            //   α_b = α                       (unchanged in bitangent)
-            // then D_aniso = 1 / (π · α_t · α_b · ((h·t/α_t)² + (h·b/α_b)² + (h·n)²)²)
             let (d, alpha_t2, alpha_b2, ta_x, ta_y, ta_z, ba_x, ba_y, ba_z) = if self.has_anisotropy {
-                // Rotate tangent basis around N by anisotropy_rotation.
                 let bx = f32x4_mul(f32x4_sub(f32x4_mul(in_.n_y, in_.tan_z), f32x4_mul(in_.n_z, in_.tan_y)), in_.tan_w);
                 let by = f32x4_mul(f32x4_sub(f32x4_mul(in_.n_z, in_.tan_x), f32x4_mul(in_.n_x, in_.tan_z)), in_.tan_w);
                 let bz = f32x4_mul(f32x4_sub(f32x4_mul(in_.n_x, in_.tan_y), f32x4_mul(in_.n_y, in_.tan_x)), in_.tan_w);
@@ -949,8 +841,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 let tax = f32x4_add(f32x4_mul(cs, in_.tan_x), f32x4_mul(sn, bx));
                 let tay = f32x4_add(f32x4_mul(cs, in_.tan_y), f32x4_mul(sn, by));
                 let taz = f32x4_add(f32x4_mul(cs, in_.tan_z), f32x4_mul(sn, bz));
-                // Bitangent = N × T_rotated (keeps orthonormality without needing
-                // a second rotation).
                 let bax = f32x4_sub(f32x4_mul(ny_final, taz), f32x4_mul(nz_final, tay));
                 let bay = f32x4_sub(f32x4_mul(nz_final, tax), f32x4_mul(nx_final, taz));
                 let baz = f32x4_sub(f32x4_mul(nx_final, tay), f32x4_mul(ny_final, tax));
@@ -971,11 +861,7 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 (d_iso, a2, a2, zero, zero, zero, zero, zero, zero)
             };
 
-            // Smith V — anisotropic-aware. For anisotropic, Λ uses (α_t, α_b)
-            // scaled dot components in the tangent frame. For isotropic, falls
-            // back to the standard height-correlated Smith with a single α.
             let v_geom = if self.has_anisotropy {
-                // Λ(v) = 0.5 · (-1 + √(1 + (α_t² · v·t² + α_b² · v·b²) / v·n²))
                 let vt = dot_v3(vx, vy, vz, ta_x, ta_y, ta_z);
                 let vb = dot_v3(vx, vy, vz, ba_x, ba_y, ba_z);
                 let lt = dot_v3(lx, ly, lz, ta_x, ta_y, ta_z);
@@ -993,25 +879,13 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 f32x4_div(f32x4_splat(0.5), f32x4_max(f32x4_add(ggx_v_t, ggx_l_t), f32x4_splat(1e-7)))
             };
 
-            // Iridescence — KHR_materials_iridescence. Modulates the specular
-            // F0 with a wavelength-dependent Fresnel from thin-film interference.
-            // We use a simplified sinusoidal-phase approximation over 3 RGB
-            // wavelengths (685/532/465 nm). Not physically-exact — that needs
-            // Belcour-Barla's Fourier fit ~40 lines — but produces the
-            // characteristic angle-dependent rainbow shift that iridescent
-            // materials are recognisable by.
             let (f0_ir_r, f0_ir_g, f0_ir_b) = if self.has_iridescence {
                 let cos_i = f32x4_max(v_dot_h, f32x4_splat(1e-4));
-                // Refract into film (Snell): sin²θ_2 = (1/η)² · (1 − cos²θ_1)
                 let inv_ir_ior = f32x4_div(one, self.iridescence_ior);
                 let sin_i2 = f32x4_sub(one, f32x4_mul(cos_i, cos_i));
                 let sin_t2 = f32x4_mul(f32x4_mul(inv_ir_ior, inv_ir_ior), sin_i2);
                 let cos_t = f32x4_sqrt(f32x4_max(f32x4_sub(one, sin_t2), zero));
-                // Thickness — texture lookup gated behind has_iridescence_thickness_tex;
-                // for MVP use midpoint of [min, max]. Per-pixel thickness tex is a
-                // future refinement.
                 let thickness = f32x4_mul(f32x4_add(self.iridescence_thickness_min, self.iridescence_thickness_max), f32x4_splat(0.5));
-                // Optical path difference (nanometres).
                 let opd = f32x4_mul(f32x4_mul(f32x4_splat(2.0), self.iridescence_ior), f32x4_mul(thickness, cos_t));
                 let two_pi = f32x4_splat(2.0 * std::f32::consts::PI);
                 let phase_r = f32x4_mul(two_pi, f32x4_div(opd, f32x4_splat(685.0)));
@@ -1021,7 +895,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 let tint_r = f32x4_add(f32x4_splat(0.5), f32x4_mul(f32x4_splat(0.5), cr));
                 let tint_g = f32x4_add(f32x4_splat(0.5), f32x4_mul(f32x4_splat(0.5), cg));
                 let tint_b = f32x4_add(f32x4_splat(0.5), f32x4_mul(f32x4_splat(0.5), cb));
-                // Modulate F0 by tint, then mix with base F0 by factor.
                 let ir_r = f32x4_mul(f0_r, f32x4_mul(f32x4_splat(2.0), tint_r));
                 let ir_g = f32x4_mul(f0_g, f32x4_mul(f32x4_splat(2.0), tint_g));
                 let ir_b = f32x4_mul(f0_b, f32x4_mul(f32x4_splat(2.0), tint_b));
@@ -1036,7 +909,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 (f0_r, f0_g, f0_b)
             };
 
-            // Schlick F using (possibly iridescence-shifted) F0.
             let x = f32x4_max(zero, f32x4_sub(one, v_dot_h));
             let x2 = f32x4_mul(x, x);
             let x4 = f32x4_mul(x2, x2);
@@ -1059,9 +931,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
 
             let lit_mask = v128_and(f32x4_gt(n_dot_l, zero), f32x4_gt(n_dot_v, zero));
 
-            // Per-lane shadow factor from this light's map. Scalar sample per
-            // lane (wasm SIMD has no gather); cheap given typical PCF kernels
-            // are 3×3–5×5 and cost is bounded per pixel.
             let shadow_v = match self.shadows.get(light_idx).and_then(|s| s.as_ref()) {
                 Some(sh) => {
                     let pcss = self.shadow_pcss_light_size as f64;
@@ -1074,23 +943,10 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 None => one,
             };
 
-            // Base direct for this light: (diffuse + spec) · light_atten · N·L.
-            // Shadow factor scales the whole per-light contribution (direct +
-            // clearcoat + sheen) uniformly — occlusion of ONE light shouldn't
-            // dim the others.
             let mut base_r = f32x4_mul(f32x4_mul(f32x4_mul(f32x4_add(diff_r, spec_r), atten_r), n_dot_l), shadow_v);
             let mut base_g = f32x4_mul(f32x4_mul(f32x4_mul(f32x4_add(diff_g, spec_g), atten_g), n_dot_l), shadow_v);
             let mut base_b = f32x4_mul(f32x4_mul(f32x4_mul(f32x4_add(diff_b, spec_b), atten_b), n_dot_l), shadow_v);
 
-            // KHR_materials_diffuse_transmission — matte back-lit lambertian.
-            // Uses the flipped normal (max(0, -N·L)) so backlit surfaces glow
-            // even when the visible face is in shadow. Tinted by
-            // `diffuse_transmission_color` × sampled color texture; the
-            // front-side kd already includes `(1 - metallic)` so the
-            // transmitted term does too — an all-metal surface has no
-            // transmission per spec. Textures modulate per-pixel: alpha
-            // channel scales factor, RGB scales color (both default to 1
-            // when the texture isn't bound).
             if self.has_diffuse_transmission {
                 let ndl_back = f32x4_max(zero, f32x4_neg(dot_v3(nx_final, ny_final, nz_final, lx, ly, lz)));
                 let dt_f = f32x4_mul(self.diffuse_transmission_factor, s.dt_factor_tex);
@@ -1105,8 +961,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 base_b = f32x4_add(base_b, f32x4_mul(f32x4_mul(dt_cb, atten_b), scale));
             }
 
-            // KHR_materials_clearcoat — per-light layered attenuation + spec.
-            // Uses clearcoat's own N + independent light dot products.
             if self.has_clearcoat {
                 let ndl_cc = f32x4_max(zero, dot_v3(nx_cc, ny_cc, nz_cc, lx, ly, lz));
                 let ndh_cc = f32x4_max(zero, dot_v3(nx_cc, ny_cc, nz_cc, hx, hy, hz));
@@ -1124,7 +978,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 let spec_cc = f32x4_mul(f32x4_mul(d_cc, v_cc), f_cc);
                 let cc = self.clearcoat_factor;
                 let cc_atten = f32x4_sub(one, f32x4_mul(cc, f_cc));
-                // Clearcoat spec also gets shadowed.
                 let cc_add = f32x4_mul(f32x4_mul(f32x4_mul(spec_cc, cc), ndl_cc), shadow_v);
                 base_r = f32x4_add(f32x4_mul(base_r, cc_atten), f32x4_mul(cc_add, atten_r));
                 base_g = f32x4_add(f32x4_mul(base_g, cc_atten), f32x4_mul(cc_add, atten_g));
@@ -1132,7 +985,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 let _ = light_idx;
             }
 
-            // KHR_materials_sheen — additive per light (Charlie D + Neubelt V).
             if self.has_sheen {
                 let sin2h = f32x4_max(f32x4_sub(one, f32x4_mul(n_dot_h, n_dot_h)), zero);
                 let pow_result = {
@@ -1167,13 +1019,8 @@ impl<'a> PixelShader for MaterialShader<'a> {
             direct_b = f32x4_add(direct_b, v128_and(base_b, lit_mask));
         }
 
-        // Ambient / IBL path. Three tiers:
-        //   * `ibl_env` present → real env-map sampling (procedural cubemap-like).
-        //   * `has_ibl` (analytical hemispheric config only) → old fallback.
-        //   * Neither → constant `ambient` fake.
         let (amb_diff_r, amb_diff_g, amb_diff_b, amb_spec_r, amb_spec_g, amb_spec_b) =
         if let Some(env) = self.ibl_env {
-            // Reflection direction R = 2·(N·V)·N − V.
             let n_dot_v_full = dot_v3(nx_final, ny_final, nz_final, vx, vy, vz);
             let two_ndv = f32x4_mul(f32x4_splat(2.0), n_dot_v_full);
             let rx = f32x4_sub(f32x4_mul(two_ndv, nx_final), vx);
@@ -1183,10 +1030,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
             let max_lod = env.max_lod;
             let mut diff = [[0.0f32; 3]; 4];
             let mut spec = [[0.0f32; 3]; 4];
-            // Back-facing diffuse sample for KHR_materials_diffuse_transmission's
-            // IBL contribution — the env at -N models light passing through the
-            // surface from the far side. Only populated when the material
-            // actually uses DT (otherwise the sample is wasted).
             let mut diff_back = [[0.0f32; 3]; 4];
             let dt_on = self.has_diffuse_transmission;
             macro_rules! lane { ($i:tt) => { {
@@ -1213,9 +1056,6 @@ impl<'a> PixelShader for MaterialShader<'a> {
             let mut ad_g = f32x4_mul(f32x4_mul(irr_g, diffuse_g), occlusion);
             let mut ad_b = f32x4_mul(f32x4_mul(irr_b, diffuse_b), occlusion);
 
-            // KHR_materials_diffuse_transmission — env contribution. Same
-            // `(1 - metallic) · factor · color` scaling as the direct-light
-            // lobe, but here the "light" is the env sampled at -N.
             if dt_on {
                 let irr_back_r = f32x4(diff_back[0][0], diff_back[1][0], diff_back[2][0], diff_back[3][0]);
                 let irr_back_g = f32x4(diff_back[0][1], diff_back[1][1], diff_back[2][1], diff_back[3][1]);
@@ -1230,17 +1070,10 @@ impl<'a> PixelShader for MaterialShader<'a> {
                 ad_b = f32x4_add(ad_b, f32x4_mul(f32x4_mul(irr_back_b, dt_cb), scale));
             }
 
-            // Karis split-sum polynomial (full form with exp2 grazing term).
-            // Returns (scale, bias) that combine F0 and roughness.
-            // a004 = min(r.x², exp2(-9.28·NoV)) · r.x + r.y
             let r_x = f32x4_sub(one, roughness);
             let r_y = f32x4_add(f32x4_mul(roughness, f32x4_splat(-0.0275)), f32x4_splat(0.0425));
             let r_z = f32x4_add(f32x4_mul(roughness, f32x4_splat(-0.572)), f32x4_splat(1.04));
             let r_w = f32x4_add(f32x4_mul(roughness, f32x4_splat(0.022)),  f32x4_splat(-0.04));
-            // SIMD exp2 approximation for the grazing-term argument
-            // `-9.28·NoV`, x ∈ roughly [-9.28, 0]. Was: extract 4 lanes,
-            // scalar `.exp2()` per lane, repack — 8 lane ops + 4 libcalls per
-            // pixel batch. Now: pure SIMD, ~15 ops, no lane extracts.
             let exp_x = simd_exp2_grazing(f32x4_mul(f32x4_splat(-9.28), n_dot_v));
             let rx2 = f32x4_mul(r_x, r_x);
             let a004 = f32x4_add(f32x4_mul(f32x4_min(rx2, exp_x), r_x), r_y);
@@ -1262,17 +1095,10 @@ impl<'a> PixelShader for MaterialShader<'a> {
             (ad_r, ad_g, ad_b, as_r, as_g, as_b)
         };
 
-        // Apply clearcoat attenuation to ambient contributions using
-        // view-dependent Fresnel (Schlick with F0 = 0.04 and N·V), matching
-        // how a viewer sees ambient light through the clearcoat. This is
-        // more correct than the earlier primary-light approximation —
-        // per-view ambient attenuation follows the same law that IBL would
-        // apply if we had prefiltered clearcoat probes.
-        let _ = primary_f_cc; // superseded by the N·V-based term below
+        let _ = primary_f_cc;
         let (amb_diff_r, amb_diff_g, amb_diff_b, amb_spec_r, amb_spec_g, amb_spec_b) =
         if self.has_clearcoat {
             let cc = self.clearcoat_factor;
-            // F_cc(N·V) using Schlick, F0 = 0.04 (dielectric clearcoat).
             let x = f32x4_max(zero, f32x4_sub(one, n_dot_v));
             let x2 = f32x4_mul(x, x);
             let x5 = f32x4_mul(f32x4_mul(x2, x2), x);
@@ -1291,28 +1117,11 @@ impl<'a> PixelShader for MaterialShader<'a> {
         let g = f32x4_add(f32x4_add(f32x4_add(direct_g, amb_diff_g), amb_spec_g), emit_g);
         let b = f32x4_add(f32x4_add(f32x4_add(direct_b, amb_diff_b), amb_spec_b), emit_b);
 
-        // KHR_materials_transmission: sample the IBL env at the refraction
-        // direction and blend it in based on `transmission_factor * base_alpha`.
-        // Uses Snell's law with `ior_ratio = 1.0 / ior` (assumes air→material).
-        // Attenuated by base color (glTF spec: transmitted light picks up the
-        // base color's tint) and volume Beer-Lambert. Diffuse contribution is
-        // replaced by the transmission when the factor is 1 — matches glTF
-        // spec's "diffuse light is transmitted" formulation.
-        //
-        // We also DIM the material's own alpha by (1 − transmission factor) so
-        // opaque geometry BEHIND the transmissive surface (coals under a
-        // heat-dome, wine in a glass) stays visible when render.rs routes
-        // transmissive OPAQUE materials into the WBOIT queue.
         let mut transmission_alpha_scale = f32x4_splat(1.0);
         let (r, g, b) = if self.has_transmission {
             if let Some(env) = self.ibl_env {
                 let max_lod = env.max_lod;
                 let (trans_r, trans_g, trans_b) = if self.has_dispersion {
-                    // KHR_materials_dispersion: three refractions (one per RGB
-                    // channel with its own IOR) and pick each channel from the
-                    // corresponding env sample. Costs 3× the base transmission
-                    // per pixel; gated by `has_dispersion` so opaque paths pay
-                    // nothing.
                     let (rfx_r, rfy_r, rfz_r) = refract_v3(vx, vy, vz, nx_final, ny_final, nz_final, self.ior_ratio_r);
                     let (rfx_g, rfy_g, rfz_g) = refract_v3(vx, vy, vz, nx_final, ny_final, nz_final, self.ior_ratio);
                     let (rfx_b, rfy_b, rfz_b) = refract_v3(vx, vy, vz, nx_final, ny_final, nz_final, self.ior_ratio_b);
@@ -1358,13 +1167,9 @@ impl<'a> PixelShader for MaterialShader<'a> {
                         f32x4(tr[0][2], tr[1][2], tr[2][2], tr[3][2]),
                     )
                 };
-                // Tint by base color (dielectric transmission takes the base
-                // color) and Beer-Lambert attenuation.
                 let tinted_r = f32x4_mul(f32x4_mul(trans_r, base_r), self.volume_attenuation_r);
                 let tinted_g = f32x4_mul(f32x4_mul(trans_g, base_g), self.volume_attenuation_g);
                 let tinted_b = f32x4_mul(f32x4_mul(trans_b, base_b), self.volume_attenuation_b);
-                // Effective factor per pixel: material factor × texture-R
-                // sample × (1 − metallic) — metals never transmit.
                 let factor = f32x4_mul(f32x4_mul(self.transmission_factor, s.transmission), one_minus_metallic);
                 let inv_factor = f32x4_sub(one, factor);
                 transmission_alpha_scale = inv_factor;
@@ -1458,9 +1263,6 @@ fn apply_mask_cutoff(alpha_v: v128, cutoff: Option<f32>, default_keep: v128) -> 
     }
 }
 
-// ---------------------------------------------------------------------------
-// SIMD vec3 helpers
-// ---------------------------------------------------------------------------
 
 #[inline(always)]
 fn dot_v3(ax: v128, ay: v128, az: v128, bx: v128, by: v128, bz: v128) -> v128 {
@@ -1549,7 +1351,6 @@ fn resolve_light_dir_and_atten(
     let one  = f32x4_splat(1.0);
     match light.kind {
         LightKind::Directional => {
-            // L = -direction (surface toward light).
             (
                 f32x4_sub(zero, light.dx),
                 f32x4_sub(zero, light.dy),
@@ -1558,7 +1359,6 @@ fn resolve_light_dir_and_atten(
             )
         }
         LightKind::Point | LightKind::Spot => {
-            // to_light = light.pos - surface_pos
             let tx = f32x4_sub(light.px, px);
             let ty = f32x4_sub(light.py, py);
             let tz = f32x4_sub(light.pz, pz);
@@ -1567,19 +1367,13 @@ fn resolve_light_dir_and_atten(
             let lx = f32x4_mul(tx, inv_dist);
             let ly = f32x4_mul(ty, inv_dist);
             let lz = f32x4_mul(tz, inv_dist);
-            // Inverse-square with soft range cutoff (glTF recommendation):
-            // atten = 1/dist² · smoothstep(1, 0, (dist·inv_range)^4)^2
             let dist_atten = f32x4_div(one, f32x4_max(dist2, f32x4_splat(0.01 * 0.01)));
-            // Range cutoff: fade out as distance approaches range.
             let dr = f32x4_mul(f32x4_sqrt(dist2), light.range_inv);
             let dr4 = f32x4_mul(f32x4_mul(dr, dr), f32x4_mul(dr, dr));
             let cutoff = f32x4_max(zero, f32x4_min(one, f32x4_sub(one, dr4)));
-            // If range=0 (light.range_inv=0), dr=0, cutoff=1 → no cutoff.
             let mut atten = f32x4_mul(dist_atten, f32x4_mul(cutoff, cutoff));
 
             if light.kind == LightKind::Spot {
-                // cos_theta = dot(-L, spot_direction) = dot(direction, from_light_to_surface)
-                //           = dot(direction, -L)
                 let cos_theta = f32x4_max(zero, f32x4_sub(zero,
                     f32x4_add(f32x4_add(
                         f32x4_mul(light.dx, lx), f32x4_mul(light.dy, ly)), f32x4_mul(light.dz, lz))));
@@ -1607,20 +1401,15 @@ fn resolve_light_dir_and_atten(
 fn refract_v3(vx: v128, vy: v128, vz: v128, nx: v128, ny: v128, nz: v128, eta: v128) -> (v128, v128, v128) {
     let one = f32x4_splat(1.0);
     let zero = f32x4_splat(0.0);
-    // I = −V, so N·I = −N·V. Keep as +N·V for max(0, ·) shape then negate.
     let ndv = dot_v3(nx, ny, nz, vx, vy, vz);
-    let cos_i = f32x4_max(zero, ndv); // clamp to avoid domain wander on TIR edges
-    // k = 1 − eta² · (1 − cos_i²)
+    let cos_i = f32x4_max(zero, ndv);
     let k = f32x4_sub(one, f32x4_mul(f32x4_mul(eta, eta), f32x4_sub(one, f32x4_mul(cos_i, cos_i))));
     let tir = f32x4_lt(k, zero);
     let sqrt_k = f32x4_sqrt(f32x4_max(k, zero));
-    // T = eta · I + (eta · cos_i − √k) · N,   with I = −V
     let coef = f32x4_sub(f32x4_mul(eta, cos_i), sqrt_k);
     let tx = f32x4_add(f32x4_mul(eta, f32x4_sub(zero, vx)), f32x4_mul(coef, nx));
     let ty = f32x4_add(f32x4_mul(eta, f32x4_sub(zero, vy)), f32x4_mul(coef, ny));
     let tz = f32x4_add(f32x4_mul(eta, f32x4_sub(zero, vz)), f32x4_mul(coef, nz));
-    // On TIR, fall back to −V (straight-through — visually acceptable for
-    // typical thin-walled glass and cheaper than a reflection compute).
     let out_x = v128_bitselect(f32x4_sub(zero, vx), tx, tir);
     let out_y = v128_bitselect(f32x4_sub(zero, vy), ty, tir);
     let out_z = v128_bitselect(f32x4_sub(zero, vz), tz, tir);
@@ -1656,13 +1445,9 @@ fn per_lane_cos(v: v128) -> v128 {
 fn simd_exp2_grazing(x: v128) -> v128 {
     let ix_f  = f32x4_floor(x);
     let fx    = f32x4_sub(x, ix_f);
-    // 2^ix — reinterpret `(ix + 127) << 23` as f32 (IEEE 754 bias trick).
-    // For our x-range `ix ∈ [-10, 0]`, `ix + 127 ∈ [117, 127]` — safely inside
-    // the exponent field, no NaN/denormal edge cases.
     let ix_i    = i32x4_trunc_sat_f32x4(ix_f);
     let biased  = i32x4_add(ix_i, i32x4_splat(127));
-    let pow_int = i32x4_shl(biased, 23);   // v128 layout matches f32x4
-    // 2^fx via Horner on the fractional part in [0, 1].
+    let pow_int = i32x4_shl(biased, 23);
     let c0 = f32x4_splat(1.0);
     let c1 = f32x4_splat(std::f32::consts::LN_2);
     let c2 = f32x4_splat(0.240_226_5);
@@ -1685,11 +1470,7 @@ fn normalize_v3(vx: v128, vy: v128, vz: v128) -> (v128, v128, v128) {
     (f32x4_mul(vx, inv), f32x4_mul(vy, inv), f32x4_mul(vz, inv))
 }
 
-// Volume/Beer-Lambert attenuation now lives on `Material::precomp` — filled
-// at scene flatten via `MaterialPrecomp::from_material` (see scene.rs).
 
-// Scalar BRDF terms (used by PbrContext::shade_pixel)
-// ---------------------------------------------------------------------------
 
 #[inline]
 fn ggx_d(n_dot_h: f32, alpha: f32) -> f32 {
@@ -1717,9 +1498,6 @@ fn fresnel_schlick(v_dot_h: f32, f0: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-// ---------------------------------------------------------------------------
-// Scalar vec3 helpers
-// ---------------------------------------------------------------------------
 
 #[inline] fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]

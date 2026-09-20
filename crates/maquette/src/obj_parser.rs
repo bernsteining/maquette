@@ -15,8 +15,6 @@ use std::collections::HashMap;
 pub fn parse_mtl(data: &str) -> HashMap<String, String> {
     let mut out: HashMap<String, String> = HashMap::new();
     let mut current: Option<String> = None;
-    // Buffer the material until we hit the next `newmtl` (or EOF): Kd may
-    // appear before or after `d`, so we compose the hex string on close.
     let mut kd: Option<(u8, u8, u8)> = None;
     let mut alpha: Option<u8> = None;
     let flush = |name: &Option<String>,
@@ -44,7 +42,6 @@ pub fn parse_mtl(data: &str) -> HashMap<String, String> {
                 alpha = None;
             }
             "Kd" => {
-                // Kd R G B — floats 0..1 in the spec.
                 let vals: Vec<f64> = parts.filter_map(|s| s.parse().ok()).collect();
                 if vals.len() >= 3 {
                     let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -52,14 +49,11 @@ pub fn parse_mtl(data: &str) -> HashMap<String, String> {
                 }
             }
             "d" => {
-                // d = dissolve. 1.0 = opaque, 0.0 = transparent.
                 if let Some(v) = parts.next().and_then(|s| s.parse::<f64>().ok()) {
                     alpha = Some((v.clamp(0.0, 1.0) * 255.0).round() as u8);
                 }
             }
             "Tr" => {
-                // Tr = transparency. Inverse of d — some tools emit it instead.
-                // If both appear, last-write wins (rare in practice).
                 if let Some(v) = parts.next().and_then(|s| s.parse::<f64>().ok()) {
                     alpha = Some(((1.0 - v.clamp(0.0, 1.0)) * 255.0).round() as u8);
                 }
@@ -123,24 +117,13 @@ pub fn parse_obj(
     let mut group_styles: HashMap<u32, GroupAppearance> = HashMap::new();
     let mut current_color: Option<(u8, u8, u8)> = None;
     let mut current_highlight: Option<(u8, u8, u8)> = None;
-    // Active texture-table index from the last `usemtl` whose material has a
-    // `map_Kd`. `None` = untextured faces (fall back to color / vertex_colors).
     let mut current_tex: Option<u16> = None;
     let mut current_group: Option<u32> = None;
     let mut group_counter: u32 = 0;
-    // Active OBJ smoothing group. `None` = explicit `s off` / `s 0` — faces
-    // in this state are treated as their own island so nothing merges them
-    // (see smooth::compute_vertex_normals fallback quantisation by group id).
-    // Default is `Some(0)` — files without ANY `s` statement (most exporters
-    // if smoothing wasn't opted out of) should keep the classic "average
-    // face normals at shared positions" behaviour, not become per-face flat.
     let mut current_smooth: Option<u32> = Some(0);
 
-    // Reusable buffer for face indices (avoids per-face allocation)
     let mut face_buf: Vec<(usize, Option<usize>, Option<usize>)> = Vec::new();
 
-    // Parse OBJ bytes directly (ASCII) — no whole-buffer UTF-8 validation, no
-    // Unicode-aware `.lines()`/`.trim()`/`split_whitespace`.
     let n = data.len();
     let mut pos = 0;
     while pos < n {
@@ -166,18 +149,11 @@ pub fn parse_obj(
                     .ok_or("normal needs 3 valid coordinates")?);
             }
             b"vt" => {
-                // `vt u [v] [w]` — we keep u,v (w is unused). Default v=0 for
-                // 1-D textures. OBJ's V origin is bottom-left; the sampler
-                // expects top-left, so flip V here (once) to match image rows.
                 let u = parts.next().and_then(crate::math::parse_f64_bytes).unwrap_or(0.0) as f32;
                 let v = parts.next().and_then(crate::math::parse_f64_bytes).unwrap_or(0.0) as f32;
                 texcoords.push([u, 1.0 - v]);
             }
             b"s" => {
-                // `s <n>` starts smoothing group n; `s off` / `s 0` disables
-                // it. Faces tagged with a smoothing group share averaged
-                // normals with same-group siblings across shared vertices;
-                // faces with `None` don't merge, leaving crease edges crisp.
                 let tok = parts.next().unwrap_or(b"off");
                 current_smooth = if tok == b"off" || tok == b"0" {
                     None
@@ -200,8 +176,6 @@ pub fn parse_obj(
                 } else {
                     None
                 };
-                // Bind a diffuse texture when this material has a `map_Kd` that
-                // resolved to a decoded image (see `parse_mtl_textures`).
                 current_tex = name_str.and_then(|s| tex_index.get(s).copied());
             }
             b"f" => {
@@ -219,25 +193,16 @@ pub fn parse_obj(
                     continue;
                 }
 
-                // Fan triangulation from first vertex. Preserve per-corner
-                // `vn` indices — a face contributes vertex_normals only when
-                // ALL its corners cite one, so smooth shading sees a
-                // coherent per-vertex normal set (mixed cases fall back to
-                // face-normal averaging).
                 let v0 = vertices[face_buf[0].0];
                 let face_color = current_highlight.or(current_color);
                 for i in 1..face_buf.len() - 1 {
                     let v1 = vertices[face_buf[i].0];
                     let v2 = vertices[face_buf[i + 1].0];
-                    // Face normal from geometry — deterministic and correct
-                    // regardless of per-corner normals.
                     let normal = Vec3::face_normal(v0, v1, v2).unwrap_or(Vec3::new(0.0, 0.0, 0.0));
                     let vertex_normals = match (face_buf[0].2, face_buf[i].2, face_buf[i + 1].2) {
                         (Some(n0), Some(n1), Some(n2)) => Some([normals[n0], normals[n1], normals[n2]]),
                         _ => None,
                     };
-                    // UVs only when the material bound a texture AND all three
-                    // fan corners cite a `vt`. Missing either → untextured.
                     let uvs = match (current_tex, face_buf[0].1, face_buf[i].1, face_buf[i + 1].1) {
                         (Some(_), Some(t0), Some(t1), Some(t2)) =>
                             Some([texcoords[t0], texcoords[t1], texcoords[t2]]),
@@ -270,18 +235,15 @@ pub fn parse_obj(
                 group_counter += 1;
 
                 if let Some(style) = highlight.get(&name) {
-                    // Extract color for per-triangle coloring
                     if let Some(hex) = style.color_hex() {
                         current_highlight = Some(parse_hex_color(hex));
                     } else {
                         current_highlight = None;
                     }
-                    // Store appearance (or default) with group name
                     let mut ga = style.appearance().cloned().unwrap_or_default();
                     ga.name = Some(name);
                     group_styles.insert(gid, ga);
                 } else {
-                    // No highlight — still record the group name for annotations
                     group_styles.insert(gid, GroupAppearance {
                         name: Some(name),
                         ..Default::default()
@@ -291,7 +253,7 @@ pub fn parse_obj(
                     }
                 }
             }
-            _ => {} // skip mtllib, comments, etc.
+            _ => {}
         }
     }
 
@@ -303,7 +265,6 @@ pub fn parse_obj(
 /// Uses manual parsing to avoid split('/').collect() allocation.
 #[inline]
 fn parse_face_index(b: &[u8], nv: usize, nt: usize, nn: usize) -> Option<(usize, Option<usize>, Option<usize>)> {
-    // Find first '/'
     let slash1 = b.iter().position(|&c| c == b'/');
     let vi_b = match slash1 {
         Some(pos) => &b[..pos],
@@ -311,7 +272,6 @@ fn parse_face_index(b: &[u8], nv: usize, nt: usize, nn: usize) -> Option<(usize,
     };
     let vi = resolve_index(vi_b, nv)?;
 
-    // `v/vt/vn`, `v/vt`, `v//vn` or `v`. `ti` is the middle field, `ni` the last.
     let (ti, ni) = if let Some(pos1) = slash1 {
         let rest = &b[pos1 + 1..];
         if let Some(pos2) = rest.iter().position(|&c| c == b'/') {
@@ -321,7 +281,6 @@ fn parse_face_index(b: &[u8], nv: usize, nt: usize, nn: usize) -> Option<(usize,
             let ni = if !ni_b.is_empty() { resolve_index(ni_b, nn) } else { None };
             (ti, ni)
         } else {
-            // `v/vt` — no normal field.
             let ti = if !rest.is_empty() { resolve_index(rest, nt) } else { None };
             (ti, None)
         }

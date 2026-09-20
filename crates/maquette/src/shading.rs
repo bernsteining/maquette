@@ -1,6 +1,3 @@
-// ---------------------------------------------------------------------------
-// Lighting and shading pipeline
-// ---------------------------------------------------------------------------
 
 use crate::config::{LightKind, RenderConfig};
 use crate::color::linear_to_srgb;
@@ -35,9 +32,6 @@ pub(crate) struct LightF32 {
     pub(crate) scr: f32, pub(crate) scg: f32, pub(crate) scb: f32,
 }
 
-// ---------------------------------------------------------------------------
-// Light resolution
-// ---------------------------------------------------------------------------
 
 pub(crate) fn resolve_lights(config: &RenderConfig) -> Vec<ResolvedLight> {
     if config.lights.is_empty() {
@@ -78,9 +72,6 @@ pub(crate) fn shadow_light_dir(config: &RenderConfig) -> Vec3 {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Scalar shading helpers
-// ---------------------------------------------------------------------------
 
 #[inline(always)]
 pub(crate) fn get_light_dir(light: &LightF32, wpx: f32, wpy: f32, wpz: f32) -> (f32, f32, f32) {
@@ -143,9 +134,6 @@ pub(crate) fn finalize_color(
     }
 }
 
-// ---------------------------------------------------------------------------
-// SIMD batched shade_point: 4 vertices per iteration
-// ---------------------------------------------------------------------------
 
 /// Helper: tone-map a single f32x4 channel (4 vertices' worth of one channel).
 #[inline(always)]
@@ -156,7 +144,7 @@ fn tone_map_4(v: v128, method: ToneMapMethod, exp4: v128) -> v128 {
             let ve = f32x4_mul(v, exp4);
             f32x4_div(ve, f32x4_add(f32x4_splat(1.0), ve))
         }
-        _ => { // ACES
+        _ => {
             let ve = f32x4_mul(v, exp4);
             let a = f32x4_mul(ve, f32x4_add(f32x4_mul(f32x4_splat(2.51), ve), f32x4_splat(0.03)));
             let b = f32x4_add(f32x4_mul(ve, f32x4_add(f32x4_mul(f32x4_splat(2.43), ve), f32x4_splat(0.59))), f32x4_splat(0.14));
@@ -200,7 +188,6 @@ pub(crate) fn shade_batch_4(
     let eps = f32x4_splat(1e-10);
     let is_cel = cel_bands > 0;
 
-    // View direction: cam - pos, normalized
     let vdx = f32x4_sub(f32x4_splat(cam_x), px4);
     let vdy = f32x4_sub(f32x4_splat(cam_y), py4);
     let vdz = f32x4_sub(f32x4_splat(cam_z), pz4);
@@ -210,7 +197,6 @@ pub(crate) fn shade_batch_4(
     let vdy = f32x4_mul(vdy, v_inv);
     let vdz = f32x4_mul(vdz, v_inv);
 
-    // Hemisphere ambient: t = (dot(n, up) + 1) * 0.5; lerp ground→sky
     let t = f32x4_mul(f32x4_add(f32x4_add(f32x4_add(
         f32x4_mul(nx4, f32x4_splat(up_x)),
         f32x4_mul(ny4, f32x4_splat(up_y))),
@@ -220,14 +206,12 @@ pub(crate) fn shade_batch_4(
     let amb_g = f32x4_add(f32x4_splat(gnd_g), f32x4_mul(f32x4_splat(sky_g - gnd_g), t));
     let amb_b = f32x4_add(f32x4_splat(gnd_b), f32x4_mul(f32x4_splat(sky_b - gnd_b), t));
 
-    // n_dot_v and orient normal
     let n_dot_v = f32x4_add(f32x4_add(f32x4_mul(nx4, vdx), f32x4_mul(ny4, vdy)), f32x4_mul(nz4, vdz));
     let neg_mask = f32x4_lt(n_dot_v, zero);
     let onx = v128_bitselect(f32x4_neg(nx4), nx4, neg_mask);
     let ony = v128_bitselect(f32x4_neg(ny4), ny4, neg_mask);
     let onz = v128_bitselect(f32x4_neg(nz4), nz4, neg_mask);
 
-    // --- Gooch early path: single light, cool/warm lerp, monochromatic specular ---
     if is_gooch {
         let light = &lights[0];
         let (ldx, ldy, ldz) = if light.kind == LightKind::Directional {
@@ -241,15 +225,12 @@ pub(crate) fn shade_batch_4(
             (f32x4_mul(dx, inv), f32x4_mul(dy, inv), f32x4_mul(dz, inv))
         };
 
-        // Signed ndotl (original normal, not oriented)
         let ndotl = f32x4_add(f32x4_add(
             f32x4_mul(nx4, ldx), f32x4_mul(ny4, ldy)), f32x4_mul(nz4, ldz));
-        // In shadow, bias toward the cool tone (t4 → 0).
         let sf0 = shadow.map(|s| s[0]);
         let t4 = f32x4_mul(f32x4_add(ndotl, one), f32x4_splat(0.5));
         let t4 = if let Some(sf) = sf0 { f32x4_mul(t4, sf) } else { t4 };
 
-        // cool = gooch_cool * 0.5 + base_lin * 0.5; warm = gooch_warm * 0.5 + base_lin * 0.5
         let half = f32x4_splat(0.5);
         let lr4 = f32x4_splat(base_lin_r);
         let lg4 = f32x4_splat(base_lin_g);
@@ -265,7 +246,6 @@ pub(crate) fn shade_batch_4(
         let mut hg = f32x4_add(cool_g, f32x4_mul(t4, f32x4_sub(warm_g, cool_g)));
         let mut hb = f32x4_add(cool_b, f32x4_mul(t4, f32x4_sub(warm_b, cool_b)));
 
-        // Monochromatic specular (oriented normal)
         if specular > 0.0 {
             let hx = f32x4_add(ldx, vdx);
             let hy = f32x4_add(ldy, vdy);
@@ -282,7 +262,6 @@ pub(crate) fn shade_batch_4(
             hb = f32x4_add(hb, s);
         }
 
-        // Tone map + sRGB (Gooch always uses linear pipeline)
         let exp4 = f32x4_splat(exposure);
         let hr = tone_map_4(hr, tm, exp4);
         let hg = tone_map_4(hg, tm, exp4);
@@ -295,7 +274,6 @@ pub(crate) fn shade_batch_4(
         ];
     }
 
-    // Accumulate diffuse and specular across lights
     let mut diff_r = zero;
     let mut diff_g = zero;
     let mut diff_b = zero;
@@ -306,10 +284,8 @@ pub(crate) fn shade_batch_4(
     let oma4 = f32x4_splat(one_minus_ambient);
 
     for (li, light) in lights.iter().enumerate() {
-        // Per-light cast-shadow attenuation (1 = lit, 0 = fully shadowed).
         let sf = shadow.map(|s| s[li]);
 
-        // Light direction
         let (ldx, ldy, ldz) = if light.kind == LightKind::Directional {
             (f32x4_splat(light.dx), f32x4_splat(light.dy), f32x4_splat(light.dz))
         } else {
@@ -321,25 +297,21 @@ pub(crate) fn shade_batch_4(
             (f32x4_mul(dx, inv), f32x4_mul(dy, inv), f32x4_mul(dz, inv))
         };
 
-        // ndotl = abs(dot(n, l))
         let ndotl_raw = f32x4_abs(f32x4_add(f32x4_add(
             f32x4_mul(nx4, ldx), f32x4_mul(ny4, ldy)), f32x4_mul(nz4, ldz)));
 
-        // Cel banding: floor(ndotl * bands) / bands
         let ndotl = if is_cel {
             let bands4 = f32x4_splat(cel_bands as f32);
             let inv_bands4 = f32x4_splat(1.0 / cel_bands as f32);
             f32x4_mul(f32x4_floor(f32x4_mul(ndotl_raw, bands4)), inv_bands4)
         } else { ndotl_raw };
 
-        // Diffuse: one_minus_ambient * ndotl * light_color (attenuated by shadow)
         let df = f32x4_mul(oma4, ndotl);
         let df = if let Some(sf) = sf { f32x4_mul(df, sf) } else { df };
         diff_r = f32x4_add(diff_r, f32x4_mul(f32x4_splat(light.cr), df));
         diff_g = f32x4_add(diff_g, f32x4_mul(f32x4_splat(light.cg), df));
         diff_b = f32x4_add(diff_b, f32x4_mul(f32x4_splat(light.cb), df));
 
-        // Specular: half-vector, ndoth, LUT lookup
         if specular > 0.0 {
             let hx = f32x4_add(ldx, vdx);
             let hy = f32x4_add(ldy, vdy);
@@ -348,22 +320,18 @@ pub(crate) fn shade_batch_4(
                 f32x4_mul(onx, hx), f32x4_mul(ony, hy)), f32x4_mul(onz, hz));
             let h_len_sq = f32x4_add(f32x4_add(f32x4_mul(hx, hx), f32x4_mul(hy, hy)), f32x4_mul(hz, hz));
             let h_inv = f32x4_div(one, f32x4_sqrt(f32x4_add(h_len_sq, eps)));
-            // Clamp to [0,1] — negative ndoth naturally maps to spec_lut[0]=0
             let ndoth = f32x4_min(f32x4_max(f32x4_mul(ndoth_unnorm, h_inv), zero), one);
             let spec_raw = f32x4_mul(lut_lookup_4(ndoth, spec_lut), f32x4_splat(specular));
-            // Cel threshold: spec > 0.5 → 1.0, else 0.0
             let spec_val = if is_cel {
                 let half = f32x4_splat(0.5);
                 v128_bitselect(one, zero, f32x4_gt(spec_raw, half))
             } else { spec_raw };
             let spec_val = if let Some(sf) = sf { f32x4_mul(spec_val, sf) } else { spec_val };
-            // Area-light softening is baked into the specular color (scr/scg/scb).
             spec_r = f32x4_add(spec_r, f32x4_mul(f32x4_splat(light.scr), spec_val));
             spec_g = f32x4_add(spec_g, f32x4_mul(f32x4_splat(light.scg), spec_val));
             spec_b = f32x4_add(spec_b, f32x4_mul(f32x4_splat(light.scb), spec_val));
         }
 
-        // SSS
         if sss_intensity > 0.0 {
             let lx = f32x4_add(f32x4_neg(ldx), f32x4_mul(onx, f32x4_splat(sss_distortion)));
             let ly = f32x4_add(f32x4_neg(ldy), f32x4_mul(ony, f32x4_splat(sss_distortion)));
@@ -377,20 +345,17 @@ pub(crate) fn shade_batch_4(
         }
     }
 
-    // Fresnel rim
     let rim4 = if fresnel > 0.0 {
         let base = f32x4_sub(one, f32x4_abs(f32x4_add(f32x4_add(
             f32x4_mul(onx, vdx), f32x4_mul(ony, vdy)), f32x4_mul(onz, vdz))));
         let clamped = f32x4_min(f32x4_max(base, zero), one);
         let rim_raw = f32x4_mul(lut_lookup_4(clamped, fresnel_lut), f32x4_splat(fresnel));
-        // Cel threshold: rim > 0.5 → 1.0, else 0.0
         if is_cel {
             let half = f32x4_splat(0.5);
             v128_bitselect(one, zero, f32x4_gt(rim_raw, half))
         } else { rim_raw }
     } else { zero };
 
-    // Finalize: base_lin * (ambient + diffuse) + specular + rim
     let exp4 = f32x4_splat(exposure);
     if gamma_correction {
         let lr4 = f32x4_splat(base_lin_r);
@@ -399,7 +364,6 @@ pub(crate) fn shade_batch_4(
         let hr = tone_map_4(f32x4_add(f32x4_add(f32x4_mul(lr4, f32x4_add(amb_r, diff_r)), spec_r), rim4), tm, exp4);
         let hg = tone_map_4(f32x4_add(f32x4_add(f32x4_mul(lg4, f32x4_add(amb_g, diff_g)), spec_g), rim4), tm, exp4);
         let hb = tone_map_4(f32x4_add(f32x4_add(f32x4_mul(lb4, f32x4_add(amb_b, diff_b)), spec_b), rim4), tm, exp4);
-        // Extract lanes and convert to sRGB
         [
             (linear_to_srgb(f32x4_extract_lane::<0>(hr)), linear_to_srgb(f32x4_extract_lane::<0>(hg)), linear_to_srgb(f32x4_extract_lane::<0>(hb))),
             (linear_to_srgb(f32x4_extract_lane::<1>(hr)), linear_to_srgb(f32x4_extract_lane::<1>(hg)), linear_to_srgb(f32x4_extract_lane::<1>(hb))),
@@ -427,9 +391,6 @@ pub(crate) fn shade_batch_4(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Scalar tone mapping and shading
-// ---------------------------------------------------------------------------
 
 #[inline]
 pub(crate) fn tone_map(r: f32, g: f32, b: f32, method: ToneMapMethod, exposure: f32) -> (f32, f32, f32) {
@@ -516,7 +477,6 @@ pub(crate) fn shade_point(
         let warm_g = gooch_warm.1 * 0.5 + lg * kd;
         let warm_b = gooch_warm.2 * 0.5 + lb * kd;
 
-        // Light 0's shadow factor: index li*stride + vi with li = 0.
         let sf0 = shadow.map(|(f, _st, vi)| f[vi]).unwrap_or(1.0);
         let t = t * sf0;
         let mut hr = cool_r + t * (warm_r - cool_r);

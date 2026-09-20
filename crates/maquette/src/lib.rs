@@ -24,9 +24,6 @@ mod smooth;
 mod ssao;
 mod svg;
 
-// Shared render primitives now live in maquette-core (deduplicated from this
-// crate's former copies). Re-export under the old paths so `crate::color::…`
-// and `crate::fxaa::…` call sites are unchanged.
 use maquette_core::{color, fxaa};
 use maquette_core::texture::{build_mips, Filter, MipLevel, Texture, Wrap};
 use config::RenderConfig;
@@ -52,9 +49,6 @@ fn cached_obj(
     data: &[u8],
     config: &RenderConfig,
 ) -> Result<CachedObj, String> {
-    // Merge auto-loaded `.mtl` Kd colors under the config's `materials` map
-    // (config wins on conflicts — the user's explicit override always beats
-    // the sidecar). Only builds an owned map when either source is non-empty.
     let materials_ref: &HashMap<String, String>;
     let mut merged: HashMap<String, String>;
     if !config.mtl.is_empty() {
@@ -64,8 +58,6 @@ fn cached_obj(
     } else {
         materials_ref = &config.materials;
     }
-    // Reparse when materials (from any source) or highlights are present —
-    // they affect triangle colors and can't be shared across configs.
     let empty_tex: HashMap<String, u16> = HashMap::new();
     if !materials_ref.is_empty() || !config.highlight.is_empty() {
         let (triangles, group_styles) =
@@ -125,16 +117,12 @@ fn build_obj_textures(
         return Ok((textures, tex_index));
     }
     let files = maquette_core::bundle::parse_sidecar_bundle(tex_bundle)?;
-    // Dedup decoded images by filename so one bitmap shared by N materials
-    // occupies a single texture slot.
     let mut by_file: HashMap<String, u16> = HashMap::new();
     for (material, file) in &map_kd {
         let slot = match by_file.get(file) {
             Some(&i) => i,
             None => {
                 let Some(bytes) = files.get(file) else { continue };
-                // PNG / JPEG / TGA — keeps the WebP (VP8) decoder out of this
-                // plugin's wasm (~200 KB); OBJ textures are never WebP.
                 let decoded = maquette_core::texture_decode::decode_obj_texture(file, bytes)
                     .map_err(|e| format!("texture '{}': {}", file, e))?;
                 let base = MipLevel { width: decoded.width, height: decoded.height, rgba: decoded.rgba };
@@ -159,10 +147,6 @@ fn build_obj_textures(
 }
 
 fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<Vec<parser::Triangle>, String> {
-    // When the user names an explicit scalar property (color_map_property),
-    // we can't share the cached parse — a different name picks a different
-    // vertex-property slot in the header. Fall through to an uncached
-    // reparse; cheap since PLYs typically fit in cache memory-wise.
     let want = config.color_map_property.as_str();
     if !want.is_empty() {
         return match ply_parser::parse_ply_with(data, Some(want))? {
@@ -206,8 +190,6 @@ fn render_obj(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
     let obj = cached_obj(obj_data, &config)?;
     let key = cache::hash(obj_data);
-    // Preprocessed-mesh cache only when materials/highlight are absent (otherwise
-    // the parsed triangles' colors depend on config not captured by the data hash).
     let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
     let svg = render::render(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key);
     Ok(svg.into_bytes())
@@ -245,23 +227,17 @@ fn render_obj_png(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
 fn render_obj_png_tex(obj_data: &[u8], config_json: &[u8], tex_bundle: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
     let (textures, tex_index) = build_obj_textures(&config, tex_bundle)?;
-    // No usable textures → identical to the plain OBJ PNG path (keeps the mesh
-    // cache and preprocessed-mesh cache in play).
     if textures.is_empty() {
         let obj = cached_obj(obj_data, &config)?;
         let key = cache::hash(obj_data);
         let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
         return render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[]);
     }
-    // Merge MTL Kd colours under config materials (config wins), same as
-    // `cached_obj`, then parse with the texture-index map so `usemtl` binds UVs.
     let mut merged = obj_parser::parse_mtl(&config.mtl);
     for (k, v) in &config.materials { merged.insert(k.clone(), v.clone()); }
     let (triangles, group_styles) =
         obj_parser::parse_obj(obj_data, &merged, &config.highlight, &tex_index)?;
     let key = cache::hash(obj_data);
-    // Geometry is unaffected by textures, so the smooth-normal cache (data_key)
-    // is safe to keep; the preprocessed-mesh cache is not (colours/materials).
     render::render_raster(&triangles, &config, &group_styles, Some(key), None, &textures)
 }
 
@@ -307,8 +283,6 @@ fn get_ply_info(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> 
     Ok(render::get_info(&triangles, &config).into_bytes())
 }
 
-// Off-wasm stand-ins for the protocol glue that `initiate_protocol!` provides on
-// wasm (gated out here), so the `#[wasm_func]` export wrappers still type-check.
 #[cfg(not(target_arch = "wasm32"))]
 unsafe fn __write_args_to_buffer(_ptr: *mut u8) {}
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,10 +1,8 @@
 /// Software triangle rasterizer with z-buffer and PNG encoding.
-// TODO: If Typst switches to a JIT WASM engine (e.g. Wasmtime), implement
-// tile-based rasterization (bin triangles into 16x16 tiles) for L1 cache locality.
 
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 
-const HIZ_SHIFT: usize = 4; // 16×16 tiles
+const HIZ_SHIFT: usize = 4;
 const HIZ_SIZE: usize = 1 << HIZ_SHIFT;
 
 pub struct PixelBuffer {
@@ -79,9 +77,7 @@ impl PixelBuffer {
             let row = ty * self.hiz_tiles_x;
             for tx in min_tx..=max_tx {
                 let idx = row + tx;
-                // Already valid — front-to-back means hiz can only decrease, skip rescan
                 if unsafe { *self.hiz.get_unchecked(idx) } != f32::NEG_INFINITY { continue; }
-                // Scan tile pixels: if any pixel is still -inf, hiz stays -inf
                 let px_start = tx << HIZ_SHIFT;
                 let py_start = ty << HIZ_SHIFT;
                 let px_end = (px_start + HIZ_SIZE).min(self.width);
@@ -155,7 +151,6 @@ impl PixelBuffer {
                     let row_base = py * width;
                     let mut px = xl;
 
-                    // SIMD loop: 4 pixels per iteration
                     while px + 3 <= xr {
                         let inside = v128_and(v128_and(
                             f32x4_ge(w0v, zero), f32x4_ge(w1v, zero)), f32x4_ge(w2v, zero));
@@ -197,7 +192,6 @@ impl PixelBuffer {
                         px += 4;
                     }
 
-                    // Scalar remainder
                     let mut w0s = f32x4_extract_lane::<0>(w0v);
                     let mut w1s = f32x4_extract_lane::<0>(w1v);
                     let mut w2s = f32x4_extract_lane::<0>(w2v);
@@ -260,9 +254,6 @@ impl PixelBuffer {
         let d1 = depths[1] as f32;
         let d2 = depths[2] as f32;
 
-        // Distance (buffer px) from `x` to the nearest hatch line (integer
-        // multiples of spacing) or the nearest cell centre (half-integer
-        // multiples) — for the line styles and the plus-mark style respectively.
         let dist_line = |x: f64| { let r = x * inv_spacing; (r - r.round()).abs() * spacing };
         let dist_center = |x: f64| { let r = x * inv_spacing - 0.5; (r - r.round()).abs() * spacing };
         let feather = |d: f64| (half_width + 0.5 - d).clamp(0.0, 1.0);
@@ -282,8 +273,6 @@ impl PixelBuffer {
                     let dw1 = setup.dw1_dx as f32;
                     let dw2 = setup.dw2_dx as f32;
                     let row_base = py * width;
-                    // Pattern coordinates: u along the lines' normal, v perpendicular.
-                    // u = px*cos + py*sin (+cos per px); v = -px*sin + py*cos (-sin per px).
                     let mut u = (xl as f64) * cos_a + (py as f64) * sin_a;
                     let mut v = -(xl as f64) * sin_a + (py as f64) * cos_a;
                     let mut px = xl;
@@ -292,20 +281,15 @@ impl PixelBuffer {
                             let depth = w0s * d0 + w1s * d1 + w2s * d2;
                             let idx = row_base + px;
                             let zb = *zbuf.get_unchecked(idx);
-                            // Visible cap fragment? (the cap fill wrote this depth;
-                            // a nearer occluder would have a larger zbuf value).
                             if depth >= zb - (zb.abs() * 1e-3 + 1e-2) {
                                 let cov = match style {
-                                    // Cross-hatch: nearer of the two perpendicular families.
                                     1 => feather(dist_line(u)).max(feather(dist_line(v))),
-                                    // Plus marks: each arm is a line segment clipped to `arm`.
                                     2 => {
                                         let (du, dv) = (dist_center(u), dist_center(v));
                                         let cv = if dv <= arm { feather(du) } else { 0.0 };
                                         let ch = if du <= arm { feather(dv) } else { 0.0 };
                                         cv.max(ch)
                                     }
-                                    // Parallel lines.
                                     _ => feather(dist_line(u)),
                                 };
                                 if cov > 0.0 {
@@ -406,12 +390,7 @@ impl PixelBuffer {
     }
 
     /// Apply shadow: blend shadow color with existing pixels where mask is set.
-    // JIT-WASM SIMD: replace per-pixel loop body with f32x4 RGB blend:
-    //   let existing = f32x4(pixels[pi], pixels[pi+1], pixels[pi+2], 0.0);
-    //   let blended = f32x4_add(f32x4_mul(existing, inv_v), shadow_v);
-    //   extract lanes back to u8 via i32x4_trunc_sat_f32x4(f32x4_nearest(blended))
     pub fn apply_shadow(&mut self, mask: &[bool], sr: u8, sg: u8, sb: u8, opacity: f64) {
-        // Fixed-point blend: (existing * inv + shadow * 256) >> 8
         let inv = ((1.0 - opacity) * 256.0) as u32;
         let s_r = (sr as f64 * opacity * 256.0) as u32;
         let s_g = (sg as f64 * opacity * 256.0) as u32;
@@ -557,7 +536,6 @@ impl PixelBuffer {
                         px += 4;
                     }
 
-                    // Scalar remainder
                     let mut w0s = f32x4_extract_lane::<0>(w0v);
                     let mut w1s = f32x4_extract_lane::<0>(w1v);
                     let mut w2s = f32x4_extract_lane::<0>(w2v);
@@ -640,9 +618,7 @@ impl PixelBuffer {
                                 *zbuf.get_unchecked_mut(idx) = depth;
                                 let u = w0 * uvs[0][0] + w1 * uvs[1][0] + w2 * uvs[2][0];
                                 let v = w0 * uvs[0][1] + w1 * uvs[1][1] + w2 * uvs[2][1];
-                                // sRGB albedo in [0,1]; alpha ignored (opaque pass).
                                 let t = tex.sample_lod([u, v], lod);
-                                // Interpolated lighting (display sRGB, 0-255).
                                 let lr = w0 * light[0].0 as f32 + w1 * light[1].0 as f32 + w2 * light[2].0 as f32;
                                 let lg = w0 * light[0].1 as f32 + w1 * light[1].1 as f32 + w2 * light[2].1 as f32;
                                 let lb = w0 * light[0].2 as f32 + w1 * light[1].2 as f32 + w2 * light[2].2 as f32;
@@ -1101,8 +1077,6 @@ impl PixelBuffer {
             unsafe { *zbuf.get_unchecked(y as usize * w as usize + x as usize) }
         }
 
-        // Compare normals without sqrt: dot < threshold iff dot² < threshold² * len1² * len2²
-        // Normals are (-dx, -dy, 1) unnormalized, so dot = dx1*dx2 + dy1*dy2 + 1.
         #[inline(always)]
         fn is_normal_edge(r1: f32, l1: f32, d1: f32, u1: f32, r2: f32, l2: f32, d2: f32, u2: f32) -> bool {
             let dx1 = r1 - l1; let dy1 = d1 - u1;
@@ -1124,21 +1098,18 @@ impl PixelBuffer {
                 let center = unsafe { *self.zbuf.get_unchecked(idx) };
                 if center == f32::NEG_INFINITY { continue; }
 
-                // Load 4 neighbor depths into f32x4 [right, left, down, up]
                 let dr = depth_raw(x + step, y, &self.zbuf, w, h);
                 let dl = depth_raw(x - step, y, &self.zbuf, w, h);
                 let dd = depth_raw(x, y + step, &self.zbuf, w, h);
                 let du = depth_raw(x, y - step, &self.zbuf, w, h);
                 let depths = f32x4(dr, dl, dd, du);
 
-                // SIMD: check all 4 neighbors valid (not NEG_INFINITY)
                 let valid = f32x4_ne(depths, neg_inf_v);
                 if i32x4_bitmask(valid) != 0xF {
                     edge_mask[idx] = true;
                     continue;
                 }
 
-                // SIMD: depth discontinuity — all 4 |neighbor - center| <= threshold
                 let threshold = 0.015 * center.abs().max(0.001);
                 let center_v = f32x4_splat(center);
                 let abs_diff = f32x4_abs(f32x4_sub(depths, center_v));
@@ -1148,7 +1119,6 @@ impl PixelBuffer {
                     continue;
                 }
 
-                // Normal discontinuity — sqrt-free comparison
                 for &(nx, ny, nd) in &[
                     (x + step, y, dr),
                     (x - step, y, dl),
@@ -1172,7 +1142,6 @@ impl PixelBuffer {
             }
         }
 
-        // Write outline color where edges were detected
         unsafe {
         for i in 0..n {
             if *edge_mask.get_unchecked(i) {
@@ -1189,7 +1158,6 @@ impl PixelBuffer {
     pub fn downsample(&self, factor: usize) -> Self {
         if factor == 2 { return self.downsample_2x(); }
         if factor == 4 { return self.downsample_2x().downsample_2x(); }
-        // Generic scalar path for other factors
         let nw = self.width / factor;
         let nh = self.height / factor;
         let count = (factor * factor) as u32;
@@ -1236,39 +1204,33 @@ impl PixelBuffer {
         let mut out = vec![0u8; nw * nh * 3];
 
         unsafe {
-            let half_v = i16x8_splat(2); // rounding: (sum + 2) >> 2
+            let half_v = i16x8_splat(2);
 
             for ny in 0..nh {
                 let row0 = ny * 2 * src_w3;
                 let row1 = row0 + src_w3;
                 let mut nx = 0usize;
 
-                // SIMD: 4 output pixels per iteration (reads 8 source pixels per row)
                 while nx + 4 <= nw {
-                    let sx = nx * 6; // 2 src pixels per out pixel × 3 bytes
+                    let sx = nx * 6;
 
-                    // 2 overlapping 16-byte loads per row cover 24 bytes (8 pixels)
                     let a0 = v128_load(src.as_ptr().add(row0 + sx) as *const v128);
                     let b0 = v128_load(src.as_ptr().add(row0 + sx + 8) as *const v128);
                     let a1 = v128_load(src.as_ptr().add(row1 + sx) as *const v128);
                     let b1 = v128_load(src.as_ptr().add(row1 + sx + 8) as *const v128);
 
-                    // Deinterleave even pixels (P0,P2,P4,P6) → [R R R R  G G G G  B B B B  _]
                     let even0 = i8x16_shuffle::<
                         0, 6, 12, 26,  1, 7, 13, 27,  2, 8, 14, 28,  0, 0, 0, 0
                     >(a0, b0);
-                    // Deinterleave odd pixels (P1,P3,P5,P7)
                     let odd0 = i8x16_shuffle::<
                         3, 9, 15, 29,  4, 10, 24, 30,  5, 11, 25, 31,  0, 0, 0, 0
                     >(a0, b0);
 
-                    // Widen u8→u16 and add even+odd pairs
                     let sum0_lo = i16x8_add(
                         u16x8_extend_low_u8x16(even0), u16x8_extend_low_u8x16(odd0));
                     let sum0_hi = i16x8_add(
                         u16x8_extend_high_u8x16(even0), u16x8_extend_high_u8x16(odd0));
 
-                    // Row 1: same deinterleave + pair sum
                     let even1 = i8x16_shuffle::<
                         0, 6, 12, 26,  1, 7, 13, 27,  2, 8, 14, 28,  0, 0, 0, 0
                     >(a1, b1);
@@ -1280,21 +1242,17 @@ impl PixelBuffer {
                     let sum1_hi = i16x8_add(
                         u16x8_extend_high_u8x16(even1), u16x8_extend_high_u8x16(odd1));
 
-                    // Combine rows, add rounding, divide by 4
                     let avg_lo = u16x8_shr(i16x8_add(
                         i16x8_add(sum0_lo, sum1_lo), half_v), 2);
                     let avg_hi = u16x8_shr(i16x8_add(
                         i16x8_add(sum0_hi, sum1_hi), half_v), 2);
 
-                    // Narrow u16→u8: [R0 R1 R2 R3 G0 G1 G2 G3 | B0 B1 B2 B3 _ _ _ _]
                     let packed = u8x16_narrow_i16x8(avg_lo, avg_hi);
 
-                    // Re-interleave to RGB output order
                     let rgb = i8x16_shuffle::<
                         0, 4, 8,  1, 5, 9,  2, 6, 10,  3, 7, 11,  0, 0, 0, 0
                     >(packed, packed);
 
-                    // Store 12 bytes (4 output pixels) via 3 u32 writes
                     let di = (ny * nw + nx) * 3;
                     let p = out.as_mut_ptr().add(di);
                     (p as *mut i32).write_unaligned(i32x4_extract_lane::<0>(rgb));
@@ -1304,7 +1262,6 @@ impl PixelBuffer {
                     nx += 4;
                 }
 
-                // Scalar remainder (0-3 pixels)
                 while nx < nw {
                     let sx = nx * 2;
                     let r0 = (ny * 2 * self.width + sx) * 3;
@@ -1337,7 +1294,6 @@ impl PixelBuffer {
         let w_i32 = w as i32;
         let h_i32 = h as i32;
 
-        // Compute depth range for scaling bias relative to scene
         let mut zmin = f32::MAX;
         let mut zmax = f32::MIN;
         for &d in &self.zbuf {
@@ -1348,13 +1304,11 @@ impl PixelBuffer {
         }
         let depth_range = (zmax - zmin).max(0.001);
 
-        // Pre-compute all sample offsets (16 noise patterns x N samples)
         let radius_px = (params.radius * w.min(h) as f64) as f32;
         let bias_scaled = params.bias as f32 * depth_range;
         let strength = params.strength as f32;
         let offsets = crate::ssao::precompute_sample_offsets(params.samples, radius_px, bias_scaled);
 
-        // Precompute flat offsets (dy*w+dx) and z_biases per pattern for fast sampling
         let num_samples = offsets[0].len();
         let batches = num_samples / 4;
         let mut flat_offsets = vec![0i32; 16 * num_samples];
@@ -1370,7 +1324,6 @@ impl PixelBuffer {
             }
         }
 
-        // Interior zone: pixels where all sample offsets are guaranteed in-bounds
         let margin_x = max_dx;
         let margin_y = max_dy;
         let interior_x_end = (w_i32 - margin_x).max(margin_x);
@@ -1378,10 +1331,8 @@ impl PixelBuffer {
         let neg_inf_v = f32x4_splat(f32::NEG_INFINITY);
         let zbuf_ptr = self.zbuf.as_ptr();
 
-        // Compute SSAO per pixel
         let mut ao_buffer = vec![1.0_f32; w * h];
 
-        // Scalar border pixel helper (with bounds checks)
         macro_rules! ssao_scalar_pixel {
             ($x:expr, $y:expr, $idx:expr) => {
                 let depth = unsafe { *self.zbuf.get_unchecked($idx) };
@@ -1411,19 +1362,16 @@ impl PixelBuffer {
             let is_interior_y = y >= margin_y && y < interior_y_end;
 
             if !is_interior_y {
-                // Full border row: scalar with bounds checks
                 for x in 0..w_i32 {
                     let idx = row + x as usize;
                     ssao_scalar_pixel!(x, y, idx);
                 }
             } else {
-                // Left border
                 for x in 0..margin_x.min(w_i32) {
                     let idx = row + x as usize;
                     ssao_scalar_pixel!(x, y, idx);
                 }
 
-                // Interior: SIMD 4 samples per batch, no bounds checks
                 for x in margin_x..interior_x_end {
                     let idx = row + x as usize;
                     let depth = unsafe { *self.zbuf.get_unchecked(idx) };
@@ -1458,7 +1406,6 @@ impl PixelBuffer {
                         occluded += i32x4_bitmask(occ_mask).count_ones();
                     }
 
-                    // Scalar remainder
                     for s in batches * 4..num_samples {
                         let sd = unsafe { *zbuf_ptr.add((idx_i32 + *offs.add(s)) as usize) };
                         if sd == f32::NEG_INFINITY { continue; }
@@ -1472,7 +1419,6 @@ impl PixelBuffer {
                     }
                 }
 
-                // Right border
                 for x in interior_x_end..w_i32 {
                     let idx = row + x as usize;
                     ssao_scalar_pixel!(x, y, idx);
@@ -1480,12 +1426,8 @@ impl PixelBuffer {
             }
         }
 
-        // Separable bilateral blur (horizontal + vertical, O(2r) instead of O(r^2))
         let ao_buffer = crate::ssao::bilateral_blur_separable(&ao_buffer, &self.zbuf, w, h, 4);
 
-        // Apply AO by darkening pixels: pixel = pixel * ao
-        // JIT-WASM SIMD: f32x4_mul(f32x4(r, g, b, 0), f32x4_splat(ao))
-        //   then i32x4_trunc_sat_f32x4(f32x4_nearest(...)) to extract u8.
         unsafe {
         for i in 0..w * h {
             let ao = *ao_buffer.get_unchecked(i);
@@ -1515,7 +1457,6 @@ impl PixelBuffer {
                 let bli = ((cy + 1).min(h_i - 1) as usize * w + (cx - 1).max(0) as usize) * 3;
                 let bri = ((cy + 1).min(h_i - 1) as usize * w + (cx + 1).min(w_i - 1) as usize) * 3;
                 unsafe {
-                    // v128_load reads 4 f32 [R,G,B,X]; 4th lane is garbage but not stored
                     let cv = v128_load(sp.add(ci) as *const v128);
                     let corners = f32x4_add(
                         f32x4_add(v128_load(sp.add(tli) as *const v128), v128_load(sp.add(tri) as *const v128)),
@@ -1587,17 +1528,14 @@ impl PixelBuffer {
         let levels = ((radius + 3) / 4).max(1).min(max_levels).min(8);
 
         let full = w * h * 3;
-        // +4 padding so v128_load on last pixel's RGB doesn't overrun
         let mut buf_a = source.to_vec();
         buf_a.extend_from_slice(&[0.0; 4]);
         let mut buf_b = vec![0.0f32; full + 4];
 
-        // Track mip dimensions
         let mut dims: Vec<(usize, usize)> = Vec::with_capacity(levels + 1);
         dims.push((w, h));
         let mut src_is_a = true;
 
-        // Downsample chain: ping-pong between buf_a and buf_b
         for _ in 0..levels {
             let &(pw, ph) = unsafe { dims.last().unwrap_unchecked() };
             if pw < 4 || ph < 4 { break; }
@@ -1612,7 +1550,6 @@ impl PixelBuffer {
             src_is_a = !src_is_a;
         }
 
-        // Upsample chain: continue ping-pong
         let last = dims.len() - 1;
         for i in (0..last).rev() {
             let (cw, ch) = dims[i + 1];
@@ -1637,7 +1574,6 @@ impl PixelBuffer {
 
         let blurred = Self::dual_kawase_blur(source, w, h, radius);
 
-        // Additive blend back (SIMD: 4 u8 channels at a time)
         let total = n * 3;
         let simd_end = (total / 4) * 4;
         let intensity_v = f32x4_splat(intensity);
@@ -1647,15 +1583,12 @@ impl PixelBuffer {
         unsafe {
         let mut i = 0usize;
         while i < simd_end {
-            // Load 4 u8 channels, widen to f32x4
             let raw = v128_load32_zero(pp.add(i) as *const u32);
             let u16v = u16x8_extend_low_u8x16(raw);
             let u32v = u32x4_extend_low_u16x8(u16v);
             let pf = f32x4_convert_u32x4(u32v);
-            // Load 4 f32 blur values, multiply by intensity, add
             let bv = f32x4_mul(v128_load(bp.add(i) as *const v128), intensity_v);
             let result = f32x4_min(f32x4_add(pf, bv), max_v);
-            // Narrow f32 → i32 → u16 → u8, store 4 bytes
             let i32v = i32x4_trunc_sat_f32x4(result);
             let i16v = u16x8_narrow_i32x4(i32v, i32v);
             let u8v = u8x16_narrow_i16x8(i16v, i16v);
@@ -1672,9 +1605,8 @@ impl PixelBuffer {
     /// Bloom: extract bright pixels by luminance threshold, blur, add back.
     pub fn apply_bloom(&mut self, threshold: f32, intensity: f32, radius: usize) {
         let n = self.width * self.height;
-        let mut buf = vec![0.0f32; n * 3 + 4]; // +4 for kawase v128_load padding
+        let mut buf = vec![0.0f32; n * 3 + 4];
 
-        // SIMD: process 4 pixels at a time using shuffle deinterleave
         let simd_end = if n >= 6 { ((n - 2) / 4) * 4 } else { 0 };
         let lum_r = f32x4_splat(0.2126);
         let lum_g = f32x4_splat(0.7152);
@@ -1688,23 +1620,19 @@ impl PixelBuffer {
         let mut i = 0usize;
         while i < simd_end {
             let pi = i * 3;
-            // Load 16 bytes: [R0 G0 B0 R1 G1 B1 R2 G2 B2 R3 G3 B3 X X X X]
             let raw = v128_load(pp.add(pi) as *const v128);
-            // Deinterleave to separate R, G, B (4 values each in low bytes)
             let rb = i8x16_shuffle::<0, 3, 6, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw);
             let gb = i8x16_shuffle::<1, 4, 7, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw);
             let bb = i8x16_shuffle::<2, 5, 8, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw);
-            // Widen u8 → f32
             let rf = f32x4_convert_u32x4(u32x4_extend_low_u16x8(u16x8_extend_low_u8x16(rb)));
             let gf = f32x4_convert_u32x4(u32x4_extend_low_u16x8(u16x8_extend_low_u8x16(gb)));
             let bf = f32x4_convert_u32x4(u32x4_extend_low_u16x8(u16x8_extend_low_u8x16(bb)));
-            // Luma = 0.2126*R + 0.7152*G + 0.0722*B
             let lum4 = f32x4_add(f32x4_add(f32x4_mul(lum_r, rf), f32x4_mul(lum_g, gf)), f32x4_mul(lum_b, bf));
             let above = f32x4_gt(lum4, thresh_v);
             let mask = i32x4_bitmask(above);
             if mask != 0 {
                 let factor = f32x4_min(f32x4_sub(f32x4_mul(lum4, inv255), thresh_s), one_v);
-                let factor = v128_and(factor, above); // zero out below-threshold
+                let factor = v128_and(factor, above);
                 let rout = f32x4_mul(rf, factor);
                 let gout = f32x4_mul(gf, factor);
                 let bout = f32x4_mul(bf, factor);
@@ -1724,7 +1652,6 @@ impl PixelBuffer {
             }
             i += 4;
         }
-        // Scalar remainder
         for i in simd_end..n {
             let pi = i * 3;
             let p = pp.add(pi);
@@ -1750,9 +1677,8 @@ impl PixelBuffer {
         let cr = color.0 as f32;
         let cg = color.1 as f32;
         let cb = color.2 as f32;
-        let mut buf = vec![0.0f32; n * 3 + 4]; // +4 for kawase v128_load padding
+        let mut buf = vec![0.0f32; n * 3 + 4];
 
-        // SIMD: batch depth test 4 pixels at a time
         let simd_end = (n / 4) * 4;
         let neg_inf_v = f32x4_splat(f32::NEG_INFINITY);
         let zp = self.zbuf.as_ptr();
@@ -1790,7 +1716,6 @@ impl PixelBuffer {
         let neg = -strength * (1.0 / 9.0);
         let center = 1.0 + strength * (8.0 / 9.0);
 
-        // Ring buffer: 3 rows (prev, curr, next)
         let mut ring = vec![0u8; stride * 3];
         ring[..stride].copy_from_slice(&self.pixels[..stride]);
         ring[stride..stride * 2].copy_from_slice(&self.pixels[stride..stride * 2]);
@@ -1883,9 +1808,6 @@ impl PixelBuffer {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
 
 /// Offset triangle points by (ox, oy).
 #[inline]
@@ -1903,9 +1825,6 @@ fn edge(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> f64 {
     (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)
 }
 
-// ---------------------------------------------------------------------------
-// Triangle setup for scanline + SIMD rasterization
-// ---------------------------------------------------------------------------
 
 struct TriSetup {
     min_x: usize, max_x: usize,
@@ -1913,8 +1832,6 @@ struct TriSetup {
     dw0_dx: f64, dw0_dy: f64,
     dw1_dx: f64, dw1_dy: f64,
     dw2_dx: f64, dw2_dy: f64,
-    // Reciprocals of the x-gradients (constant per triangle) so the scanline
-    // edge-crossing uses a multiply per row instead of a division.
     inv_dw0_dx: f64, inv_dw1_dx: f64, inv_dw2_dx: f64,
     row_w0: f64, row_w1: f64, row_w2: f64,
 }
@@ -1979,7 +1896,6 @@ impl TriSetup {
             }
         }
 
-        // Conservative: expand by 1 pixel each side to catch FP edge cases
         let xl = ((left - 1.0).max(self.min_x as f64)) as usize;
         let xr = (((right + 1.0) as usize).min(self.max_x)).min(self.max_x);
         if xl > xr { return None; }

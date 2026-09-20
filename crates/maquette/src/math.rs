@@ -2,10 +2,6 @@
 
 use std::collections::HashMap;
 
-// Vec3 / Mat4 / FxHasher are shared render primitives — they live in
-// maquette-core (byte-identical) and are re-exported so `crate::math::…`
-// call sites are unchanged. Mesh-only utilities (parsers, adjacency, the
-// SIMD view transform) stay below.
 pub use maquette_core::math::{FxBuildHasher, FxHashMap, Mat4, Vec3};
 
 
@@ -70,12 +66,10 @@ pub fn parse_f64_bytes(b: &[u8]) -> Option<f64> {
     if len == 0 { return None; }
     let mut i = 0;
 
-    // Sign
     let neg = b[i] == b'-';
     if neg || b[i] == b'+' { i += 1; }
     if i >= len { return None; }
 
-    // Integer part
     let mut int_val: u64 = 0;
     let mut has_digits = false;
     while i < len && b[i] >= b'0' && b[i] <= b'9' {
@@ -84,7 +78,6 @@ pub fn parse_f64_bytes(b: &[u8]) -> Option<f64> {
         i += 1;
     }
 
-    // Fractional part
     let mut frac_val: u64 = 0;
     let mut frac_digits: u32 = 0;
     if i < len && b[i] == b'.' {
@@ -101,7 +94,6 @@ pub fn parse_f64_bytes(b: &[u8]) -> Option<f64> {
 
     let mut result = int_val as f64;
     if frac_digits > 0 {
-        // Precomputed powers of 10 (up to 18 digits)
         const POW10: [f64; 19] = [
             1.0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9,
             1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18,
@@ -114,7 +106,6 @@ pub fn parse_f64_bytes(b: &[u8]) -> Option<f64> {
         result += frac_val as f64 / div;
     }
 
-    // Exponent
     if i < len && (b[i] == b'e' || b[i] == b'E') {
         i += 1;
         let exp_neg = i < len && b[i] == b'-';
@@ -196,9 +187,6 @@ pub fn parse_i64_bytes(b: &[u8]) -> Option<i64> {
 }
 
 
-// ---------------------------------------------------------------------------
-// SIMD f32 view matrix — pre-splatted coefficients for batch vertex transforms
-// ---------------------------------------------------------------------------
 
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 

@@ -56,7 +56,6 @@ fn quantize_normal(n: Vec3) -> (i32, i32, i32) {
 pub fn compute_vertex_normals(triangles: &[Triangle]) -> SmoothData {
     let est_unique = triangles.len();
 
-    // Fast path: fully authored per-vertex normals — use them verbatim.
     if !triangles.is_empty() && triangles.iter().all(|t| t.vertex_normals.is_some()) {
         type Key = ((i64, i64, i64), (i32, i32, i32));
         let mut index_map: FxHashMap<Key, usize> = fx_hashmap_cap(est_unique);
@@ -80,17 +79,10 @@ pub fn compute_vertex_normals(triangles: &[Triangle]) -> SmoothData {
             }
             tri_indices.push(indices);
         }
-        // Renormalise in case the input carried unnormalised normals — cheap
-        // insurance, one loop over `unique` verts (usually ≪ triangle count).
         for n in &mut normals { *n = n.normalized(); }
         return SmoothData { normals, positions, tri_indices };
     }
 
-    // Fallback: average face normals at each shared position, PARTITIONED
-    // by OBJ smoothing group so different `s N` groups (and `s off` faces,
-    // each of which gets a unique key) don't merge at a shared edge.
-    // Files without smoothing statements have `smoothing_group == None`
-    // everywhere and collapse to the classic "average by position" path.
     type FbKey = ((i64, i64, i64), i64);
     let mut index_map: FxHashMap<FbKey, usize> = fx_hashmap_cap(est_unique);
     let mut normals: Vec<Vec3> = Vec::with_capacity(est_unique);
@@ -99,9 +91,6 @@ pub fn compute_vertex_normals(triangles: &[Triangle]) -> SmoothData {
 
     for (ti, tri) in triangles.iter().enumerate() {
         let n = tri.normal;
-        // `s off` (represented as None) makes each face its own island — key
-        // by a per-face bucket derived from the triangle index (offset into
-        // negative i64 space so it can't collide with a real group id).
         let group_key: i64 = match tri.smoothing_group {
             Some(g) => g as i64,
             None => -(1 + ti as i64),

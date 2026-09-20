@@ -26,12 +26,10 @@ pub fn compute_annotations<'a>(
             None => continue,
         };
 
-        // Filter by groups if specified
         if !filter.is_empty() && !filter.iter().any(|f| f == name) {
             continue;
         }
 
-        // Direction from model center to group centroid
         let dx = cx - view_center.0;
         let dy = cy - view_center.1;
         let len = (dx * dx + dy * dy).sqrt().max(1.0);
@@ -49,10 +47,8 @@ pub fn compute_annotations<'a>(
         });
     }
 
-    // Sort by label Y position for overlap resolution
     anns.sort_by(|a, b| a.label_pos.1.partial_cmp(&b.label_pos.1).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Resolve vertical overlaps
     let min_gap = ann.font_size * 1.4;
     for i in 1..anns.len() {
         let prev_y = anns[i - 1].label_pos.1;
@@ -62,7 +58,6 @@ pub fn compute_annotations<'a>(
         }
     }
 
-    // Clamp to viewport
     let margin = ann.font_size;
     for a in &mut anns {
         a.label_pos.0 = a.label_pos.0.clamp(margin, w - margin);
@@ -85,13 +80,11 @@ pub fn write_annotations_svg(
         let (lx, ly) = a.label_pos;
         let anchor = if lx >= ax { "start" } else { "end" };
 
-        // Dot at centroid
         svg.push_str("<circle cx=\""); push_f1(svg, ax);
         svg.push_str("\" cy=\""); push_f1(svg, ay);
         svg.push_str("\" r=\"3\" fill=\""); svg.push_str(color);
         svg.push_str("\"/>");
 
-        // Leader line
         svg.push_str("<line x1=\""); push_f1(svg, ax);
         svg.push_str("\" y1=\""); push_f1(svg, ay);
         svg.push_str("\" x2=\""); push_f1(svg, lx);
@@ -99,7 +92,6 @@ pub fn write_annotations_svg(
         svg.push_str("\" stroke=\""); svg.push_str(color);
         svg.push_str("\" stroke-width=\"1\"/>");
 
-        // Label
         svg.push_str("<text x=\""); push_f1(svg, lx);
         svg.push_str("\" y=\""); push_f1(svg, ly);
         svg.push_str("\" font-family=\"sans-serif\" font-size=\"");

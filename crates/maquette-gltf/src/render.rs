@@ -29,20 +29,14 @@ pub fn render(scene: &Scene, config: &RenderConfig) -> Vec<u8> {
     let factor = config.antialias.clamp(1, 4);
     let (bg, transparent) = resolve_background(&config.background);
 
-    // SSAA: render at supersize, then downsample to target. Focal length
-    // scales naturally since `focal = height * 0.5 / tan(fov/2)` — bigger
-    // buffer height means proportionally larger focal, keeping FOV identical.
     let mut buffer = PixelBuffer::new(width * factor, height * factor, bg);
 
     if !scene.triangles.is_empty() || !scene.lines.is_empty() || !scene.points.is_empty() {
         rasterize_scene(&mut buffer, scene, config);
     }
 
-    // Composite WBOIT translucent accumulation over the opaque pixel buffer.
-    // No-op when no AlphaMode::Blend triangles were drawn.
     buffer.composite_oit();
 
-    // SSAO runs on the hi-res depth buffer (better sample distribution).
     if let Some(ssao) = &config.ssao {
         buffer.apply_ssao(&SSAOParams {
             samples: ssao.samples,
@@ -52,11 +46,8 @@ pub fn render(scene: &Scene, config: &RenderConfig) -> Vec<u8> {
         });
     }
 
-    // Downsample to target size (no-op when factor == 1).
     let mut buffer = buffer.downsample(factor);
 
-    // FXAA on target-size buffer — SSAA handles the bulk of edge cleanup;
-    // FXAA polishes the remaining sub-pixel-ratio edges.
     if config.fxaa {
         maquette_core::fxaa::apply_fxaa(&mut buffer.pixels, buffer.width, buffer.height);
     }
@@ -72,8 +63,6 @@ pub fn render(scene: &Scene, config: &RenderConfig) -> Vec<u8> {
 fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfig) {
     let (center, radius) = scene.bounds();
 
-    // Resolve camera. glTF-authored wins (via `camera_name`/`camera_index`);
-    // else the config's Cartesian/spherical perspective setup applies.
     let (camera_pos, view, projection, znear, zfar) = if let Some(sc) = pick_glb_camera(scene, config) {
         let view = Mat4::look_at(sc.position, sc.target, sc.up);
         let proj = match sc.fov_y_deg {
@@ -92,23 +81,12 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
 
     let width_f = buffer.width as f64;
     let height_f = buffer.height as f64;
-    // Perspective focal: `height/2 / tan(fov/2)`. Unused for orthographic
-    // (projection() handles both).
     let focal = match projection {
         Projection::Perspective { fov_deg } => (height_f * 0.5) / (fov_deg.to_radians() * 0.5).tan(),
         Projection::Orthographic { .. } => 0.0,
     };
 
-    // The config's light_dir is a *from-surface-toward-light* vector, matching
-    // shader convention (positive N·L when lit).
-    // Splat lights: prefer glTF's KHR_lights_punctual list; fall back to the
-    // config's single directional when the file declares none. We also keep
-    // the un-splatted `PunctualLight` list for shadow-map construction.
     let raw_lights: Vec<crate::scene::PunctualLight> = if scene.lights.is_empty() {
-        // Build a fallback directional in the world "away from light" sense:
-        // `direction` is "toward light" per glTF, so config.light_dir (which
-        // is FROM surface TO light) needs to be negated for the light's
-        // outbound direction.
         let d = Vec3::from(config.light_dir).normalized();
         vec![crate::scene::PunctualLight {
             kind: crate::scene::LightKind::Directional,
@@ -132,27 +110,14 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
         raw_lights.iter().map(SplattedLight::from_light).collect()
     };
 
-    // Optional ground plane — two triangles at model bottom. Included in
-    // both the shadow-caster pass (so ground can occlude itself under
-    // grazing angles) and the shading pass (so shadows land on it).
     let (ground_tris, ground_material) = build_ground(scene, config);
 
-    // Shadow maps: one per light when enabled. Built from all scene triangles
-    // (the model) plus optional ground triangles.
     let (shadows, shadow_bias, shadow_softness, shadow_pcss_light_size) = if let Some(sh_cfg) = config.shadows {
         let (bc, br) = scene.bounds();
         let up = Vec3::from(config.up);
-        // Grow the shadow bbox radius to cover the ground so the
-        // directional-light ortho frustum reaches ground extents. Ground
-        // itself is a RECEIVER only, not a caster — including it in the
-        // shadow map produces subtle self-shadowing bands at triangle
-        // boundaries where PCF taps read slightly different depths.
         let effective_br = if let Some(g) = &config.ground {
             br * g.size_scale as f64
         } else { br };
-        // Project the glTF `Triangle` → 3-tuple of world positions that the
-        // shadow builder wants. Cheap; ground isn't included per the roadmap
-        // note (avoids self-shadow banding on the grid).
         let caster_tris: Vec<[Vec3; 3]> = scene.triangles.iter().map(|t| {
             [t.vertices[0].position, t.vertices[1].position, t.vertices[2].position]
         }).collect();
@@ -182,10 +147,6 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
         },
         exposure: config.exposure as f32,
         ibl: config.ibl.as_ref().map(|c| IblContext { sky: c.sky, ground: c.ground, intensity: c.intensity }),
-        // Bake the env map once per render if IBL is on. HDR bytes (if present)
-        // win over procedural sky/ground — same slot, different colour source.
-        // On HDR parse error, fall back to procedural silently rather than
-        // failing the whole render.
         ibl_env: config.ibl.as_ref().and_then(|c| {
             if let Some(hdr) = c.hdr_bytes.as_ref() {
                 match crate::cache::ibl_for_hdr(hdr, c.intensity, c.rotation) {
@@ -210,18 +171,8 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
         shadow_pcss_light_size,
     };
 
-    // Cull + project each triangle once. Opaque + mask go straight to the
-    // rasterizer with Overwrite blend; blend triangles queue up so they're
-    // rasterized AFTER every opaque/mask primitive has settled the z-buffer.
-    // No back-to-front sort needed — the queue drains through WBOIT
-    // (Weighted Blended OIT, McGuire & Bavoil 2013), which is inherently
-    // order-independent: each translucent fragment contributes into an
-    // accumulation buffer weighted by depth, then a single composite pass
-    // over the opaque frame produces the final image.
     let mut blend_queue: Vec<PreparedTriangle> = Vec::new();
 
-    // Iterate scene triangles then ground triangles. Ground material lives
-    // outside `scene.materials` so we branch on a sentinel id.
     let all_tris = scene.triangles.iter().chain(ground_tris.iter());
     for tri in all_tris {
         let material: &Material = if tri.material_id == u32::MAX {
@@ -240,8 +191,6 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
         let v1 = view.transform_point(tri.vertices[1].position);
         let v2 = view.transform_point(tri.vertices[2].position);
 
-        // Near / far clip. glTF's camera znear/zfar are in view-space distance
-        // (positive), so translate to our view-space z (camera looks along -Z).
         let near = -znear;
         if v0.z >= near || v1.z >= near || v2.z >= near { continue; }
         if let Some(f) = zfar {
@@ -256,8 +205,6 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
                     project(v1, focal, width_f, height_f),
                     project(v2, focal, width_f, height_f),
                 ],
-                // Perspective-correct interp weight = -1/v.z (also serves as
-                // the hyperbolic z-buffer key — larger = closer).
                 [-1.0 / v0.z, -1.0 / v1.z, -1.0 / v2.z],
                 [-1.0 / v0.z, -1.0 / v1.z, -1.0 / v2.z],
             ),
@@ -267,11 +214,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
                     project_ortho(v1, half_w, half_h, width_f, height_f),
                     project_ortho(v2, half_w, half_h, width_f, height_f),
                 ],
-                // Orthographic: plain barycentric interp (no perspective
-                // correction — attrs scale linearly across screen space).
                 [1.0, 1.0, 1.0],
-                // Z-buffer key = linear view-space depth (-v.z; larger = closer
-                // since v.z is negative in front of the camera).
                 [-v0.z, -v1.z, -v2.z],
             ),
         };
@@ -284,15 +227,6 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
             textures: &scene.textures,
         };
 
-        // Transmissive materials (KHR_materials_transmission) join the WBOIT
-        // queue even when authored OPAQUE. Our transmission shader is thin-wall
-        // IBL sampling — physically it colours the surface, but any opaque
-        // geometry sitting BEHIND (the dome over hot coals, glass over a bezel)
-        // is completely hidden by the Z-test in the overwrite path. Routing to
-        // WBOIT composites the dome/glass over the already-rasterized behind-
-        // geometry at composite time. Not refractively correct (no framebuffer
-        // sample at refracted UVs) but the emissive/opaque bits behind become
-        // visible again — the fix the user actually needs.
         let transmissive = material.transmission_factor > 0.0;
         match material.alpha_mode {
             AlphaMode::Blend => blend_queue.push(prepared),
@@ -303,25 +237,13 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
         }
     }
 
-    // Translucent (AlphaMode::Blend) triangles go through Weighted Blended OIT
-    // — accumulate `(rgb·a·w, a·w)` into an off-screen buffer and multiply
-    // `(1−a)` into a revealage buffer, composited into the pixel buffer after
-    // the loop by `composite_oit`. Order-independent, so no back-to-front sort
-    // is needed and interpenetrating translucents render correctly.
     for prepared in &blend_queue {
         let material = &scene.materials[prepared.tri.material_id as usize];
         shade_triangle(buffer, &pbr, material, prepared, BlendMode::WBOIT);
     }
 
-    // Points and lines. glTF primitives with mode POINTS / LINES / LINE_STRIP
-    // / LINE_LOOP get rendered as unlit 1-pixel screen-space primitives with
-    // depth-testing. No PBR shading — the spec doesn't define BRDFs for
-    // point/line topology, so we just use the material's base color × vertex
-    // colour × cheap N·L for lit lines (giving some depth cue). Points get a
-    // flat base × vertex colour.
     for pt in &scene.points {
         let vp = view.transform_point(pt.p.position);
-        // Near/far clip.
         if vp.z >= -znear { continue; }
         if let Some(f) = zfar { if vp.z <= -f { continue; } }
         let (sx, sy) = match projection {
@@ -432,19 +354,6 @@ fn shade_triangle(
         None
     };
 
-    // Per-triangle LOD: ratio of UV area (unit²) to screen area (pixel²).
-    // Each texture then converts this to its own mip level as
-    // `0.5 · log2(lod_scale · width · height)`. Big screen area / small UV
-    // means "oversampled — use mip 0"; the reverse means "use a smaller mip".
-    //
-    // KHR_texture_transform correction: the raw UV area assumes UVs live in
-    // roughly `[0, 1]`. Under KHR_mesh_quantization + gltfpack the vertex UV
-    // may be a raw 12-bit integer (0..~4095) meant to be dequantized by the
-    // material's `KHR_texture_transform.scale`. Without the correction below
-    // the raw UV area is ~4095² × the true area, driving LOD into the
-    // highest mip and blurring texture detail catastrophically. We fold the
-    // base-color transform's scale in — assets almost always use one
-    // transform across all textures, so this correction is applied uniformly.
     let xform_area_scale = {
         let s = material.xform_base.scale;
         (s[0] * s[1]).abs()
@@ -527,29 +436,19 @@ fn build_ground(scene: &Scene, config: &RenderConfig) -> (Vec<Triangle>, Option<
     if scene.triangles.is_empty() { return (Vec::new(), None); }
     let (bc, br) = scene.bounds();
     let up = Vec3::from(config.up).normalized();
-    // Pick two orthogonal axes in the ground plane by seeding from up.
     let arbitrary = if up.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
     let axis_a = up.cross(arbitrary).normalized();
     let axis_b = up.cross(axis_a).normalized();
     let half = br * g.size_scale as f64;
 
-    // Ground origin: scene center projected onto the ground plane at
-    // configured Y (or `bbox_min.y - small epsilon` when auto).
     let y_ground = match g.y {
         Some(y) => y as f64,
         None => {
-            // Project bbox_min onto up axis. For up=+Y that's just bbox_min.y.
-            // General: distance along -up from bc to touch the bbox lower edge.
             let corner = scene.bbox_min;
             corner.dot(up)
         }
     };
-    // Place ground centered under the model in the plane perpendicular to `up`.
     let center_on_ground = bc.sub(up.scale(bc.dot(up) - y_ground));
-    // Subdivide the ground into a grid so triangles crossing the near plane
-    // only cull the affected cells, not the whole plane. `N` = 8 gives 128
-    // triangles — cheap, and preserves most of the ground even when the
-    // camera is close.
     const N: usize = 8;
     let cell = (half * 2.0) / N as f64;
     let n = up;
@@ -578,14 +477,11 @@ fn build_ground(scene: &Scene, config: &RenderConfig) -> (Vec<Triangle>, Option<
         }
     }
 
-    // Ground material: matte dielectric — takes ambient IBL + cast shadows.
     let mut mat = Material::default_gltf();
     mat.base_color = [g.color[0], g.color[1], g.color[2], 1.0];
     mat.metallic = 0.0;
     mat.roughness = g.roughness;
-    mat.double_sided = true; // Grazing views shouldn't cull ground.
-    // Reflect the mutations above in the cached precomputes — dielectric F0,
-    // volume attenuation etc. depend on fields we may have touched.
+    mat.double_sided = true;
     mat.recompute_precomp();
     (tris, Some(Box::new(mat)))
 }
@@ -602,12 +498,6 @@ fn pick_glb_camera<'a>(scene: &'a Scene, config: &RenderConfig) -> Option<&'a cr
     if let Some(idx) = config.camera_index {
         return scene.cameras.get(idx);
     }
-    // Auto-pick the first authored camera when the caller didn't ask for a
-    // specific one and hasn't overridden the framing (position, azimuth,
-    // distance, fov). Matches viewer convention — an asset that ships a
-    // camera almost always expects you to use it. Callers that want the
-    // orbit fallback pass `camera: [x, y, z]` or a spherical override; the
-    // check on `camera_auto_use` (default true) is the opt-out.
     if config.camera_auto_use && scene.cameras.first().is_some() && !user_overrode_framing(config) {
         return scene.cameras.first();
     }

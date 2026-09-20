@@ -29,7 +29,6 @@ pub fn find_silhouette_edges(
     view_dir: Vec3,
     project_fn: impl Fn(Vec3) -> (f64, f64),
 ) -> Vec<ScreenEdge> {
-    // Build edge adjacency and screen-space vertex lookup in a single pass
     let mut edge_faces: FxHashMap<
         ((i64, i64, i64), (i64, i64, i64)),
         EdgeFaces,

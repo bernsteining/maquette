@@ -22,9 +22,6 @@ pub struct Vertex {
     pub normal: Vec3,
     /// TEXCOORD_0. Zero-filled when the primitive has no UV set.
     pub uv: [f32; 2],
-    // TEXCOORD_2 — glTF's third UV channel. Rare but spec-legal (typical
-    // uses: baked light detail overlaid on a base UV, or a decal channel).
-    // Zero when the primitive lacks it; `clamp_texcoord` maps N ≥ 2 → slot 2.
     pub uv2: [f32; 2],
     /// TEXCOORD_1. Zero-filled when the primitive has no secondary UV set.
     /// Materials pick per-slot which coord set to sample via `texcoord_*` fields.
@@ -98,15 +95,11 @@ pub struct Material {
     /// KHR_materials_unlit: skip all lighting, output base color directly.
     pub unlit: bool,
 
-    // Texture indices into `Scene::textures`. Populated when present in the
-    // glTF material; `None` means "use the factor only".
     pub base_color_texture: Option<u32>,
     pub metallic_roughness_texture: Option<u32>,
     pub normal_texture: Option<u32>,
     pub occlusion_texture: Option<u32>,
     pub emissive_texture: Option<u32>,
-    // TEXCOORD_N selector per texture slot (0 or 1). Defaults to 0. glTF spec
-    // allows either UV set per texture_info via `texCoord: 1`.
     pub texcoord_base:              u8,
     pub texcoord_mr:                u8,
     pub texcoord_normal:            u8,
@@ -120,31 +113,18 @@ pub struct Material {
     /// Occlusion strength: `ao = mix(1, sampled_ao, strength)`. Default 1.0.
     pub occlusion_strength: f32,
 
-    // KHR_materials_clearcoat — thin dielectric layer over the base BRDF.
-    // `factor = 0` disables the lobe (no perf cost). Clearcoat normal
-    // texture is optional; when absent, clearcoat uses the geometric normal
-    // (spec-correct — clearcoat does *not* inherit the base normal-map
-    // perturbation).
     pub clearcoat_factor: f32,
     pub clearcoat_roughness: f32,
     pub clearcoat_normal_texture: Option<u32>,
     pub clearcoat_normal_scale: f32,
 
-    // KHR_materials_sheen — fabric-style backscatter (Charlie NDF + Neubelt V).
-    // `sheen_color = [0,0,0]` disables the lobe.
     pub sheen_color: [f32; 3],
     pub sheen_roughness: f32,
 
-    // KHR_materials_ior — dielectric refractive index. Default 1.5 gives the
-    // conventional F0 ≈ 0.04.
     pub ior: f32,
-    // KHR_materials_specular — tint + scale for dielectric F0. Metals ignore
-    // both (their F0 is base color).
     pub specular_factor: f32,
     pub specular_color: [f32; 3],
 
-    // KHR_texture_transform — per-texture-info UV transform. Identity when
-    // the extension isn't declared on that texture_info. One slot per texture.
     pub xform_base:             TextureTransform,
     pub xform_mr:               TextureTransform,
     pub xform_normal:           TextureTransform,
@@ -153,25 +133,13 @@ pub struct Material {
     pub xform_clearcoat_normal: TextureTransform,
     pub xform_transmission:     TextureTransform,
 
-    // KHR_materials_transmission — thin-walled dielectric transmission. When
-    // > 0, part of the light passes through the surface, sampled from the IBL
-    // env (or ambient fallback) at the refraction direction. Factor 0 = opaque
-    // (no perf cost). Tinted by base_color, attenuated per KHR_materials_volume.
     pub transmission_factor:  f32,
     pub transmission_texture: Option<u32>,
 
-    // KHR_materials_volume — attenuation of light traversing the medium.
-    // `thickness_factor` gives the world-space path length (approximate; we
-    // use it directly rather than a thickness texture). Beer-Lambert:
-    // `T = exp(-thickness / attenuation_distance · -ln(attenuation_color))`.
     pub thickness_factor:      f32,
     pub attenuation_color:     [f32; 3],
     pub attenuation_distance:  f32,
 
-    // KHR_materials_iridescence — thin-film interference on top of the
-    // dielectric surface. Modulates F0 with a wavelength-dependent Fresnel
-    // computed from film IOR + thickness. Zero factor = disabled (no perf
-    // cost).
     pub iridescence_factor:            f32,
     pub iridescence_ior:               f32,
     pub iridescence_thickness_min:     f32,
@@ -181,27 +149,13 @@ pub struct Material {
     pub texcoord_iridescence:          u8,
     pub texcoord_iridescence_thickness: u8,
 
-    // KHR_materials_anisotropy — directional roughness (brushed metal, hair).
-    // `strength` in [0, 1] controls how "stretched" the specular highlight
-    // becomes. `rotation` (radians) rotates the tangent basis around N.
-    // Texture RG stores 2D tangent direction (offset by 0.5, so unit vector
-    // = 2*sample - 1), B stores per-pixel strength.
     pub anisotropy_strength: f32,
     pub anisotropy_rotation: f32,
     pub anisotropy_texture:  Option<u32>,
     pub texcoord_anisotropy: u8,
 
-    // KHR_materials_dispersion — chromatic dispersion in transmissive materials.
-    // Only meaningful when `transmission_factor > 0`. Splits the refractive
-    // index across RGB: higher wavelength (red) refracts less, shorter
-    // wavelength (blue) refracts more. Zero factor = no dispersion.
     pub dispersion: f32,
 
-    // KHR_materials_diffuse_transmission — light diffusely transmitted through
-    // the surface (thin cloth, backlit leaves, paper). Distinct from
-    // `KHR_materials_transmission` which is refractive (glass). At the shader,
-    // adds a `max(0, -N·L)` back-lit lambertian term tinted by
-    // `diffuse_transmission_color`. Zero factor = disabled (no perf cost).
     pub diffuse_transmission_factor:  f32,
     pub diffuse_transmission_color:   [f32; 3],
     pub diffuse_transmission_texture: Option<u32>,
@@ -425,9 +379,6 @@ pub struct Scene {
     pub bbox_max: Vec3,
 }
 
-// `LightKind` and `PunctualLight` are re-exported from maquette-core so that
-// shadow-map builder (which lives in core) can consume them without pulling
-// in this crate. Struct layout / field docs live in `maquette_core::light`.
 pub use maquette_core::light::{LightKind, PunctualLight};
 
 /// A glTF-authored camera resolved to world space at scene flatten time.
@@ -553,9 +504,6 @@ pub fn flatten_with_cached_textures(loaded: &LoadedGltf, opts: SceneOpts, bytes:
     scene.textures = crate::cache::textures_for(bytes, loaded, opts.textures);
     scene.materials = collect_materials(loaded);
     let (anim, pointer_writes) = sample_animations(loaded, opts.time, opts.animation_index);
-    // KHR_animation_pointer: tween arbitrary material/light/camera properties.
-    // Applied after material collection so scene.materials sees the interpolated
-    // values before fill_scene builds triangles.
     apply_pointer_writes(&mut scene, &pointer_writes);
     fill_scene(&mut scene, loaded, &anim, opts.variant, opts.scene_index);
     scene
@@ -615,10 +563,7 @@ fn collect_lights(loaded: &LoadedGltf, world_transforms: &[Mat4]) -> Vec<Punctua
     for node in loaded.document.nodes() {
         let Some(light) = node.light() else { continue; };
         let m = world_transforms[node.index()];
-        // World-space light origin: apply full transform to (0,0,0).
         let position = m.transform_point(Vec3::new(0.0, 0.0, 0.0));
-        // Direction: node's local -Z axis in world space, normalised. The
-        // linear part of the world matrix suffices (no translation).
         let direction = m.transform_vector(Vec3::new(0.0, 0.0, -1.0)).normalized();
 
         let color = light.color();
@@ -656,33 +601,18 @@ fn collect_lights(loaded: &LoadedGltf, world_transforms: &[Mat4]) -> Vec<Punctua
 pub fn flatten_geometry_only(loaded: &LoadedGltf) -> Scene {
     let mut scene = Scene::empty();
     scene.materials = collect_materials(loaded);
-    // `get_gltf_info` doesn't sample textures, but material paths may still
-    // index into them — leak placeholder Vec once and reuse.
     scene.textures = placeholder_textures_for(loaded.document.textures().len());
-    // Geometry-only path (get_gltf_info): pointer writes ignored, only TRS
-    // affects mesh topology/skinning.
     let (anim, _) = sample_animations(loaded, 0.0, None);
     fill_scene(&mut scene, loaded, &anim, 0, None);
     scene
 }
 
 fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], variant: u32, scene_index: Option<usize>) {
-    // Phase 1: resolve every node's world-space transform (needed up front
-    // for skinning, which references joint node transforms possibly outside
-    // the current mesh's parent chain).
     let world_transforms = compute_world_transforms(loaded, anim);
 
-    // Phase 1.5: resolve KHR_lights_punctual attachments + glTF cameras.
     scene.lights = collect_lights(loaded, &world_transforms);
     scene.cameras = collect_cameras(loaded, &world_transforms);
 
-    // Phase 2: emit meshes. Skinned meshes ignore their owning node's
-    // transform per the glTF spec — only the joint palette matters.
-    // Scene selection: explicit `scene_index` wins; otherwise the document's
-    // authored default; otherwise the first scene. glTF assets can declare
-    // multiple scenes as alternative composition roots — animations, cameras
-    // and node hierarchies attach to nodes, but only nodes reachable from
-    // the chosen root are rendered.
     let root_scene = scene_index
         .and_then(|i| loaded.document.scenes().nth(i))
         .or_else(|| loaded.document.default_scene())
@@ -700,8 +630,6 @@ fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], varia
         if let Some(mesh) = node.mesh() {
             let palette = node.skin().map(|s| compute_joint_palette(loaded, &s, &world_transforms));
             let world = world_transforms[node_index];
-            // Morph-target weights: animation-sampled if animated, else the
-            // node's default weights, else the mesh's default weights.
             let node_weights = anim.get(node_index).and_then(|a| a.weights.clone())
                 .or_else(|| node.weights().map(|w| w.to_vec()))
                 .or_else(|| mesh.weights().map(|w| w.to_vec()));
@@ -756,8 +684,6 @@ fn compute_joint_palette(loaded: &LoadedGltf, skin: &gltf::Skin, world_transform
 }
 
 fn collect_materials(loaded: &LoadedGltf) -> Vec<Material> {
-    // Reserve one extra slot at index 0 for glTF's "no material" default.
-    // We'll refer to indexed materials by (index + 1) in emit_mesh.
     let mut materials = Vec::with_capacity(loaded.document.materials().len() + 1);
     materials.push(Material::default_gltf());
     for m in loaded.document.materials() {
@@ -772,22 +698,13 @@ fn collect_materials(loaded: &LoadedGltf) -> Vec<Material> {
         let anisotropy = parse_anisotropy(&m);
         let dispersion = parse_dispersion(&m);
         let diffuse_transmission = parse_diffuse_transmission(&m);
-        // KHR_materials_pbrSpecularGlossiness — legacy alternative to the
-        // metallic-roughness workflow. Convert to MR at load time so the shader
-        // only needs one code path. When present, overrides pbr_metallic_roughness.
         let sg = m.pbr_specular_glossiness();
         let volume = m.volume();
-        // KHR_materials_emissive_strength scales the emissive factor. Spec:
-        // "final emissive = emissiveFactor · emissiveTexture · emissiveStrength."
-        // Baking it into the factor at load time keeps the shader hot path
-        // untouched (one splat, not a runtime branch).
         let em_strength = m.emissive_strength().unwrap_or(1.0);
         let emissive_scaled = {
             let e = m.emissive_factor();
             [e[0] * em_strength, e[1] * em_strength, e[2] * em_strength]
         };
-        // If pbrSpecularGlossiness is present, compute an equivalent MR
-        // baseColor/metallic/roughness triple (Khronos-recommended fit).
         let (base_from_sg, metallic_from_sg, roughness_from_sg, base_tex_from_sg, texcoord_base_from_sg, xform_base_from_sg) =
             if let Some(sg) = sg.as_ref() {
                 let (b, mtl, rgh) = spec_gloss_to_mr(
@@ -880,9 +797,6 @@ fn collect_materials(loaded: &LoadedGltf) -> Vec<Material> {
             precomp: MaterialPrecomp::default(),
         });
     }
-    // Fill in per-material precomputes now that every input field is set —
-    // MaterialShader::new reads these on every triangle, so the transcendentals
-    // and small arithmetic chains only pay once per material this way.
     for m in &mut materials { m.precomp = MaterialPrecomp::from_material(m); }
     materials
 }
@@ -1101,11 +1015,6 @@ fn parse_anisotropy(m: &gltf::Material) -> AnisotropyCfg {
 
 #[inline]
 fn clamp_texcoord(n: u32) -> u8 {
-    // glTF puts no upper bound on TEXCOORD_N. We wire slots 0/1/2 through
-    // the Vertex; anything N ≥ 3 falls back to slot 2 (assets that author
-    // TEXCOORD_3+ typically have the lower slots too). Real-world usage
-    // of N ≥ 3 is essentially never seen — extending further is easy but
-    // burns 8 bytes of vertex + a barycentric interp per slot.
     n.min(2) as u8
 }
 
@@ -1147,15 +1056,10 @@ fn load_occlusion_transform(info: &gltf::material::OcclusionTexture) -> TextureT
 fn collect_textures(loaded: &LoadedGltf, opts: TextureLoadOpts) -> Vec<Texture> {
     let n = loaded.document.textures().len();
     if opts.disabled {
-        // Fast-path draft mode: every texture is a solid-white 1×1 placeholder.
-        // Materials fall back to their factors alone.
         return (0..n).map(|_| placeholder_texture()).collect();
     }
     let mut textures = Vec::with_capacity(n);
     for t in loaded.document.textures() {
-        // Best-effort: skip textures we can't decode (log-friendly failure
-        // instead of aborting the whole render). Downstream shader treats
-        // a missing texture as "factor only", which is the graceful path.
         match load_texture(loaded, &t, opts) {
             Ok(tex) => textures.push(tex),
             Err(_e) => textures.push(placeholder_texture()),
@@ -1165,14 +1069,7 @@ fn collect_textures(loaded: &LoadedGltf, opts: TextureLoadOpts) -> Vec<Texture> 
 }
 
 fn load_texture(loaded: &LoadedGltf, t: &gltf::Texture, opts: TextureLoadOpts) -> Result<Texture, String> {
-    // `allow_empty_texture` returns `Option<Image>` — None means the texture
-    // references an image via an extension we didn't build gltf-rs to
-    // understand (EXT_texture_avif, KHR_texture_basisu). Fall through to the
-    // placeholder texture rather than panicking.
     let image = t.source().ok_or("texture has no primary source (unsupported ext?)")?;
-    // Bind a Vec outside the match so the data-URI branch can own the decoded
-    // bytes while the View/sidecar branches borrow. Rust's "definitely assigned"
-    // analysis lets us leave it uninitialised until the arm needs it.
     let data_uri_owned: Vec<u8>;
     let (bytes, mime): (&[u8], Option<&str>) = match image.source() {
         gltf::image::Source::View { view, mime_type } => {
@@ -1197,10 +1094,6 @@ fn load_texture(loaded: &LoadedGltf, t: &gltf::Texture, opts: TextureLoadOpts) -
     };
     let decoded = texture_decode::decode(bytes, mime)?;
     let mut base = MipLevel { width: decoded.width, height: decoded.height, rgba: decoded.rgba };
-    // Downsample to `max_size` before mip-chain generation so subsequent mips
-    // start from the capped resolution. Halving in a loop (not one-shot to
-    // arbitrary size) keeps the resample cheap and gives identical output to
-    // "one extra mip level" — the difference is only where LOD 0 sits.
     if let Some(cap) = opts.max_size {
         while base.width > cap || base.height > cap {
             if base.width <= 4 || base.height <= 4 { break; }
@@ -1225,7 +1118,6 @@ fn load_texture(loaded: &LoadedGltf, t: &gltf::Texture, opts: TextureLoadOpts) -
 fn placeholder_textures_for(n: usize) -> &'static [Texture] {
     static mut PLACEHOLDERS: Vec<Vec<Texture>> = Vec::new();
     unsafe {
-        // Reuse if a prior call already leaked the same size (uncommon).
         for v in PLACEHOLDERS.iter() {
             if v.len() == n {
                 return std::mem::transmute::<&[Texture], &'static [Texture]>(v.as_slice());
@@ -1239,12 +1131,11 @@ fn placeholder_textures_for(n: usize) -> &'static [Texture] {
 }
 
 fn placeholder_texture() -> Texture {
-    // Solid white 1×1 so missing textures collapse to "factor only" behaviour.
     Texture {
         mips: vec![MipLevel { width: 1, height: 1, rgba: vec![255, 255, 255, 255] }],
         wrap_s: Wrap::Repeat, wrap_t: Wrap::Repeat,
         mag_filter: Filter::Nearest, min_filter: Filter::Nearest,
-        lod_bias: 0.0,   // 0.5 · log₂(1) = 0
+        lod_bias: 0.0,
     }
 }
 
@@ -1264,7 +1155,6 @@ fn map_mag(f: gltf::texture::MagFilter) -> Filter {
 }
 
 fn map_min(f: gltf::texture::MinFilter) -> Filter {
-    // Mipmap modes collapse to their base filter until we generate mips.
     use gltf::texture::MinFilter as M;
     match f {
         M::Nearest | M::NearestMipmapNearest | M::NearestMipmapLinear => Filter::Nearest,
@@ -1273,10 +1163,6 @@ fn map_min(f: gltf::texture::MinFilter) -> Filter {
 }
 
 fn node_transform_animated(node: &gltf::Node, anim: Option<&AnimSample>) -> Mat4 {
-    // If any TRS component is animated for this node, we build a fresh TRS
-    // matrix using the node's base T/R/S as the "unanimated" fallback for
-    // components that this animation doesn't touch. If nothing's animated
-    // we fall back to the node's own transform (matrix or decomposed).
     let anim = match anim {
         Some(a) if a.any() => a,
         _ => return match node.transform() {
@@ -1284,9 +1170,6 @@ fn node_transform_animated(node: &gltf::Node, anim: Option<&AnimSample>) -> Mat4
             gltf::scene::Transform::Decomposed { translation, rotation, scale } => Mat4::from_trs(translation, rotation, scale),
         },
     };
-    // Base TRS: from decomposed if present, else fall back to identity when
-    // the node uses a matrix (spec: animated nodes shouldn't use matrix, so
-    // this path is theoretical).
     let (bt, br, bs) = match node.transform() {
         gltf::scene::Transform::Decomposed { translation, rotation, scale } => (translation, rotation, scale),
         gltf::scene::Transform::Matrix { .. } => ([0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0]),
@@ -1297,9 +1180,6 @@ fn node_transform_animated(node: &gltf::Node, anim: Option<&AnimSample>) -> Mat4
     Mat4::from_trs(t, r, s)
 }
 
-// ---------------------------------------------------------------------------
-// Animation sampling
-// ---------------------------------------------------------------------------
 
 /// Per-node TRS override sampled from animation channels at a specific time.
 /// Any `None` field means that node component isn't animated — fall back to
@@ -1369,9 +1249,6 @@ fn sample_animations(
             };
             if times.is_empty() { continue; }
 
-            // KHR_animation_pointer: target has no node — path is a JSON
-            // pointer string. Read output as a raw f32 stream and sample
-            // generically over N components.
             if channel.target().property() == gltf::animation::Property::Pointer {
                 let Some(path) = channel.target().animation_pointer() else { continue; };
                 let output = sampler.output();
@@ -1407,9 +1284,6 @@ fn sample_animations(
                 None => {}
                 Some(gltf::animation::util::ReadOutputs::MorphTargetWeights(w)) => {
                     let flat: Vec<f32> = w.into_f32().collect();
-                    // Weights are packed as `num_targets` per keyframe, in the
-                    // same input-time order as the sampler. Determine
-                    // num_targets from the mesh on the target node.
                     let num_targets = loaded.document.nodes().nth(node_idx)
                         .and_then(|n| n.mesh())
                         .and_then(|m| m.primitives().next())
@@ -1473,7 +1347,6 @@ fn sample_flat(times: &[f32], flat: &[f32], n: usize, t: f32, interp: gltf::anim
             (0..n).map(|k| a[k] * (1.0 - alpha) + b[k] * alpha).collect()
         }
         I::CubicSpline => {
-            // Hermite: v(t) = h00·p0 + h10·(dt·m0) + h01·p1 + h11·(dt·m1)
             let i1 = (i + 1).min(times.len().saturating_sub(1));
             let dt = (times[i1] - times[i]).max(1e-9);
             let (t2, t3) = (alpha * alpha, alpha * alpha * alpha);
@@ -1483,10 +1356,10 @@ fn sample_flat(times: &[f32], flat: &[f32], n: usize, t: f32, interp: gltf::anim
                 -2.0 * t3 + 3.0 * t2,
                 t3 - t2,
             );
-            let p0_base = i  * values_per_kf + n;    // value slot
+            let p0_base = i  * values_per_kf + n;
             let p1_base = i1 * values_per_kf + n;
-            let m0_base = i  * values_per_kf + n * 2; // out-tangent slot
-            let m1_base = i1 * values_per_kf;         // in-tangent slot
+            let m0_base = i  * values_per_kf + n * 2;
+            let m1_base = i1 * values_per_kf;
             (0..n).map(|k| {
                 let p0 = flat.get(p0_base + k).copied().unwrap_or(0.0);
                 let p1 = flat.get(p1_base + k).copied().unwrap_or(0.0);
@@ -1514,9 +1387,6 @@ pub fn apply_pointer_writes(scene: &mut Scene, writes: &[PointerWrite]) {
 }
 
 fn apply_pointer_write(scene: &mut Scene, path: &str, v: &[f32]) {
-    // Parse the JSON pointer. RFC 6901 escape: `~0` → `~`, `~1` → `/`. Pointer
-    // channels in the wild use plain paths so the naive split is fine; the
-    // decode step is here for spec compliance.
     let segs: Vec<String> = path.split('/').skip(1).map(decode_pointer_seg).collect();
     match segs.first().map(String::as_str) {
         Some("materials") => apply_material_write(scene, &segs, v),
@@ -1535,13 +1405,8 @@ fn apply_material_write(scene: &mut Scene, segs: &[String], v: &[f32]) {
     let tail: Vec<&str> = segs[2..].iter().map(String::as_str).collect();
     let f = |i: usize| v.get(i).copied().unwrap_or(0.0);
 
-    // KHR_texture_transform on a per-texture texture_info. The transform lives
-    // under `/materials/N/<texture-slot>/extensions/KHR_texture_transform/<prop>`
-    // where `<texture-slot>` names a texture info (variable depth path). Try
-    // this first so we don't have to enumerate every slot in the big match.
     if let Some(pos) = tail.iter().position(|s| *s == "KHR_texture_transform") {
         if pos >= 2 && tail.get(pos - 1) == Some(&"extensions") {
-            // slot_segs = the texture-slot path preceding /extensions/KHR_texture_transform/…
             let slot_segs = &tail[..pos - 1];
             let prop = tail.get(pos + 1).copied().unwrap_or("");
             if let Some(xform) = xform_slot_mut(m, slot_segs) {
@@ -1552,57 +1417,44 @@ fn apply_material_write(scene: &mut Scene, segs: &[String], v: &[f32]) {
     }
 
     match tail.as_slice() {
-        // Core pbrMetallicRoughness.
         ["pbrMetallicRoughness", "baseColorFactor"] if v.len() >= 4 => {
             m.base_color = [f(0), f(1), f(2), f(3)];
         }
         ["pbrMetallicRoughness", "metallicFactor"]  => m.metallic  = f(0),
         ["pbrMetallicRoughness", "roughnessFactor"] => m.roughness = f(0),
-        // Core emissive + alpha.
         ["emissiveFactor"] if v.len() >= 3 => m.emissive = [f(0), f(1), f(2)],
         ["alphaCutoff"] => m.alpha_cutoff = f(0),
-        // Core texture info scalars.
         ["normalTexture",    "scale"]    => m.normal_scale = f(0),
         ["occlusionTexture", "strength"] => m.occlusion_strength = f(0),
-        // KHR_materials_clearcoat.
         ["extensions", "KHR_materials_clearcoat", "clearcoatFactor"]          => m.clearcoat_factor    = f(0),
         ["extensions", "KHR_materials_clearcoat", "clearcoatRoughnessFactor"] => m.clearcoat_roughness = f(0),
         ["extensions", "KHR_materials_clearcoat", "clearcoatNormalTexture", "scale"]
                                                                              => m.clearcoat_normal_scale = f(0),
-        // KHR_materials_sheen.
         ["extensions", "KHR_materials_sheen", "sheenColorFactor"] if v.len() >= 3
                                                                              => m.sheen_color = [f(0), f(1), f(2)],
         ["extensions", "KHR_materials_sheen", "sheenRoughnessFactor"]        => m.sheen_roughness = f(0),
-        // KHR_materials_ior + specular.
         ["extensions", "KHR_materials_ior", "ior"]                           => m.ior             = f(0),
         ["extensions", "KHR_materials_specular", "specularFactor"]           => m.specular_factor = f(0),
         ["extensions", "KHR_materials_specular", "specularColorFactor"] if v.len() >= 3
                                                                              => m.specular_color = [f(0), f(1), f(2)],
-        // KHR_materials_transmission.
         ["extensions", "KHR_materials_transmission", "transmissionFactor"]   => m.transmission_factor = f(0),
-        // KHR_materials_volume.
         ["extensions", "KHR_materials_volume", "thicknessFactor"]            => m.thickness_factor    = f(0),
         ["extensions", "KHR_materials_volume", "attenuationDistance"]        => m.attenuation_distance = f(0),
         ["extensions", "KHR_materials_volume", "attenuationColor"] if v.len() >= 3
                                                                              => m.attenuation_color = [f(0), f(1), f(2)],
-        // KHR_materials_iridescence.
         ["extensions", "KHR_materials_iridescence", "iridescenceFactor"]     => m.iridescence_factor = f(0),
         ["extensions", "KHR_materials_iridescence", "iridescenceIor"]        => m.iridescence_ior    = f(0),
         ["extensions", "KHR_materials_iridescence", "iridescenceThicknessMinimum"]
                                                                              => m.iridescence_thickness_min = f(0),
         ["extensions", "KHR_materials_iridescence", "iridescenceThicknessMaximum"]
                                                                              => m.iridescence_thickness_max = f(0),
-        // KHR_materials_anisotropy.
         ["extensions", "KHR_materials_anisotropy", "anisotropyStrength"]     => m.anisotropy_strength = f(0),
         ["extensions", "KHR_materials_anisotropy", "anisotropyRotation"]     => m.anisotropy_rotation = f(0),
-        // KHR_materials_dispersion.
         ["extensions", "KHR_materials_dispersion", "dispersion"]             => m.dispersion = f(0),
-        // KHR_materials_diffuse_transmission.
         ["extensions", "KHR_materials_diffuse_transmission", "diffuseTransmissionFactor"]
                                                                              => m.diffuse_transmission_factor = f(0),
         ["extensions", "KHR_materials_diffuse_transmission", "diffuseTransmissionColorFactor"] if v.len() >= 3
                                                                              => m.diffuse_transmission_color = [f(0), f(1), f(2)],
-        // Unknown / unsupported — silently drop rather than break the render.
         _ => {}
     }
 }
@@ -1685,8 +1537,6 @@ fn sample_weights(times: &[f32], flat: &[f32], num_targets: usize, t: f32, inter
 fn find_bracket(times: &[f32], t: f32) -> (usize, f32) {
     if t <= times[0] { return (0, 0.0); }
     if t >= *times.last().unwrap() { return (times.len() - 1, 0.0); }
-    // Linear search — fine for typical animations (<100 keyframes/channel);
-    // upgrade to binary search if we ever hit assets with dense sampling.
     for i in 0..times.len() - 1 {
         if t < times[i + 1] {
             let span = times[i + 1] - times[i];
@@ -1701,8 +1551,6 @@ fn sample_vec3(times: &[f32], values: &[[f32; 3]], t: f32, interp: gltf::animati
     use gltf::animation::Interpolation as I;
     let (i, alpha) = find_bracket(times, t);
     if alpha == 0.0 || i + 1 >= values.len() {
-        // CubicSpline uses 3 output values per keyframe (in-tangent, value,
-        // out-tangent). We fall back to picking `value` — index * 3 + 1.
         return match interp {
             I::CubicSpline => values.get(i * 3 + 1).copied().unwrap_or([0.0, 0.0, 0.0]),
             _ => values[i.min(values.len() - 1)],
@@ -1715,9 +1563,6 @@ fn sample_vec3(times: &[f32], values: &[[f32; 3]], t: f32, interp: gltf::animati
             values[i][1] + alpha * (values[i + 1][1] - values[i][1]),
             values[i][2] + alpha * (values[i + 1][2] - values[i][2]),
         ],
-        // Cubic Hermite spline. glTF packs each keyframe as
-        //   [in_tangent, value, out_tangent]
-        // consecutively, so keyframe k lives at indices k*3..k*3+3.
         I::CubicSpline => {
             let td = times[i + 1] - times[i];
             let (h00, h10, h01, h11) = hermite_basis(alpha);
@@ -1739,10 +1584,10 @@ fn hermite_basis(s: f32) -> (f32, f32, f32, f32) {
     let s2 = s * s;
     let s3 = s2 * s;
     (
-        2.0 * s3 - 3.0 * s2 + 1.0,   // h00 for value at k
-        s3 - 2.0 * s2 + s,           // h10 for out-tangent at k
-        -2.0 * s3 + 3.0 * s2,        // h01 for value at k+1
-        s3 - s2,                     // h11 for in-tangent at k+1
+        2.0 * s3 - 3.0 * s2 + 1.0,
+        s3 - 2.0 * s2 + s,
+        -2.0 * s3 + 3.0 * s2,
+        s3 - s2,
     )
 }
 
@@ -1810,12 +1655,7 @@ fn emit_mesh(
     variant: u32,
 ) {
     for primitive in mesh.primitives() {
-        // All modes handled — Points/Lines emit into scene.points/lines from
-        // `emit_indexed` and return early; triangle modes continue below.
 
-        // KHR_materials_variants: if the primitive has variant mappings and
-        // the requested variant is listed, use the mapped material; otherwise
-        // fall back to the primitive's default material.
         let variant_material = primitive.mappings()
             .find(|m| m.variants().iter().any(|&v| v == variant))
             .map(|m| m.material());
@@ -1828,12 +1668,6 @@ fn emit_mesh(
             loaded.buffers.get(buffer.index()).map(|v| v.as_slice())
         });
 
-        // gltf-rs's typed readers (`read_positions/normals/tangents`) work
-        // by reinterpreting raw accessor bytes as `f32` — which is wrong
-        // for KHR_mesh_quantization assets where POSITION/NORMAL/TANGENT
-        // are stored as normalized i8/u8/i16/u16 integers. We route
-        // through a helper that dispatches on `data_type()` and covers
-        // every spec-legal componentType.
         let Some(pos_acc) = primitive.get(&gltf::Semantic::Positions) else { continue; };
         let positions_raw = match read_vec3_f32(&pos_acc, loaded) {
             Ok(v) => v, Err(_) => continue,
@@ -1849,11 +1683,6 @@ fn emit_mesh(
             .get(&gltf::Semantic::Tangents)
             .and_then(|acc| read_vec4_f32(&acc, loaded).ok());
 
-        // Apply morph-target deltas in bind space (per glTF spec: morph
-        // targets add position/normal/tangent deltas weighted by
-        // node/mesh/animation weights, THEN skinning transforms the result).
-        // Morph deltas may be quantized under KHR_mesh_quantization too,
-        // so we go through the same f32-dispatch helpers as the base attrs.
         if let Some(weights) = morph_weights.filter(|w| !w.is_empty()) {
             for (i, target) in primitive.morph_targets().enumerate() {
                 let w = weights.get(i).copied().unwrap_or(0.0);
@@ -1876,9 +1705,6 @@ fn emit_mesh(
                 }
                 if let Some(ts) = tangents_bind.as_mut() {
                     if let Some(deltas) = target.tangents().and_then(|acc| read_vec3_f32(&acc, loaded).ok()) {
-                        // Morph target tangent deltas are vec3 per spec
-                        // (the .w handedness is inherited from the base
-                        // tangent, not morphed).
                         for (t, d) in ts.iter_mut().zip(deltas.iter()) {
                             t[0] += w * d[0];
                             t[1] += w * d[1];
@@ -1889,19 +1715,12 @@ fn emit_mesh(
             }
         }
 
-        // Transform to world space — either via the mesh's node transform
-        // (unskinned) or via per-vertex joint weighting (skinned). glTF spec:
-        // for skinned meshes, the node transform is ignored.
         let (positions, normals, tangents) = if let Some(palette) = skin_palette {
             let joints_iter = reader.read_joints(0);
             let weights_iter = reader.read_weights(0);
             let (Some(j), Some(w)) = (joints_iter, weights_iter) else { continue; };
             let joints: Vec<[u16; 4]> = j.into_u16().collect();
             let weights: Vec<[f32; 4]> = w.into_f32().collect();
-            // JOINTS_1 / WEIGHTS_1 extend the influence set to 8 per vertex.
-            // glTF spec allows arbitrary N-multiples but rec. supporting ≥ 2.
-            // Empty vecs when the primitive has no second set — skinning code
-            // treats them as all-zero weights (no-op).
             let joints1: Vec<[u16; 4]> = reader.read_joints(1).map(|j| j.into_u16().collect()).unwrap_or_default();
             let weights1: Vec<[f32; 4]> = reader.read_weights(1).map(|w| w.into_f32().collect()).unwrap_or_default();
             apply_skinning(&positions_bind, normals_bind.as_deref(), tangents_bind.as_deref(), &joints, &weights, &joints1, &weights1, palette)
@@ -1920,11 +1739,6 @@ fn emit_mesh(
             (pos, nrm, tan)
         };
 
-        // Texcoord accessors go through the same quantization-aware helper
-        // as positions/normals — gltf-rs's `.into_f32()` divides u16 by
-        // 65535 even when the accessor is `normalized: false`, which
-        // corrupts KHR_mesh_quantization texcoords (they're paired with a
-        // KHR_texture_transform that expects raw ints).
         let uvs: Vec<[f32; 2]> = primitive.get(&gltf::Semantic::TexCoords(0))
             .and_then(|acc| read_vec2_f32(&acc, loaded).ok())
             .unwrap_or_default();
@@ -1934,8 +1748,6 @@ fn emit_mesh(
         let uvs2: Vec<[f32; 2]> = primitive.get(&gltf::Semantic::TexCoords(2))
             .and_then(|acc| read_vec2_f32(&acc, loaded).ok())
             .unwrap_or_default();
-        // COLOR_0 may be vec3 or vec4 per glTF spec — the utils reader
-        // hands us `[f32; 4]` in either case (alpha=1 padded for vec3).
         let colors: Vec<[f32; 4]> = reader
             .read_colors(0)
             .map(|c| c.into_rgba_f32().collect())
@@ -1966,15 +1778,6 @@ fn apply_skinning(
     let mut tangents = tangents_bind.map(|_| Vec::with_capacity(n));
 
     for i in 0..n {
-        // Sum the (weight · joint_matrix) into one matrix, then apply. Loops
-        // over both influence sets — up to 8 joints/weights per vertex per
-        // glTF spec (JOINTS_0/WEIGHTS_0 and JOINTS_1/WEIGHTS_1). Renormalise
-        // the raw weights to sum to 1 first — the spec requires it, but
-        // exporters (Blender, gltfpack) sometimes emit slightly-off sums
-        // (float drift, or quantized u8/u16 weights that don't quite hit
-        // 255/65535). Un-normalised weights leave the blended matrix
-        // shorter/longer than a pure rotation, which visibly shrinks or
-        // stretches deformed verts.
         let raw_sum: f64 =
             weights.get(i).copied().unwrap_or([0.0; 4]).iter().map(|w| *w as f64).sum::<f64>()
           + weights1.get(i).copied().unwrap_or([0.0; 4]).iter().map(|w| *w as f64).sum::<f64>();
@@ -2049,9 +1852,6 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
         }
     };
 
-    // Non-triangle primitive modes emit into scene.lines / scene.points and
-    // return early. Points/lines don't participate in shadow maps or PBR
-    // shading; they render with the material's base color × vertex color.
     match mode {
         gltf::mesh::Mode::Points => {
             for &i in &indices {
@@ -2089,7 +1889,6 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
                     scene.extend_bbox(positions[i0]); scene.extend_bbox(positions[i1]);
                     scene.lines.push(LinePrim { a: mk_vertex(i0), b: mk_vertex(i1), material_id });
                 }
-                // Closing segment last → first.
                 let (i0, i1) = (*indices.last().unwrap() as usize, indices[0] as usize);
                 if i0 < positions.len() && i1 < positions.len() {
                     scene.lines.push(LinePrim { a: mk_vertex(i0), b: mk_vertex(i1), material_id });
@@ -2118,8 +1917,6 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
         _ => unreachable!("non-triangle modes handled above"),
     };
 
-    // Resolve per-face-vertex normals up front so both MikkTSpace and the emit
-    // loop see the same values (flat face normal for prims without NORMAL).
     let face_vert_normal = |face: usize, vert: usize| -> Vec3 {
         let [ia, ib, ic] = tri_indices[face];
         if let Some(n) = normals {
@@ -2131,13 +1928,6 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
         }
     };
 
-    // Tangent source strategy:
-    //   * TANGENT attribute → per-vertex, index by (vertex index).
-    //   * MikkTSpace → per-face-vertex, index by (face * 3 + vert). Only
-    //     computed if the primitive has both UVs and normals AND at least
-    //     one non-degenerate triangle; otherwise fall back to flat.
-    //   * Flat (per-triangle UV derivative) — last resort when MikkT can't
-    //     run (missing UVs).
     let mikkt_tangents: Option<Vec<[f32; 4]>> = if tangents.is_none() && !uvs.is_empty() {
         let mut geom = MikkTGeom {
             positions,
@@ -2187,8 +1977,6 @@ fn emit_indexed<'a, F: Clone + Fn(gltf::Buffer<'a>) -> Option<&'a [u8]>>(
     }
 }
 
-// MikkTSpace `Geometry` adapter over a primitive's per-face-vertex data.
-// Tangents are written to `tangents` indexed by `face * 3 + vert`.
 struct MikkTGeom<'a, N> {
     positions: &'a [Vec3],
     uvs: &'a [[f32; 2]],
@@ -2278,9 +2066,6 @@ fn read_vec_f32<const N: usize>(accessor: &gltf::Accessor, loaded: &LoadedGltf) 
     let base = view.offset() + accessor.offset();
     let normalized = accessor.normalized();
 
-    // Scale factor per glTF §3.6.2.2. Non-normalized integer paths use 1.0
-    // and produce plain integer-to-float casts (rarely used for these
-    // attributes but spec-legal).
     let scale = match (dt, normalized) {
         (DataType::I8,  true) => 1.0 / 127.0,
         (DataType::U8,  true) => 1.0 / 255.0,
@@ -2327,9 +2112,6 @@ fn compute_flat_tangent(
     let du2y = (uv2[1] - uv0[1]) as f64;
     let det = du1x * du2y - du2x * du1y;
     if det.abs() < 1e-12 {
-        // Degenerate UVs — pick an arbitrary tangent orthogonal to N so the
-        // shader still has a valid basis (normal map contributions cancel
-        // out visually in that case anyway).
         let axis = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
         let t = n.cross(axis).normalized();
         return [t.x as f32, t.y as f32, t.z as f32, 1.0];
@@ -2345,12 +2127,9 @@ fn compute_flat_tangent(
         (e2.y * du1x - e1.y * du2x) * inv,
         (e2.z * du1x - e1.z * du2x) * inv,
     );
-    // Gram-Schmidt: strip the N component from T.
     let dot_nt = n.dot(t_raw);
     let t = Vec3::new(t_raw.x - n.x * dot_nt, t_raw.y - n.y * dot_nt, t_raw.z - n.z * dot_nt)
         .normalized();
-    // Handedness: sign of (N × T) · B — determines whether the bitangent
-    // should be flipped for the (T, B, N) frame to match the UV winding.
     let sign = if n.cross(t).dot(b_raw) < 0.0 { -1.0 } else { 1.0 };
     [t.x as f32, t.y as f32, t.z as f32, sign as f32]
 }

@@ -2,9 +2,6 @@ use crate::color::{parse_hex_color, srgb_to_linear};
 use crate::math::parse_f64_fast;
 use std::collections::HashMap;
 
-// ---------------------------------------------------------------------------
-// JSON parser — minimal recursive-descent, no dependencies
-// ---------------------------------------------------------------------------
 
 pub(crate) struct JsonParser<'a> {
     b: &'a [u8],
@@ -69,9 +66,8 @@ impl<'a> JsonParser<'a> {
             }
             self.pos += 1;
         }
-        // Safety: input is &str so always valid UTF-8
         let s = unsafe { std::str::from_utf8_unchecked(&self.b[start..self.pos]) };
-        self.pos += 1; // closing "
+        self.pos += 1;
         Ok(s)
     }
 
@@ -89,8 +85,6 @@ impl<'a> JsonParser<'a> {
         self.skip_ws();
         if self.peek() != b'"' { return Err("expected string".into()); }
         self.pos += 1;
-        // Buffer as bytes and validate UTF-8 at the end — multi-byte UTF-8
-        // sequences (input is already valid) pass through byte-by-byte.
         let mut out: Vec<u8> = Vec::new();
         while self.pos < self.b.len() {
             let c = self.b[self.pos];
@@ -141,7 +135,6 @@ impl<'a> JsonParser<'a> {
                 _ => break,
             }
         }
-        // Safety: input is &str, digits/signs/dots are ASCII
         let s = unsafe { std::str::from_utf8_unchecked(&self.b[start..self.pos]) };
         parse_f64_fast(s).ok_or_else(|| "invalid number".into())
     }
@@ -241,7 +234,7 @@ impl<'a> JsonParser<'a> {
                 self.skip_ws();
                 if self.peek() != b'}' {
                     loop {
-                        self.parse_str()?; // key
+                        self.parse_str()?;
                         self.expect(b':')?;
                         self.skip_value()?;
                         if self.eat_comma_or(b'}') { break; }
@@ -269,9 +262,6 @@ impl<'a> JsonParser<'a> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Domain types
-// ---------------------------------------------------------------------------
 
 /// Ambient lighting configuration: flat scalar or hemisphere (sky/ground gradient).
 #[derive(Clone)]
@@ -490,9 +480,6 @@ pub struct ShadowMapConfig {
 
 impl Default for ShadowMapConfig {
     fn default() -> Self {
-        // 512 is the sweet spot: per-vertex sampling makes ≥512 visually
-        // indistinguishable from 1024 while costing ~60% less to build.
-        // Normal-offset carries the acne fix, so the constant bias stays small.
         Self {
             resolution: 512, bias: 0.0008, normal_bias: 2.0, slope_bias: 1.0,
             strength: 1.0, softness: 1, per_pixel: false, color: String::new(), light_size: 0.0, omni: false,
@@ -818,9 +805,6 @@ impl Default for RenderConfig {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Parsing functions
-// ---------------------------------------------------------------------------
 
 fn axis_index(s: &str) -> u8 {
     match s { "x" | "X" => 0, "y" | "Y" => 1, _ => 2 }
@@ -885,7 +869,6 @@ fn parse_clip(p: &mut JsonParser) -> Result<Option<ClipConfig>, String> {
         p.expect(b'}')?;
         return Ok(Some(c));
     }
-    // Unrecognized scalar (e.g. a bare bool) — treat as off.
     p.skip_value()?;
     Ok(None)
 }
@@ -953,12 +936,10 @@ fn parse_light_def(p: &mut JsonParser) -> Result<LightDef, String> {
             match key {
                 "type" => {
                     let s = p.parse_str()?;
-                    // `area` shares the positional lighting/shadow path (its
-                    // `vector` is a position) but adds size-driven softening.
                     light.kind = match s {
                         "positional" | "point" => LightKind::Positional,
                         "area" => LightKind::Area,
-                        _ => LightKind::Directional, // "directional", "sun", …
+                        _ => LightKind::Directional,
                     };
                 }
                 "vector" => light.vector = p.parse_f64_3()?,
@@ -982,7 +963,6 @@ fn parse_light_def(p: &mut JsonParser) -> Result<LightDef, String> {
 fn parse_light_vec(p: &mut JsonParser) -> Result<Vec<LightDef>, String> {
     p.skip_ws();
     if p.peek() == b'{' {
-        // Single light object — wrap in a vec.
         return Ok(vec![parse_light_def(p)?]);
     }
     p.expect(b'[')?;
@@ -1057,9 +1037,6 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
             let key = p.parse_str()?;
             p.expect(b':')?;
             match key {
-                // `none` (Typst) → JSON null on any setting: keep the default (i.e.
-                // "unset" / disabled), so `field: none` never errors. `background` is
-                // excepted below — there, none means transparent, not the default fill.
                 _ if key != "background" && p.is_null() => {}
                 "camera" => cfg.camera = if p.is_null() { None } else { Some(p.parse_f64_3()?) },
                 "center" => cfg.center = p.parse_f64_3()?,
@@ -1193,7 +1170,6 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
         }
     }
     p.expect(b'}')?;
-    // Flat shading implies no smooth normals unless the user explicitly set smooth.
     if cfg.shading == "flat" && !smooth_explicit {
         cfg.smooth = false;
     }

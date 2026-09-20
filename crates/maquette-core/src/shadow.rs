@@ -28,16 +28,16 @@ pub struct BiasParams {
 
 /// Single-frustum depth map + light-view projection.
 pub struct ShadowMap {
-    view: Mat4,          // world → light view space (look_at)
-    ortho: bool,         // true: directional (orthographic); false: perspective
-    half_extent: f64,    // ortho: half-size of the covered square, world units
-    tan_half_fov: f64,   // perspective: tan(fov/2)
+    view: Mat4,
+    ortho: bool,
+    half_extent: f64,
+    tan_half_fov: f64,
     near: f64,
     far: f64,
     res: usize,
-    depth: Vec<f32>,     // res*res, min normalised depth per texel (EMPTY = empty)
-    forward: Vec3,       // unit direction the light travels
-    eye: Vec3,           // light position (positional) or camera behind the ortho box
+    depth: Vec<f32>,
+    forward: Vec3,
+    eye: Vec3,
 }
 
 impl ShadowMap {
@@ -168,7 +168,6 @@ impl ShadowMap {
         let tw = self.texel_world(p).max(1e-9);
         let light_texels = (light_size / tw).clamp(1.0, 24.0);
 
-        // 1) Blocker search: average depth of texels closer than the receiver.
         let search = light_texels.ceil() as i64;
         let sstep = (search / 4).max(1);
         let mut bsum = 0.0f64;
@@ -191,11 +190,9 @@ impl ShadowMap {
         }
         let avg_blocker = bsum / bn as f64;
 
-        // 2) Penumbra ∝ (receiver − blocker) / blocker × light size.
         let penumbra = ((depth - avg_blocker) / avg_blocker).max(0.0);
         let radius = ((penumbra * light_texels * 8.0).max(base_softness as f64)).clamp(1.0, 12.0) as i64;
 
-        // 3) PCF over the penumbra-sized kernel (bounded taps).
         let pstep = (radius / 6).max(1);
         let mut lit = 0u32;
         let mut total = 0u32;
@@ -235,7 +232,7 @@ impl ShadowMap {
         for (i, v) in tri.iter().enumerate() {
             match self.project(*v) {
                 Some(p) => sp[i] = p,
-                None => return, // triangle crosses the light plane; skip (rare)
+                None => return,
             }
         }
         rasterize_depth(&mut self.depth, res, &sp);
@@ -342,8 +339,6 @@ pub fn build_shadow_maps(
 }
 
 fn build_single(light: &PunctualLight, bc: Vec3, br: f64, up: Vec3, res: usize) -> ShadowMap {
-    // Directional light shines along its `direction` (world -Z of its node);
-    // Spot too. Frustum forward is along that direction.
     let forward = light.direction.normalized();
     let up_aux = if forward.cross(up).length() > 1e-3 {
         up
@@ -369,12 +364,9 @@ fn build_single(light: &PunctualLight, bc: Vec3, br: f64, up: Vec3, res: usize) 
             }
         }
         _ => {
-            // Spot or Point-as-single (unused when omnidirectional cube is on).
             let eye = light.position;
             let dist = (bc - eye).length().max(br * 0.1);
             let tan_half_fov: f64 = if light.kind == LightKind::Spot {
-                // Spot outer cone gives the fov. Add a small margin so PCF
-                // taps near the edge stay inside the map.
                 let outer = light.outer_cone_cos.acos();
                 ((outer * 1.05).tan() as f64).max(0.05)
             } else {
