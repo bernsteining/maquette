@@ -12,6 +12,8 @@ docs/*.stl
 docs/*.ply
 docs/*.glb
 docs/*.blg
+docs/js/app.bundle.js
+docs/js/package.json
 idea.md
 notes.md
 

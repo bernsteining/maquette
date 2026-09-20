@@ -142,6 +142,30 @@ jobs:
           sed -i "s/__BUILD_COMMIT__/${GITHUB_SHA::7}/g" docs/index.html
           echo "stamped build ${GITHUB_SHA::7}"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Bundle + minify demo JS
+        shell: bash
+        run: |
+          # Bundle the ES modules (docs/js/*) into one minified file for the
+          # deployed site. Source modules stay in the artifact for debugging;
+          # index.html is pointed at the bundle. esbuild resolves every import,
+          # so a broken module graph fails the build here.
+          npx --yes esbuild@0.24.0 docs/js/main.js \
+            --bundle --minify --format=esm --legal-comments=none \
+            --outfile=docs/js/app.bundle.js
+          # Smoke-test the bundle: evaluate the whole graph + boot() under a
+          # stubbed DOM to catch import/TDZ/reference errors (browser behavior
+          # still needs a manual pass).
+          cp docs/js/app.bundle.js /tmp/app.bundle.mjs
+          node .github/scripts/webdemo-smoke.mjs /tmp/app.bundle.mjs
+          # Point the page at the bundle (cache-busted by the build SHA).
+          sed -i "s|js/main.js?v=[0-9]*|js/app.bundle.js?v=${GITHUB_SHA::7}|" docs/index.html
+          grep -q "js/app.bundle.js" docs/index.html && echo "index.html → bundle ✓"
+          ls -la docs/js/app.bundle.js
+
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
