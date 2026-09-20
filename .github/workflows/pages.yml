@@ -49,7 +49,7 @@ jobs:
       scad: ${{ steps.filter.outputs.scad }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -142,7 +142,7 @@ jobs:
           sed -i "s/__BUILD_COMMIT__/${GITHUB_SHA::7}/g" docs/index.html
           echo "stamped build ${GITHUB_SHA::7}"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "20"
 
