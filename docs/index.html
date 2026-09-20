@@ -8,7 +8,7 @@
 <!-- Start the demo's two heaviest first-load fetches during head parse instead
      of after the deferred module script runs. CI rewrites the modulepreload to
      the bundled JS; the wasm is the boot plugin (maquette), fetched by worker.js. -->
-<link rel="modulepreload" href="js/main.js?v=3">
+<link rel="modulepreload" href="js/main.js?v=4">
 <link rel="preload" as="fetch" type="application/wasm" href="maquette.wasm">
 <style>
   :root {
@@ -263,9 +263,12 @@
     border: 2px dashed var(--accent); border-radius: 14px; color: var(--accent);
     font-size: 15px; font-weight: 500; background: color-mix(in srgb, var(--accent) 8%, transparent); backdrop-filter: blur(1px); }
   #out, #outc { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: var(--shadow); user-select: none; -webkit-user-drag: none; }
+  /* Frame that hugs the visible render, so overlays (the fullscreen icon) pin to
+     the canvas's corners rather than the stage's. */
+  #viewport { position: relative; display: inline-flex; max-width: 100%; max-height: 100%; }
   /* Transparent-background render: drop the frame so the canvas blends into the stage. */
   #out.bare, #outc.bare { box-shadow: none; border-radius: 0; }
-  #tools { position: absolute; top: 3.3rem; right: 0.9rem; display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; }
+  #tools { position: absolute; top: 0.9rem; right: 0.9rem; display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; }
   #tools button, #tools #btn-docs { font: inherit; font-size: 0.8rem; font-weight: 500; border: 1px solid var(--line);
     background: var(--panel); color: var(--ink-soft); padding: 0.28rem 0.7rem; border-radius: 7px; cursor: pointer; box-shadow: var(--shadow); transition: .12s;
     text-align: center; text-decoration: none; }
@@ -300,7 +303,6 @@
     #tools .seg { flex: 0 0 auto; }
     #rtime { bottom: auto; top: 0.6rem; left: 0.6rem; right: auto; }   /* free the top-right for the fullscreen icon */
     #hint { top: 0.6rem; bottom: auto; }
-    #fs-toggle { top: 0.6rem; right: 0.6rem; }
   }
   #err { position: absolute; top: 54px; left: 50%; transform: translateX(-50%);
     color: var(--err); font-size: 12.5px; background: var(--panel);
@@ -335,10 +337,10 @@
      a CSS overlay filling the viewport. Below the help dialog (z 80) so `?` still works. */
   #stage.pseudo-fs { position: fixed; inset: 0; z-index: 70; padding: 1.2rem; background: var(--bg); }
 
-  /* Fullscreen toggle — an icon pinned to the render's top-right corner (the
-     toolbar sits below it). In fullscreen it swaps to the exit glyph and the
-     toolbar + bottom hint are hidden for an unobstructed view. */
-  #fs-toggle { position: absolute; top: 0.9rem; right: 0.9rem; z-index: 6;
+  /* Fullscreen toggle — an icon pinned to the render canvas's top-right corner
+     (via #viewport). In fullscreen it swaps to the exit glyph and the toolbar +
+     bottom hint are hidden for an unobstructed view. */
+  #fs-toggle { position: absolute; top: 0.5rem; right: 0.5rem; z-index: 6;
     display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem;
     padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
     color: var(--ink-soft); cursor: pointer; box-shadow: var(--shadow); transition: .12s; }
@@ -458,12 +460,14 @@
         <a id="btn-docs" target="_blank" rel="noopener" title="Open the plugin's documentation">Documentation</a>
         <a id="get-models" href="#" target="_blank" rel="noopener" title="Browse external asset libraries"></a>
       </div>
-      <button id="fs-toggle" title="Fullscreen (F)" aria-label="Toggle fullscreen">
-        <svg class="fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-        <svg class="fs-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h3a2 2 0 0 0 2-2V3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3"/></svg>
-      </button>
-      <img id="out" alt="render" draggable="false">
-      <canvas id="outc" style="display:none"></canvas>
+      <div id="viewport">
+        <img id="out" alt="render" draggable="false">
+        <canvas id="outc" style="display:none"></canvas>
+        <button id="fs-toggle" title="Fullscreen (F)" aria-label="Toggle fullscreen">
+          <svg class="fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          <svg class="fs-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h3a2 2 0 0 0 2-2V3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3"/></svg>
+        </button>
+      </div>
       <!-- Rendered visible only when `#stage.busy` is set (a render is in
            flight for > 150 ms). Announces itself to screen readers via the
            `aria-busy` toggle on the stage. -->
@@ -493,6 +497,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=3"></script>
+  <script type="module" src="js/main.js?v=4"></script>
 </body>
 </html>

@@ -179,7 +179,7 @@ function ensureSpherical() {
   };
 
   stage.addEventListener("pointerdown", (e) => {
-    if (e.target.closest("#tools")) return;                 // ignore toolbar clicks
+    if (e.target.closest("#tools, #fs-toggle")) return;     // ignore toolbar + fullscreen-icon clicks
     if (e.pointerType === "mouse" && e.button !== 0) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     try { stage.setPointerCapture(e.pointerId); } catch {}
