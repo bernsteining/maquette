@@ -65,6 +65,12 @@
     "end_header",
   )
   let ply = (header + vlines + flines).join("\n") + "\n"
-  let opts = (smooth: true, up: (0, 0, 1), azimuth: 40, elevation: 30, background: none) + args.named()
-  render-ply(bytes(ply), ..opts)
+  // Pass the render config as a POSITIONAL dict so width/height reach the
+  // renderer as pixel resolution (named width/height are display lengths and
+  // get popped by the wrapper). SSAA ×4 + a real resolution kill the jaggies.
+  let cfg = (
+    smooth: true, up: (0, 0, 1), azimuth: 40, elevation: 30, background: none,
+    width: 1000, height: 1000, antialias: 4,
+  ) + args.named()
+  render-ply(bytes(ply), cfg)
 }
