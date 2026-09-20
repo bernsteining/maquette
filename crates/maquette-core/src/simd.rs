@@ -5,7 +5,6 @@
 #![allow(non_camel_case_types)]
 
 use bytemuck::cast;
-use wide::{CmpEq, CmpGe, CmpGt, CmpLe, CmpLt, CmpNe};
 
 #[derive(Clone, Copy)]
 pub struct v128([u8; 16]);
@@ -74,15 +73,15 @@ pub fn f32x4_floor(a: v128) -> v128 { uwf(wf(a).floor()) }
 #[inline]
 pub fn f32x4_nearest(a: v128) -> v128 { uwf(wf(a).round()) }
 #[inline]
-pub fn f32x4_ge(a: v128, b: v128) -> v128 { uwf(wf(a).cmp_ge(wf(b))) }
+pub fn f32x4_ge(a: v128, b: v128) -> v128 { uwf(wf(a).simd_ge(wf(b))) }
 #[inline]
-pub fn f32x4_gt(a: v128, b: v128) -> v128 { uwf(wf(a).cmp_gt(wf(b))) }
+pub fn f32x4_gt(a: v128, b: v128) -> v128 { uwf(wf(a).simd_gt(wf(b))) }
 #[inline]
-pub fn f32x4_le(a: v128, b: v128) -> v128 { uwf(wf(a).cmp_le(wf(b))) }
+pub fn f32x4_le(a: v128, b: v128) -> v128 { uwf(wf(a).simd_le(wf(b))) }
 #[inline]
-pub fn f32x4_lt(a: v128, b: v128) -> v128 { uwf(wf(a).cmp_lt(wf(b))) }
+pub fn f32x4_lt(a: v128, b: v128) -> v128 { uwf(wf(a).simd_lt(wf(b))) }
 #[inline]
-pub fn f32x4_ne(a: v128, b: v128) -> v128 { uwf(wf(a).cmp_ne(wf(b))) }
+pub fn f32x4_ne(a: v128, b: v128) -> v128 { uwf(wf(a).simd_ne(wf(b))) }
 #[inline]
 pub fn f32x4_extract_lane<const N: usize>(a: v128) -> f32 { af32(a)[N] }
 #[inline]
@@ -114,7 +113,7 @@ pub fn i32x4_add(a: v128, b: v128) -> v128 { uwi(wi(a) + wi(b)) }
 #[inline]
 pub fn i32x4_mul(a: v128, b: v128) -> v128 { uwi(wi(a) * wi(b)) }
 #[inline]
-pub fn i32x4_eq(a: v128, b: v128) -> v128 { uwi(wi(a).cmp_eq(wi(b))) }
+pub fn i32x4_eq(a: v128, b: v128) -> v128 { uwi(wi(a).simd_eq(wi(b))) }
 #[inline]
 pub fn i32x4_shl(a: v128, amt: u32) -> v128 {
     let s = amt & 31;
