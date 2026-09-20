@@ -228,6 +228,7 @@ function paintRaster(resp, token) {
     if (out[0] === 0x02) svgBytes = out.subarray(9 + n);
   }
   elOutc.style.display = ""; elOut.style.display = "none";
+  $("stage").classList.add("ready");   // first paint → drop the logo placeholder
   lastRender = { kind: "raw" };
   if (svgBytes && svgBytes.length) {
     // Layer the transparent SVG overlay (labels, grid, annotations) on top.
@@ -302,6 +303,7 @@ async function render() {
       const out = resp.result;
       const url = URL.createObjectURL(new Blob([out], { type: "image/svg+xml" }));
       elOut.src = url; elOut.style.display = ""; elOutc.style.display = "none";
+      $("stage").classList.add("ready");
       if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = url;
       lastRender = { kind: "svg", bytes: out };
     }

@@ -8,7 +8,7 @@
 <!-- Start the demo's two heaviest first-load fetches during head parse instead
      of after the deferred module script runs. CI rewrites the modulepreload to
      the bundled JS; the wasm is the boot plugin (maquette), fetched by worker.js. -->
-<link rel="modulepreload" href="js/main.js?v=7">
+<link rel="modulepreload" href="js/main.js?v=8">
 <link rel="preload" as="fetch" type="application/wasm" href="maquette.wasm">
 <style>
   :root {
@@ -266,6 +266,12 @@
   /* Frame that hugs the visible render, so overlays (the fullscreen icon) pin to
      the canvas's corners rather than the stage's. */
   #viewport { position: relative; display: inline-flex; max-width: 100%; max-height: 100%; }
+  /* First-load placeholder: the maquette logo, until the first render paints.
+     Before that, hide the (empty, src-less) render frame so no broken-image box shows. */
+  #placeholder { position: absolute; top: 44%; left: 50%; transform: translate(-50%, -50%);
+    width: clamp(88px, 20%, 140px); height: auto; opacity: 0.5; pointer-events: none; user-select: none; }
+  #stage.ready #placeholder { display: none; }
+  #stage:not(.ready) #viewport { display: none; }
   /* Transparent-background render: drop the frame so the canvas blends into the stage. */
   #out.bare, #outc.bare { box-shadow: none; border-radius: 0; }
   #tools { position: absolute; top: 0.9rem; right: 0.9rem; display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; }
@@ -481,6 +487,7 @@
         <a id="btn-docs" target="_blank" rel="noopener" title="Open the plugin's documentation">Documentation</a>
         <a id="get-models" href="#" target="_blank" rel="noopener" title="Browse external asset libraries"></a>
       </div>
+      <img id="placeholder" src="logo.svg" alt="" aria-hidden="true">
       <div id="viewport">
         <img id="out" alt="3D render" draggable="false">
         <canvas id="outc" style="display:none" role="img" aria-label="3D render"></canvas>
@@ -532,6 +539,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=7"></script>
+  <script type="module" src="js/main.js?v=8"></script>
 </body>
 </html>
