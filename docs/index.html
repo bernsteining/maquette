@@ -238,6 +238,8 @@
     border: 2px dashed var(--accent); border-radius: 14px; color: var(--accent);
     font-size: 15px; font-weight: 500; background: color-mix(in srgb, var(--accent) 8%, transparent); backdrop-filter: blur(1px); }
   #out, #outc { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: var(--shadow); user-select: none; -webkit-user-drag: none; }
+  /* Transparent-background render: drop the frame so the canvas blends into the stage. */
+  #out.bare, #outc.bare { box-shadow: none; border-radius: 0; }
   #tools { position: absolute; top: 0.9rem; right: 0.9rem; display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; }
   #tools button, #tools #btn-docs { font: inherit; font-size: 0.8rem; font-weight: 500; border: 1px solid var(--line);
     background: var(--panel); color: var(--ink-soft); padding: 0.28rem 0.7rem; border-radius: 7px; cursor: pointer; box-shadow: var(--shadow); transition: .12s;

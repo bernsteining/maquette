@@ -24,6 +24,9 @@ function renderConfig() {
   // The paint step pins the canvas to this, so a reduced-resolution interactive
   // frame upscales to fill the stage (rather than shrinking).
   displayDims = fitBox(rw, rh);
+  const bare = !!state._bgNone;   // transparent render → drop the canvas frame so it blends
+  elOutc.classList.toggle("bare", bare);
+  elOut.classList.toggle("bare", bare);
   const div = (interacting && outputFormat !== "svg") ? dragDiv : 1;
   lastRenderReduced = div > 1;
   if (lastRenderReduced) {
