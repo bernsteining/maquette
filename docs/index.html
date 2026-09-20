@@ -114,20 +114,18 @@
     white-space: nowrap; flex: none;
   }
   .file-row select { min-width: 0; flex: 1 1 8rem; }
-  .plugin-row #plugin {
-    flex: 1; display: flex; overflow: hidden;
-    border: 1px solid var(--line); border-radius: 7px; background: var(--bg);
-  }
+  /* Same segmented-control look as the PNG/SVG toggle (#tools .seg). */
+  .plugin-row #plugin { flex: 1; display: flex; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 7px; box-shadow: var(--shadow); }
   .plugin-row #plugin button {
-    flex: 1; font: inherit; font-size: 0.8rem; font-weight: 500;
-    border: 0; border-left: 1px solid var(--line);
-    background: transparent; color: var(--ink-soft);
-    padding: 0.28rem 0.4rem; cursor: pointer; transition: .12s;
+    flex: 1; font: inherit; font-size: 0.8rem; font-weight: 500; border: none;
+    background: var(--panel); color: var(--ink-soft); text-align: center; white-space: nowrap;
+    padding: 0.28rem 0.5rem; cursor: pointer; transition: .12s;
   }
-  .plugin-row #plugin button:first-child { border-left: 0; }
-  .plugin-row #plugin button:hover { color: var(--accent); background: var(--accent-soft); }
+  .plugin-row #plugin button + button { border-left: 1px solid var(--line); }
+  .plugin-row #plugin button:hover { color: var(--accent); }
   .plugin-row #plugin button.on { background: var(--accent); color: #fff; }
-  .plugin-row #plugin button.on:hover { background: var(--accent); color: #fff; }
+  .plugin-row #plugin button.on:hover { color: #fff; }
   .plugin-row #plugin button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
   .file-row button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
   /* "get more models" link — sits inside #tools, stacked under Download so it
