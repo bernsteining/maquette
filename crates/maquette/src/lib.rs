@@ -151,15 +151,13 @@ fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<Vec<parser::Triangle
     if !want.is_empty() {
         return match ply_parser::parse_ply_with(data, Some(want))? {
             ply_parser::PlyData::Mesh(t) => Ok(t),
-            ply_parser::PlyData::Points(cloud) => Ok(render::pointcloud_to_triangles(&cloud, config)),
+            ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(&cloud, config)),
         };
     }
     if let Some(ply) = cache::get_ply(data) {
         return match ply {
             ply_parser::PlyData::Mesh(t) => Ok(t.clone()),
-            ply_parser::PlyData::Points(cloud) => {
-                Ok(render::pointcloud_to_triangles(cloud, config))
-            }
+            ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(cloud, config)),
         };
     }
     let ply = ply_parser::parse_ply(data)?;
@@ -167,9 +165,15 @@ fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<Vec<parser::Triangle
     let cached = cache::get_ply(data).unwrap();
     match cached {
         ply_parser::PlyData::Mesh(t) => Ok(t.clone()),
-        ply_parser::PlyData::Points(cloud) => {
-            Ok(render::pointcloud_to_triangles(cloud, config))
-        }
+        ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(cloud, config)),
+    }
+}
+
+fn cloud_to_triangles(cloud: &ply_parser::PointCloud, config: &RenderConfig) -> Vec<parser::Triangle> {
+    if config.point_splat {
+        render::pointcloud_to_splats(cloud, config)
+    } else {
+        render::pointcloud_to_triangles(cloud, config)
     }
 }
 

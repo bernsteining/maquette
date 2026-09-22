@@ -350,6 +350,207 @@ pub(crate) fn pointcloud_to_triangles(
     triangles
 }
 
+/// Render a point cloud *as points*: each point becomes a small camera-facing
+/// disc (a triangle fan). Unlike `pointcloud_to_triangles`, nothing is stitched —
+/// gaps stay gaps — so volumetric clouds (a fractal, a scatter plot) read as
+/// clouds instead of being smoothed into a surface. Discs (not quads) give the
+/// round dots every point-cloud viewer draws; the antialiasing pass smooths
+/// their rims. The disc's face normal faces the camera so no splat is ever
+/// back-face culled, but when the cloud carries per-point normals those are
+/// used as the disc's vertex normals, so `smooth: true` lights the splats by
+/// the surface they sample (revealing 3D form) while they still never cull.
+const SPLAT_SIDES: usize = 8;
+const SPLAT_RINGS: &[(f64, f64, Option<f32>)] = &[
+    (0.0, 0.86, None),
+    (0.86, 1.0, Some(0.4)),
+];
+const SPLAT_MIN_FACE: f64 = 0.34;
+
+fn smallest_eigvec_sym3(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> Vec3 {
+    let p1 = d * d + e * e + f * f;
+    if p1 <= 1e-20 {
+        return if a <= b && a <= c {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else if b <= c {
+            Vec3::new(0.0, 1.0, 0.0)
+        } else {
+            Vec3::new(0.0, 0.0, 1.0)
+        };
+    }
+    let q = (a + b + c) / 3.0;
+    let p2 = (a - q).powi(2) + (b - q).powi(2) + (c - q).powi(2) + 2.0 * p1;
+    let pp = (p2 / 6.0).sqrt();
+    let (ba, bb, bc) = ((a - q) / pp, (b - q) / pp, (c - q) / pp);
+    let (bd, be, bf) = (d / pp, e / pp, f / pp);
+    let detb = ba * (bb * bc - bf * bf) - bd * (bd * bc - bf * be) + be * (bd * bf - bb * be);
+    let r = (detb / 2.0).clamp(-1.0, 1.0);
+    let phi = r.acos() / 3.0;
+    let two_pp = 2.0 * pp;
+    let e1 = q + two_pp * phi.cos();
+    let e2 = q + two_pp * (phi + 2.0 * std::f64::consts::FRAC_PI_3).cos();
+    let e3 = 3.0 * q - e1 - e2;
+    let lambda = e1.min(e2).min(e3);
+    let r0 = Vec3::new(a - lambda, d, e);
+    let r1 = Vec3::new(d, b - lambda, f);
+    let r2 = Vec3::new(e, f, c - lambda);
+    let cands = [r0.cross(r1), r1.cross(r2), r2.cross(r0)];
+    let best = cands
+        .into_iter()
+        .max_by(|x, y| x.length().partial_cmp(&y.length()).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap();
+    if best.length() < 1e-12 { Vec3::new(0.0, 0.0, 1.0) } else { best.normalized() }
+}
+
+fn splat_estimate_normal(p: Vec3, nbr: &[u32], positions: &[Vec3], cam_dir: Vec3) -> Vec3 {
+    let m = nbr.len();
+    if m < 2 { return cam_dir; }
+    let mut c = p;
+    for &j in nbr { c = c.add(positions[j as usize]); }
+    let c = c.scale(1.0 / (m as f64 + 1.0));
+    let (mut a, mut b, mut cc, mut d, mut e, mut f) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+    for q in std::iter::once(p).chain(nbr.iter().map(|&j| positions[j as usize])) {
+        let (x, y, z) = (q.x - c.x, q.y - c.y, q.z - c.z);
+        a += x * x;
+        b += y * y;
+        cc += z * z;
+        d += x * y;
+        e += x * z;
+        f += y * z;
+    }
+    let nrm = smallest_eigvec_sym3(a, b, cc, d, e, f);
+    if nrm.dot(cam_dir) < 0.0 { nrm.scale(-1.0) } else { nrm }
+}
+
+pub(crate) fn pointcloud_to_splats(
+    cloud: &crate::ply_parser::PointCloud,
+    config: &RenderConfig,
+) -> Vec<Triangle> {
+    let n = cloud.positions.len();
+    if n == 0 { return Vec::new(); }
+    let positions = &cloud.positions;
+    let (bmin, bmax) = bbox_of(positions.iter().copied());
+    let diag = bmax.sub(bmin).length();
+    if diag < 1e-12 { return Vec::new(); }
+
+    let view = resolve_config_view(config, bbox_center(bmin, bmax), bbox_radius(bmin, bmax));
+    let cam_dir = view.camera.sub(view.center).normalized();
+    let (cam_right, cam_up) = cam_dir.tangent_basis();
+
+    let has_normals = cloud.normals.len() == n;
+    let need_grid = config.point_size <= 0.0 || !has_normals;
+    let (radii, est_normals): (Vec<f64>, Option<Vec<Vec3>>) = if !need_grid {
+        (vec![config.point_size; n], None)
+    } else {
+        let base = (diag / (n as f64).sqrt() * 0.5).max(diag * 1e-3);
+        let inv = 1.0 / base;
+        let key = |p: Vec3| ((p.x * inv).floor() as i32, (p.y * inv).floor() as i32, (p.z * inv).floor() as i32);
+        let mut grid: HashMap<(i32, i32, i32), Vec<u32>, FxBuildHasher> =
+            HashMap::with_hasher(FxBuildHasher::default());
+        for i in 0..n { grid.entry(key(positions[i])).or_default().push(i as u32); }
+        let adaptive = config.point_size <= 0.0;
+        let mut radii = Vec::with_capacity(n);
+        let mut normals = if has_normals { None } else { Some(Vec::with_capacity(n)) };
+        let mut nbr: Vec<u32> = Vec::with_capacity(32);
+        for i in 0..n {
+            let p = positions[i];
+            let (cx, cy, cz) = key(p);
+            nbr.clear();
+            for dz in -1i32..=1 { for dy in -1i32..=1 { for dx in -1i32..=1 {
+                if let Some(bucket) = grid.get(&(cx + dx, cy + dy, cz + dz)) {
+                    for &j in bucket { if j as usize != i { nbr.push(j); } }
+                }
+            }}}
+            let r = if !adaptive {
+                config.point_size
+            } else if nbr.is_empty() {
+                base
+            } else {
+                let mut ds: Vec<f64> = nbr.iter().map(|&j| positions[j as usize].sub(p).length()).collect();
+                ds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                (ds[3.min(ds.len() - 1)] * 0.75).max(diag * 1e-4)
+            };
+            radii.push(r);
+            if let Some(nv) = normals.as_mut() {
+                nv.push(splat_estimate_normal(p, &nbr, positions, cam_dir));
+            }
+        }
+        (radii, normals)
+    };
+
+    let rim_dir: Vec<(f64, f64)> = (0..SPLAT_SIDES)
+        .map(|k| {
+            let a = std::f64::consts::TAU * (k as f64) / (SPLAT_SIDES as f64);
+            (a.cos(), a.sin())
+        })
+        .collect();
+
+    let has_colors = cloud.colors.len() == n;
+    let mut triangles = Vec::with_capacity(n * SPLAT_SIDES * 3);
+    for i in 0..n {
+        let p = positions[i];
+        let r = radii[i];
+        let color = if has_colors { Some(cloud.colors[i]) } else { None };
+        let vertex_colors = color.map(|c| [c, c, c]);
+        let nrm = if has_normals {
+            Some(cloud.normals[i])
+        } else {
+            est_normals.as_ref().map(|en| en[i])
+        };
+        let shade_n = nrm.map(|v| v.normalized()).unwrap_or(cam_dir);
+        let (right, up) = match nrm {
+            Some(dn) => {
+                let dn = dn.normalized();
+                let f = dn.dot(cam_dir);
+                let disc_n = if f.abs() >= SPLAT_MIN_FACE {
+                    dn
+                } else {
+                    let s = if f < 0.0 { -1.0 } else { 1.0 };
+                    let tang = dn.sub(cam_dir.scale(f)).normalized();
+                    cam_dir
+                        .scale(s * SPLAT_MIN_FACE)
+                        .add(tang.scale((1.0 - SPLAT_MIN_FACE * SPLAT_MIN_FACE).sqrt()))
+                        .normalized()
+                };
+                disc_n.tangent_basis()
+            }
+            None => (cam_right, cam_up),
+        };
+        let mut push_tri = |v: [Vec3; 3], alpha: Option<f32>| {
+            triangles.push(Triangle {
+                vertices: v,
+                normal: cam_dir,
+                color,
+                vertex_colors,
+                group_id: None,
+                alpha,
+                vertex_normals: Some([shade_n; 3]),
+                smoothing_group: None,
+                vertex_scalars: None,
+                uvs: None,
+                tex: None,
+            });
+        };
+        let at = |c: f64, s: f64, rr: f64| p.add(right.scale(r * rr * c)).add(up.scale(r * rr * s));
+        for &(r0, r1, alpha) in SPLAT_RINGS {
+            for k in 0..SPLAT_SIDES {
+                let (c0, s0) = rim_dir[k];
+                let (c1, s1) = rim_dir[(k + 1) % SPLAT_SIDES];
+                let o0 = at(c0, s0, r1);
+                let o1 = at(c1, s1, r1);
+                if r0 <= 0.0 {
+                    push_tri([p, o0, o1], alpha);
+                } else {
+                    let i0 = at(c0, s0, r0);
+                    let i1 = at(c1, s1, r0);
+                    push_tri([i0, o0, o1], alpha);
+                    push_tri([i0, o1, i1], alpha);
+                }
+            }
+        }
+    }
+    triangles
+}
+
 
 /// Everything the shade paths need to apply cast shadows. `maps` has one entry
 /// per light (None = non-caster); `factors` is the per-unique-vertex×light
