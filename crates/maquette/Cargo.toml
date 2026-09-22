@@ -1,6 +1,6 @@
 [package]
 name = "maquette"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2021"
 description = "Typst plugin that rasterizes STL / OBJ / PLY models into raster or SVG images at document build time. Root of the maquette family (maquette-gltf, maquette-scad live alongside)."
 license = "MIT"

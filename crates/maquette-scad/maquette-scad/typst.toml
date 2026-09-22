@@ -4,8 +4,8 @@ version = "0.1.0"
 entrypoint = "maquette-scad.typ"
 authors = ["bernsteining"]
 repository = "https://github.com/bernsteining/maquette"
-license = "MIT"
-description = "Render openscad files."
+license = "GPL-3.0-or-later"
+description = "Render OpenSCAD (.scad) models as raster or SVG images in Typst."
 keywords = [
   "3D",
   "OpenSCAD",

@@ -2,7 +2,7 @@
 name = "maquette-c"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "C ABI for maquette — a headless CPU 3D renderer (STL/OBJ/PLY, glTF PBR, OpenSCAD). Bind it from any FFI-capable language."
 repository = "https://github.com/bernsteining/maquette"
 

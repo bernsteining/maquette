@@ -105,7 +105,7 @@ function buildTypst() {
       + `#let data = read("${model._molSrcPath}", encoding: none)\n\n`
       + `#molfig.render(\n  data,\n${allArgs.join(",\n")},\n)`;
   }
-  return `#import "@preview/maquette:0.1.3": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
+  return `#import "@preview/maquette:0.2.0": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
 }
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

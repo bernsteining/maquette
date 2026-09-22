@@ -19,17 +19,6 @@
 | **[maquette-gltf](crates/maquette-gltf/README.md)** | [glTF](https://www.khronos.org/gltf/) 2.0 (`.glb` / `.gltf`) |
 | **[maquette-scad](crates/maquette-scad/README.md)** | [.scad](https://openscad.org/) |
 
-## Beyond Typst
-
-The same renderer also ships as a native binary and as language bindings — headless, deterministic, no GL/GPU. See each README:
-
-| Target | What | Get it |
-|---|---|---|
-| **[CLI](crates/maquette-cli/README.md)** | native `maquette` binary → PNG/SVG | `cargo install --path crates/maquette-cli` |
-| **[Python](crates/maquette-py/README.md)** | pyo3 module (dict config → PNG/SVG bytes) | `pip install maquette` |
-| **[JavaScript](packages/maquette-js/README.md)** | the wasm, in Node + the browser | `npm install maquette-render` |
-| **[C ABI](crates/maquette-c/README.md)** | `libmaquette` + header — bind from C/C++/Ruby/Julia/Go/… | build from source |
-
 # Usage
 
 <table>
@@ -38,7 +27,7 @@ The same renderer also ships as a native binary and as language bindings — hea
 <td>
 
 ```typst
-#import "@preview/maquette:0.1.3": render-obj
+#import "@preview/maquette:0.2.0": render-obj
 
 #render-obj(
   read("bunny.obj"),
@@ -139,21 +128,16 @@ Documentation contains many examples showcasing all the features, with each exam
 
 * [molfig](https://github.com/rice8y/molfig): Render molecular data (PDB, mmCIF, BinaryCIF, XYZ) in Typst. [Try it Live](https://bernsteining.github.io/maquette/?a=lsd)
 
-## Command line (native)
+## Beyond Typst
 
-The same renderer also ships as a native `maquette` binary — no Typst, no wasm runtime, just an ELF/PE/Mach-O executable that reads a model and writes a PNG or SVG. The wasm plugins are untouched: the renderer's wasm SIMD is swapped, per architecture, for a [`wide`](https://crates.io/crates/wide)-backed native SIMD path via conditional compilation (so the shipped wasm stays byte-identical).
+The same renderer also ships as a native binary and as language bindings — headless, deterministic, no GL/GPU. See each README:
 
-```sh
-make cli                      # builds target/release/maquette
-# or: cargo install --path crates/maquette-cli
-
-maquette bunny.obj  -o bunny.png  --set width=800 --set height=600
-maquette model.stl  -o model.svg
-maquette part.scad  -o part.png   --fn 64
-maquette scene.glb  -o scene.png  --plugin gltf --config camera.json
-```
-
-`--config file.json` supplies the same render-config dict the plugins accept; `--set key=value` overrides individual keys (value parsed as JSON). The output format follows the `-o` extension (`.png` / `.svg`). Note: native and wasm renders are visually equivalent but not bit-identical (floating-point evaluation differs).
+| Target | What | Get it |
+|---|---|---|
+| **[CLI](crates/maquette-cli/README.md)** | native `maquette` binary → PNG/SVG | `cargo install --path crates/maquette-cli` |
+| **[Python](crates/maquette-py/README.md)** | pyo3 module (dict config → PNG/SVG bytes) | `pip install maquette` |
+| **[JavaScript](packages/maquette-js/README.md)** | the wasm, in Node + the browser | `npm install maquette-render` |
+| **[C ABI](crates/maquette-c/README.md)** | `libmaquette` + header — bind from C/C++/Ruby/Julia/Go/… | build from source |
 
 ## Building
 

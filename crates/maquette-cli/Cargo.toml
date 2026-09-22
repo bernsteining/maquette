@@ -2,7 +2,7 @@
 name = "maquette-cli"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Native command-line renderer for the maquette family (STL/OBJ/PLY, glTF, OpenSCAD) to PNG/SVG."
 repository = "https://github.com/bernsteining/maquette"
 

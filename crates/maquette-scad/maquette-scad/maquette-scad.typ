@@ -345,7 +345,7 @@
 /// - ..args (arguments): forwarded to maquette's `render-ply` (camera, shading, background, …).
 /// -> content
 #let render-scad(model, files: (:), bin: (:), font: none, fn: 32, smooth-normals: 30, ..args) = {
-  import "@preview/maquette:0.1.3": render-ply
+  import "@preview/maquette:0.2.0": render-ply
   // `model` is a DSL node (dict) or `.scad` source text. No `color:` default:
   // the mesh carries its own per-face colours.
   let ply = if type(model) == dictionary {
@@ -368,7 +368,7 @@
 /// - ..args (arguments): forwarded to maquette's `render-ply`.
 /// -> content
 #let render-scad-tree(entry, root: "", read: none, bin: (:), font: none, fn: 32, trace: none, smooth-normals: 30, ..args) = {
-  import "@preview/maquette:0.1.3": render-ply
+  import "@preview/maquette:0.2.0": render-ply
   render-ply(
     compile-scad-tree(entry, root: root, read: read, bin: bin, font: font, fn: fn, trace: trace, smooth-normals: smooth-normals),
     specular: 0,

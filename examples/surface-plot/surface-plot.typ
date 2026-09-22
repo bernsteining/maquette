@@ -2,7 +2,7 @@
 // Sample z = f(x, y) on a grid, mesh it, colour it by height, and hand the
 // mesh to maquette's render-ply as an in-memory PLY. A worked example of the
 // "generate a mesh string → render-*" path any Typst package can use.
-#import "@local/maquette:0.1.3": render-ply
+#import "@local/maquette:0.2.0": render-ply
 
 // viridis-ish 5-stop colormap: t in [0,1] -> (r, g, b) bytes.
 #let _cols = ((68, 1, 84), (59, 82, 139), (33, 145, 140), (94, 201, 98), (253, 231, 37))
@@ -71,6 +71,38 @@
   let cfg = (
     smooth: true, up: (0, 0, 1), azimuth: 40, elevation: 30, background: none,
     width: 1000, height: 1000, antialias: 4,
+  ) + args.named()
+  render-ply(bytes(ply), cfg)
+}
+
+// Render a point cloud as a PLY with vertices only (no faces). By default
+// maquette draws each point as a camera-facing splat (`point_splat: true`),
+// so a volumetric cloud stays a cloud. Pass `point_splat: false` to instead
+// reconstruct a surface — maquette fans each point to its neighbours within
+// `point_size` (a *connection radius* there), and you then want `normals` (an
+// array parallel to `points`) to orient those fans. `points` is an array of
+// (x, y, z) or (x, y, z, (r, g, b)).
+#let point-cloud(points, normals: none, ..args) = {
+  let has-n = normals != none
+  let vlines = range(points.len()).map(idx => {
+    let p = points.at(idx)
+    let c = if p.len() >= 4 { p.at(3) } else { (210, 210, 220) }
+    let nrm = if has-n { let m = normals.at(idx); " " + str(m.at(0)) + " " + str(m.at(1)) + " " + str(m.at(2)) } else { "" }
+    str(p.at(0)) + " " + str(p.at(1)) + " " + str(p.at(2)) + nrm + " " + str(c.at(0)) + " " + str(c.at(1)) + " " + str(c.at(2))
+  })
+  let nprops = if has-n { ("property float nx", "property float ny", "property float nz") } else { () }
+  let header = (
+    "ply", "format ascii 1.0",
+    "element vertex " + str(points.len()),
+    "property float x", "property float y", "property float z",
+  ) + nprops + (
+    "property uchar red", "property uchar green", "property uchar blue",
+    "end_header",
+  )
+  let ply = (header + vlines).join("\n") + "\n"
+  let cfg = (
+    up: (0, 0, 1), azimuth: 40, elevation: 22, background: none,
+    width: 1000, height: 1000, antialias: 2, point_splat: true,
   ) + args.named()
   render-ply(bytes(ply), cfg)
 }

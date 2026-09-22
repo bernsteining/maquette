@@ -1,6 +1,6 @@
 WASM_TARGET = target/wasm32-unknown-unknown/release/maquette.wasm
 WASM_OUT = crates/maquette/maquette.wasm
-WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette/0.1.3/maquette.wasm
+WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette/0.2.0/maquette.wasm
 
 # Path remaps so no build-machine paths (home, cargo registry, rustup toolchain)
 # leak into the wasm. Overridable — CI passes its container-specific prefixes.
@@ -19,7 +19,7 @@ wasm:
 	@ls -lh $(WASM_OUT)
 
 # Local: build + install into the typst local package dir. Copies the
-# whole package (wasm + typst.toml + .typ) so `@local/maquette:0.1.0`
+# whole package (wasm + typst.toml + .typ) so `@local/maquette:0.2.0`
 # resolves — otherwise a bare wasm sits there without the manifest and
 # typst can't find the entry .typ.
 build: wasm
@@ -162,7 +162,26 @@ SCAD_WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette-scad/0.1.0/ma
 scad-build: scad-wasm
 	mkdir -p $(dir $(SCAD_WASM_PKG))
 	cp $(SCAD_WASM_OUT) $(SCAD_WASM_PKG)
-	cp crates/maquette-scad/maquette-scad.typ crates/maquette-scad/typst.toml $(dir $(SCAD_WASM_PKG))
+	cp crates/maquette-scad/maquette-scad/maquette-scad.typ crates/maquette-scad/maquette-scad/typst.toml $(dir $(SCAD_WASM_PKG))
+
+# --- publish: refresh the three Typst package dirs so they can't drift ---
+# Each package dir (crates/<crate>/<name>/) holds the committed typst.toml +
+# entrypoint + README (+ scad's syntax file); `package` drops in the freshly
+# built wasm and the matching LICENSE. Then copy the dir into typst/packages
+# (packages/preview/<name>/<version>/) and open the PR. scad-wasm is NOT rebuilt
+# here (it needs the emsdk toolchain); run `make scad-wasm` first if scad changed.
+MAQ_PKG_DIR  = crates/maquette/maquette
+GLTF_PKG_DIR = crates/maquette-gltf/maquette-gltf
+SCAD_PKG_DIR = crates/maquette-scad/maquette-scad
+package: wasm gltf-wasm
+	cp $(WASM_OUT)      $(MAQ_PKG_DIR)/maquette.wasm
+	cp $(GLTF_WASM_OUT) $(GLTF_PKG_DIR)/maquette-gltf.wasm
+	cp $(SCAD_WASM_OUT) $(SCAD_PKG_DIR)/maquette-scad.wasm
+	cp LICENSE $(MAQ_PKG_DIR)/LICENSE
+	cp LICENSE $(GLTF_PKG_DIR)/LICENSE
+	cp COPYING $(SCAD_PKG_DIR)/LICENSE
+	@echo "== refreshed publish dirs =="
+	@for d in $(MAQ_PKG_DIR) $(GLTF_PKG_DIR) $(SCAD_PKG_DIR); do echo "$$d:"; ls $$d | sed 's/^/  /'; done
 
 # --- local quality gates (mirrored by the pre-commit hook and CI) ---
 # The wasm-only crates are linted for the wasm target (their SIMD code only

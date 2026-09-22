@@ -3,7 +3,7 @@ name = "maquette-scad"
 version = "0.1.0"
 edition = "2021"
 description = "OpenSCAD-flavored procedural geometry -> PLY, as a Typst wasm plugin, for maquette."
-license = "MIT"
+license = "GPL-3.0-or-later"
 
 [lib]
 crate-type = ["cdylib", "rlib"]  # rlib so a native repro harness can link it

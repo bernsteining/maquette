@@ -2,7 +2,7 @@
 name = "maquette-py"
 version = "0.1.0"
 edition = "2021"
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Python bindings for maquette — deterministic, headless, CPU 3D rendering (STL/OBJ/PLY, glTF PBR, OpenSCAD) to PNG/SVG. No GL/GPU."
 repository = "https://github.com/bernsteining/maquette"
 

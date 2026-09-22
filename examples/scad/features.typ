@@ -53,14 +53,14 @@ front-end: `compile-scad` for real `.scad` source, or the DSL helpers + `scadyps
 
 #zebraw(lang: [Typst], numbering: false, raw(
 "// A) run real OpenSCAD source
-#import \"@preview/maquette:0.1.3\": render-ply
+#import \"@preview/maquette:0.2.0\": render-ply
 #import \"@preview/maquette-scad:0.1.0\": compile-scad
 
 #render-ply(compile-scad(read(\"part.scad\")))", lang: "typ", block: true))
 
 #zebraw(lang: [Typst], numbering: false, raw(
 "// B) compose with the Typst DSL
-#import \"@preview/maquette:0.1.3\": render-ply
+#import \"@preview/maquette:0.2.0\": render-ply
 #import \"@preview/maquette-scad:0.1.0\": *
 
 #render-ply(scadypst(difference(

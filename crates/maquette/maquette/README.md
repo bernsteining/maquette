@@ -26,7 +26,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 <td>
 
 ```typst
-#import "@preview/maquette:0.1.3": render-obj
+#import "@preview/maquette:0.2.0": render-obj
 #let bunny = read("examples/data/bunny.obj", encoding: none)
 
 #render-obj(bunny,
