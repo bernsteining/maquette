@@ -33,7 +33,7 @@ const FIELD_CODES = ["model", "camera", "azimuth", "elevation", "distance", "cen
   "vertex_smoothing", "color_map_palette", "outline", "ground_shadow", "shadows", "antialias", "ssao",
   "bloom", "glow", "sharpen", "clip", "explode", "decimate", "views", "grid_labels", "turntable",
   "materials", "highlight", "annotations", "debug", "debug_color", "point_size", "point_neighbors",
-  "point_boundary", "_cam", "_hemi", "_bgNone", "scad_smooth_normals"];
+  "point_boundary", "point_splat", "_cam", "_hemi", "_bgNone", "scad_smooth_normals"];
 const CODE_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const codeFor = (i) => i < 52 ? CODE_ALPHABET[i] : CODE_ALPHABET[((i - 52) / 52) | 0] + CODE_ALPHABET[(i - 52) % 52];
 const KEY_ALIAS = {}, KEY_UNALIAS = {};

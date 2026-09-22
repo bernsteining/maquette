@@ -191,6 +191,19 @@
   input[type=color]::-webkit-color-swatch { border: none; border-radius: 6px; }
   input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
   input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
+  .num-wrap { position: relative; display: flex; align-items: stretch; }
+  .num-wrap input[type=number] { width: 100%; padding-right: 20px; }
+  .num-wrap input[type=number]::-webkit-outer-spin-button,
+  .num-wrap input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .num-wrap input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+  .num-wrap .spin { position: absolute; top: 1px; right: 1px; bottom: 1px; width: 17px;
+    display: flex; flex-direction: column; overflow: hidden; border-radius: 0 6px 6px 0; }
+  .num-wrap .spin button { flex: 1; display: flex; align-items: center; justify-content: center;
+    border: none; border-left: 1px solid var(--line); background: var(--bg); color: var(--muted);
+    font-size: 7px; line-height: 1; cursor: pointer; padding: 0; transition: .12s; }
+  .num-wrap .spin button:first-child { border-bottom: 1px solid var(--line); }
+  .num-wrap .spin button:hover { color: var(--accent); background: var(--accent-soft); }
+  .num-wrap .spin button:active { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
   .row { display: flex; gap: 6px; }
   .row > * { flex: 1; min-width: 0; }
   .chk { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink); cursor: pointer; }

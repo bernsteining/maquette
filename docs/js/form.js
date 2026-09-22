@@ -12,6 +12,15 @@ const conds = [];
 
 const VEC_AXES = ["X", "Y", "Z", "W"];
 
+function numStep(f, v) {
+  const s = String(v);
+  const dot = s.indexOf(".");
+  const dec = dot < 0 ? 0 : s.length - dot - 1;
+  let step = 10 ** -dec;
+  if (f.step != null) step = Math.min(step, f.step);
+  return step;
+}
+
 function ctl(f, slot, local) {
   const wrap = document.createElement("div");
   wrap.className = "ctl";
@@ -54,10 +63,26 @@ function ctl(f, slot, local) {
         input.setAttribute("aria-valuetext", t);
       };
     } else if (f.t === "num") {
-      input = document.createElement("input"); input.type = "number"; input.value = cur; input.step = "any";
-      input.setAttribute("aria-label", f.label);
-      input.oninput = () => set(input.value === "" ? f.def : +input.value);
-      sync = (v) => { input.value = v; };
+      const ni = document.createElement("input"); ni.type = "number"; ni.value = cur;
+      ni.setAttribute("aria-label", f.label);
+      if (f.min != null) ni.min = f.min;
+      if (f.max != null) ni.max = f.max;
+      const applyStep = () => { ni.step = String(numStep(f, ni.value === "" ? (f.def || 0) : +ni.value)); };
+      applyStep();
+      ni.oninput = () => { applyStep(); set(ni.value === "" ? f.def : +ni.value); };
+      const stepBy = (dir) => {
+        const base = ni.value === "" ? (f.def || 0) : +ni.value;
+        let nv = +(base + dir * numStep(f, base)).toFixed(12);
+        if (f.min != null) nv = Math.max(f.min, nv);
+        if (f.max != null) nv = Math.min(f.max, nv);
+        ni.value = nv; applyStep(); set(nv);
+      };
+      const spin = document.createElement("div"); spin.className = "spin";
+      const up = document.createElement("button"); up.type = "button"; up.tabIndex = -1; up.setAttribute("aria-hidden", "true"); up.textContent = "▲"; up.onclick = () => stepBy(1);
+      const dn = document.createElement("button"); dn.type = "button"; dn.tabIndex = -1; dn.setAttribute("aria-hidden", "true"); dn.textContent = "▼"; dn.onclick = () => stepBy(-1);
+      spin.append(up, dn);
+      input = document.createElement("div"); input.className = "num-wrap"; input.append(ni, spin);
+      sync = (v) => { ni.value = v; applyStep(); };
     } else if (f.t === "col") {
       input = document.createElement("input"); input.type = "color"; input.value = cur || "#000000";
       input.setAttribute("aria-label", f.label);
