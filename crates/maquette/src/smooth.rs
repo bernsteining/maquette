@@ -43,68 +43,61 @@ fn quantize_normal(n: Vec3) -> (i32, i32, i32) {
     ((n.x * s).round() as i32, (n.y * s).round() as i32, (n.z * s).round() as i32)
 }
 
-/// Compute per-vertex normals for smooth shading.
+/// Compute per-vertex normals for smooth shading, deciding per face.
 ///
-/// If every input triangle carries `vertex_normals` (e.g. from a PLY with
-/// `nx/ny/nz` or from Manifold's `calculate_normals`), the authored per-corner
-/// normals are used directly — quantized by `(position, normal)` so
-/// crease-split vertices from creased authoring don't get re-merged. Otherwise
-/// the classic fallback runs: face normals averaged at each shared position.
+/// A face keeps its authored `vertex_normals` (e.g. from a PLY's `nx/ny/nz` or
+/// Manifold's `calculate_normals`) — quantized by `(position, normal)` so
+/// crease-split vertices don't get re-merged.
 ///
-/// Either way the return is per-unique-vertex, enabling memoized shading
-/// (shade each unique vertex once, index from triangles).
+/// A face is instead recomputed when it has no authored normals, or when its
+/// authored normals are *flat* (all three within ~2.5° of each other) yet it
+/// belongs to an OBJ smoothing group. That last case is a self-contradictory
+/// export — per-face normals say "faceted" while `s N` says "smooth" — so the
+/// flat normals carry no information and the smoothing group wins. Recomputed
+/// faces average face normals at each shared position, keyed by smoothing group
+/// (a face with no group, e.g. `s off`, is left flat).
+///
+/// The return is per-unique-vertex, enabling memoized shading (shade each unique
+/// vertex once, index from triangles).
 pub fn compute_vertex_normals(triangles: &[Triangle]) -> SmoothData {
     let est_unique = triangles.len();
 
-    if !triangles.is_empty() && triangles.iter().all(|t| t.vertex_normals.is_some()) {
-        type Key = ((i64, i64, i64), (i32, i32, i32));
-        let mut index_map: FxHashMap<Key, usize> = fx_hashmap_cap(est_unique);
-        let mut normals: Vec<Vec3> = Vec::with_capacity(est_unique);
-        let mut positions: Vec<Vec3> = Vec::with_capacity(est_unique);
-        let mut tri_indices: Vec<[usize; 3]> = Vec::with_capacity(triangles.len());
-        for tri in triangles {
-            let vns = tri.vertex_normals.unwrap();
-            let mut indices = [0usize; 3];
-            for i in 0..3 {
-                let v = tri.vertices[i];
-                let n = vns[i];
-                let key: Key = (quantize(v), quantize_normal(n));
-                let len = normals.len();
-                let idx = *index_map.entry(key).or_insert_with(|| {
-                    normals.push(n);
-                    positions.push(v);
-                    len
-                });
-                indices[i] = idx;
-            }
-            tri_indices.push(indices);
-        }
-        for n in &mut normals { *n = n.normalized(); }
-        return SmoothData { normals, positions, tri_indices };
+    #[derive(PartialEq, Eq, Hash)]
+    enum NKey {
+        Authored((i64, i64, i64), (i32, i32, i32)),
+        Recompute((i64, i64, i64), i64),
     }
 
-    type FbKey = ((i64, i64, i64), i64);
-    let mut index_map: FxHashMap<FbKey, usize> = fx_hashmap_cap(est_unique);
+    let mut index_map: FxHashMap<NKey, usize> = fx_hashmap_cap(est_unique);
     let mut normals: Vec<Vec3> = Vec::with_capacity(est_unique);
     let mut positions: Vec<Vec3> = Vec::with_capacity(est_unique);
     let mut tri_indices: Vec<[usize; 3]> = Vec::with_capacity(triangles.len());
 
     for (ti, tri) in triangles.iter().enumerate() {
-        let n = tri.normal;
-        let group_key: i64 = match tri.smoothing_group {
-            Some(g) => g as i64,
-            None => -(1 + ti as i64),
+        let recompute = match tri.vertex_normals {
+            None => true,
+            Some([a, b, c]) => {
+                let eq = |x: Vec3, y: Vec3| x.normalized().dot(y.normalized()) > 0.999;
+                eq(a, b) && eq(b, c) && tri.smoothing_group.is_some()
+            }
         };
         let mut indices = [0usize; 3];
-        for (i, v) in tri.vertices.iter().enumerate() {
-            let key: FbKey = (quantize(*v), group_key);
+        for i in 0..3 {
+            let v = tri.vertices[i];
+            let (key, add) = if recompute {
+                let g = tri.smoothing_group.map(|g| g as i64).unwrap_or(-(1 + ti as i64));
+                (NKey::Recompute(quantize(v), g), tri.normal)
+            } else {
+                let n = tri.vertex_normals.unwrap()[i];
+                (NKey::Authored(quantize(v), quantize_normal(n)), n)
+            };
             let len = normals.len();
             let idx = *index_map.entry(key).or_insert_with(|| {
                 normals.push(Vec3::new(0.0, 0.0, 0.0));
-                positions.push(*v);
+                positions.push(v);
                 len
             });
-            normals[idx] = normals[idx] + n;
+            normals[idx] = normals[idx] + add;
             indices[i] = idx;
         }
         tri_indices.push(indices);
