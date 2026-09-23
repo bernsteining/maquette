@@ -1,7 +1,7 @@
 import { $ } from "./dom.js";
-import { state, model, setModel, makeModel, outputFormat, setOutputFormat, MOLECULES, getSchema, isGltf, resetState, setRebuildForm } from "./state.js";
+import { state, model, setModel, makeModel, outputFormat, setOutputFormat, MOLECULES, getSchema, isGltf, resetState, setRebuildForm, topFields } from "./state.js";
 import { maquettePlugin, scadPlugin, gltfPlugin, molfigPlugin, bindModel } from "./plugins.js";
-import { buildConfig, renderCode, buildTypst } from "./config.js";
+import { buildConfig, renderCode, buildTypst, parseTypst, setCodeGuard, highlightCode, sizeCode } from "./config.js";
 import { buildForm, refreshVisibility, filterForm } from "./form.js";
 setRebuildForm(() => { buildForm(); refreshVisibility(); });
 import { onChange, render, safeRender, scheduleRender, setStageBusy, showErr, sizeCanvasDisplay } from "./render.js";
@@ -33,6 +33,57 @@ document.addEventListener("keydown", (e) => {
 });
 
 $("search").addEventListener("input", () => filterForm($("search").value));
+
+function cfgValid(cfg) {
+  const TF = topFields();
+  for (const [k, v] of Object.entries(cfg)) {
+    if (k === "ambient") { if (typeof v === "number" || (v && typeof v === "object" && !Array.isArray(v))) continue; return false; }
+    if (k === "background") { if (typeof v === "string") continue; return false; }
+    const f = TF[k];
+    if (!f) continue;
+    const ok =
+      f.t === "bool" ? typeof v === "boolean" :
+      (f.t === "num" || f.t === "rng") ? typeof v === "number" :
+      f.t === "vec" ? (Array.isArray(v) && v.every(x => typeof x === "number")) :
+      (f.t === "sel" || f.t === "txt" || f.t === "col") ? typeof v === "string" :
+      f.t === "grp" ? (v !== null && ["object", "boolean", "number", "string"].includes(typeof v)) :
+      f.t === "map" ? (!!v && typeof v === "object" && !Array.isArray(v)) :
+      (f.t === "lights" || f.t === "palette" || f.t === "views") ? Array.isArray(v) :
+      true;
+    if (!ok) return false;
+  }
+  return true;
+}
+
+const codeSrc = $("code-src");
+if (codeSrc) {
+  const codeStatus = $("code-status");
+  const flagCode = (bad) => { if (codeStatus) codeStatus.hidden = !bad; };
+  let codeTimer = null;
+  codeSrc.addEventListener("input", () => {
+    highlightCode(codeSrc.value);
+    sizeCode();
+    clearTimeout(codeTimer);
+    codeTimer = setTimeout(() => {
+      const cfg = parseTypst(codeSrc.value);
+      const ok = !!cfg && cfgValid(cfg);
+      flagCode(!ok);
+      if (!ok) return;
+      const keepW = state.width, keepH = state.height;
+      resetState();
+      state.width = keepW; state.height = keepH;
+      applyConfig(cfg);
+      setCodeGuard(true);
+      buildForm();
+      onChange();
+      setCodeGuard(false);
+    }, 250);
+  });
+  codeSrc.addEventListener("scroll", () => {
+    const hl = $("code-hl");
+    if (hl) { hl.scrollTop = codeSrc.scrollTop; hl.scrollLeft = codeSrc.scrollLeft; }
+  });
+}
 
 document.querySelectorAll("#fmt button").forEach((b) => {
   b.onclick = () => {

@@ -231,6 +231,9 @@
   #copy { margin-left: auto; font: inherit; font-size: 11px; font-weight: 500;
     border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 2px 9px; border-radius: 6px; cursor: pointer; transition: .12s; }
   #copy:hover { color: var(--accent); border-color: var(--accent); }
+  #code-status { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--err); white-space: nowrap; }
+  #code-status:not([hidden]) + #copy { margin-left: 6px; }
+  #code-status[hidden] { display: none; }
   .editor-body { padding: 9px 0; overflow-x: auto; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; scrollbar-width: thin; }
   /* SCAD-mode footer: hint on the left, compile-status on the right, one
      line only. Hidden entirely outside SCAD mode (see setTab / ingest). */
@@ -259,6 +262,13 @@
     white-space: pre; overflow: auto; tab-size: 2; scrollbar-width: thin; }
   #scad-hl { pointer-events: none; color: var(--ink); }
   #scad-src { background: transparent; color: transparent; caret-color: var(--ink); outline: none; resize: none; }
+  .code-wrap { display: grid; }
+  #code-hl, #code-src {
+    grid-area: 1 / 1; margin: 0; padding: 9px 14px; border: 0;
+    font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre; overflow-x: auto; overflow-y: hidden; tab-size: 2; scrollbar-width: thin; }
+  #code-hl { pointer-events: none; color: var(--ink); }
+  #code-src { background: transparent; color: transparent; caret-color: var(--ink); outline: none; resize: none; }
 
   /* render stage */
   /* Symmetric horizontal padding sized to clear the #tools column so the
@@ -462,6 +472,7 @@
             <div class="editor-bar">
               <button id="tab-scad" class="tab" hidden>model.scad</button>
               <button id="tab-typst" class="tab on">preview.typ</button>
+              <span id="code-status" hidden title="This snippet couldn't be parsed, so the render wasn't updated.">⚠ invalid snippet</span>
               <button id="copy">Copy</button>
             </div>
             <!-- OpenSCAD editor: transparent textarea over a highlighted <pre> -->
@@ -469,8 +480,12 @@
               <pre id="scad-hl" aria-hidden="true"></pre>
               <textarea id="scad-src" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea>
             </div>
-            <!-- generated Typst (read-only) -->
-            <div id="code" class="editor-body"></div>
+            <!-- generated Typst, editable: transparent textarea over a highlighted <pre>.
+                 Edits are parsed back into the settings and the render. -->
+            <div id="code" class="code-wrap">
+              <pre id="code-hl" aria-hidden="true"></pre>
+              <textarea id="code-src" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" aria-label="Editable Typst code"></textarea>
+            </div>
             <!-- Footer strip: hint + compile status. Shown only while the SCAD
                  tab is active (toggled via setTab). Kept out of the editor-bar
                  above so it doesn't compete with the tabs for horizontal space. -->

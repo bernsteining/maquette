@@ -1,4 +1,4 @@
-import { $, elCode } from "./dom.js";
+import { $ } from "./dom.js";
 import { state, model, getSchema, num, fmtT, eq, group, ambientCfg, bgCfg, hlCollapse, outputFormat, topFields } from "./state.js";
 
 function buildConfig() {
@@ -131,10 +131,77 @@ function highlightLine(line) {
   }
   return out || "&nbsp;";
 }
+let codeGuard = false;
+const setCodeGuard = (v) => { codeGuard = v; };
+function highlightCode(text) {
+  const hl = $("code-hl");
+  if (hl) hl.innerHTML = text.split("\n").map(l => l === "" ? "" : highlightLine(l)).join("\n");
+}
+function sizeCode() {
+  const s = $("code-src");
+  if (s) s.rows = Math.max(1, s.value.split("\n").length);
+}
 function renderCode() {
-  elCode.innerHTML = buildTypst().split("\n").map((l, i) =>
-    `<div class="cline"><span class="gutter">${i + 1}</span><span class="src">${highlightLine(l)}</span></div>`
-  ).join("");
+  if (codeGuard) return;
+  const cs = $("code-status");
+  if (cs) cs.hidden = true;
+  const text = buildTypst();
+  const src = $("code-src");
+  if (src && document.activeElement !== src) src.value = text;
+  highlightCode(src ? src.value : text);
+  sizeCode();
+}
+
+function splitTopLevel(s) {
+  const out = [];
+  let depth = 0, inStr = false, start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) { if (c === '"' && s[i - 1] !== "\\") inStr = false; continue; }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "," && depth === 0) { out.push(s.slice(start, i)); start = i + 1; }
+  }
+  const tail = s.slice(start).trim();
+  if (tail) out.push(tail);
+  return out.map(x => x.trim()).filter(Boolean);
+}
+function parseTypstValue(raw) {
+  const s = raw.trim();
+  if (s === "true") return true;
+  if (s === "false") return false;
+  if (s === "none") return "none";
+  if (s === "auto") return "auto";
+  if (/^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(s)) return Number(s);
+  if (s.startsWith('"') && s.endsWith('"')) return s.slice(1, -1).replace(/\\(.)/g, "$1");
+  if (s.startsWith("(") && s.endsWith(")")) {
+    const inner = s.slice(1, -1).trim();
+    if (inner === "") return [];
+    const parts = splitTopLevel(inner);
+    if (parts.every(p => /^[A-Za-z_][\w-]*\s*:/.test(p))) {
+      const o = {};
+      for (const p of parts) { const i = p.indexOf(":"); o[p.slice(0, i).trim()] = parseTypstValue(p.slice(i + 1)); }
+      return o;
+    }
+    return parts.map(parseTypstValue);
+  }
+  return s;
+}
+function parseTypst(code) {
+  const m = code.match(/#render-[a-z]+\s*\(([\s\S]*)\)\s*$/);
+  if (!m) return null;
+  let args = splitTopLevel(m[1]);
+  if (args.length && (args[0] === "model" || /^read\(/.test(args[0]))) args = args.slice(1);
+  const cfg = {};
+  for (const a of args) {
+    const i = a.indexOf(":");
+    if (i < 0) continue;
+    const key = a.slice(0, i).trim();
+    if (!/^[A-Za-z_][\w-]*$/.test(key)) continue;
+    cfg[key] = parseTypstValue(a.slice(i + 1));
+  }
+  return cfg;
 }
 
 const SCAD_KW = new Set(["module", "function", "if", "else", "for", "let", "each",
@@ -203,4 +270,4 @@ function buildMolOpts(s, format) {
 }
 
 
-export { buildConfig, buildTypst, renderCode, updateScadHighlight, buildMolOpts, esc, highlightScad, highlightLine };
+export { buildConfig, buildTypst, renderCode, updateScadHighlight, buildMolOpts, esc, highlightScad, highlightLine, parseTypst, setCodeGuard, highlightCode, sizeCode };

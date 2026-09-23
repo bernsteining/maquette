@@ -13,6 +13,7 @@ const SCHEMA = [
     { k: "point_size", label: "Point size / radius (0 = auto)", t: "num", def: 0, step: 0.001, min: 0, omitIf: v => v === 0 },
     { k: "point_neighbors", label: "Neighbors k (higher = fewer holes)", t: "num", def: 12, omitIf: v => v === 12, when: s => !s.point_splat },
     { k: "point_boundary", label: "Boundary cut angle ° (0 = off)", t: "num", def: 60, omitIf: v => v === 60, when: s => !s.point_splat },
+    { k: "point_denoise", label: "Denoise colors (crisper regions)", t: "bool", def: false, omitIf: v => v === false, when: s => !s.point_splat },
   ]},
   { s: "Molecule (molfig)", open: true, when: () => model._mol, fields: [
     { k: "mol_representation", label: "Representation", t: "sel", def: "cartoon",
@@ -377,7 +378,7 @@ const HELP = {
   sharpen: "Unsharp-mask edge sharpening (PNG only).",
   clip: "Cut the model with a plane; optionally cap and hatch the section.",
   explode: "Push components outward from the center (multi-part models).",
-  decimate: "Simplify the mesh (higher = fewer triangles).", point_splat: "PLY clouds: draw points as round splats instead of reconstructing a surface.", point_size: "PLY clouds: kNN radius, or splat radius when splatting (0 = auto).", point_neighbors: "PLY clouds: neighbors per point (higher = fewer holes, slower).", point_boundary: "PLY clouds: cut connections across a normal jump > this angle\u00b0 (0 = keep all).",
+  decimate: "Simplify the mesh (higher = fewer triangles).", point_splat: "PLY clouds: draw points as round splats instead of reconstructing a surface.", point_size: "PLY clouds: kNN radius, or splat radius when splatting (0 = auto).", point_neighbors: "PLY clouds: neighbors per point (higher = fewer holes, slower).", point_boundary: "PLY clouds: cut connections across a normal jump > this angle\u00b0 (0 = keep all).", point_denoise: "PLY clouds (reconstruction): clean up scan colors with an edge-preserving filter so regions read crisply instead of bleeding.",
   views: "Render a grid of named orthographic views.", grid_labels: "Show labels on the multi-view grid.",
   turntable: "Render a spun grid of frames around the model.",
   materials: "Map OBJ material names to colors.", highlight: "Recolor named OBJ groups.",

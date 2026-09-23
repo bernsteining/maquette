@@ -306,6 +306,7 @@ function setTab(which) {
   const foot = $("scad-foot"); if (foot) foot.hidden = which !== "scad";
   if (which !== "scad") { const s = $("scad-status"); if (s) s.textContent = ""; }
   elCode.style.display = which === "typst" ? "" : "none";
+  const cs = $("code-status"); if (cs && which !== "typst") cs.hidden = true;
 }
 $("tab-scad").onclick = () => setTab("scad");
 $("tab-typst").onclick = () => setTab("typst");
