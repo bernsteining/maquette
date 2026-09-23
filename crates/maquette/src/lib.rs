@@ -177,6 +177,24 @@ fn cloud_to_triangles(cloud: &ply_parser::PointCloud, config: &RenderConfig) -> 
     }
 }
 
+/// Colored point clouds are usually scans whose colors already bake in real
+/// lighting, so a specular highlight reads as wrong plastic gloss. When the user
+/// hasn't chosen a shading style, render them matte. Call after `cached_ply` has
+/// populated the geometry cache so the peek hits; `specular` is a shading-only
+/// parameter, so adjusting it after geometry is fine.
+fn apply_pointcloud_matte(data: &[u8], config: &mut RenderConfig) {
+    if !config.shading.is_empty() {
+        return;
+    }
+    let colored = matches!(
+        cache::get_ply(data),
+        Some(ply_parser::PlyData::Points(c)) if c.colors.len() == c.positions.len() && !c.positions.is_empty()
+    );
+    if colored {
+        config.specular = 0.0;
+    }
+}
+
 /// Entry point: receives STL bytes + JSON config, returns SVG string.
 #[wasm_func]
 fn render_stl(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
@@ -264,8 +282,9 @@ fn get_obj_info(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> 
 /// Entry point: receives PLY bytes + JSON config, returns SVG string.
 #[wasm_func]
 fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-    let config = parse_config(config_json)?;
+    let mut config = parse_config(config_json)?;
     let triangles = cached_ply(ply_data, &config)?;
+    apply_pointcloud_matte(ply_data, &mut config);
     let empty = HashMap::new();
     Ok(render::render(&triangles, &config, &empty, None, None).into_bytes())
 }
@@ -273,8 +292,9 @@ fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
 /// Entry point: receives PLY bytes + JSON config, returns PNG bytes.
 #[wasm_func]
 fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-    let config = parse_config(config_json)?;
+    let mut config = parse_config(config_json)?;
     let triangles = cached_ply(ply_data, &config)?;
+    apply_pointcloud_matte(ply_data, &mut config);
     let empty = HashMap::new();
     render::render_raster(&triangles, &config, &empty, None, None, &[])
 }

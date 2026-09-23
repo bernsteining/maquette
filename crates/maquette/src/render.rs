@@ -106,6 +106,7 @@ pub(crate) fn pointcloud_to_triangles(
 
     let max_neighbors: usize = config.point_neighbors.max(3);
     let boundary_cos = if config.point_boundary > 0.0 { config.point_boundary.to_radians().cos() } else { -2.0 };
+    let denoise = has_colors && config.point_denoise;
 
     let xs: Vec<f32> = positions.iter().map(|p| p.x as f32).collect();
     let ys: Vec<f32> = positions.iter().map(|p| p.y as f32).collect();
@@ -171,6 +172,48 @@ pub(crate) fn pointcloud_to_triangles(
         let cz = (zs[i] * inv_cell_f32).floor() as i32;
         grid.entry((cx, cy, cz)).or_default().push(i as u32);
     }
+    let denoised_colors: Vec<(u8, u8, u8)> = if denoise {
+        let cap = max_neighbors.max(8);
+        (0..n)
+            .map(|i| {
+                let (cx, cy, cz) = ((xs[i] * inv_cell_f32).floor() as i32, (ys[i] * inv_cell_f32).floor() as i32, (zs[i] * inv_cell_f32).floor() as i32);
+                let mut nb: Vec<(f32, (u8, u8, u8))> = Vec::new();
+                for dz in -1i32..=1 {
+                    for dy in -1i32..=1 {
+                        for dx in -1i32..=1 {
+                            if let Some(b) = grid.get(&(cx + dx, cy + dy, cz + dz)) {
+                                for &j in b {
+                                    let ju = j as usize;
+                                    let (ex, ey, ez) = (xs[ju] - xs[i], ys[ju] - ys[i], zs[ju] - zs[i]);
+                                    let dsq = ex * ex + ey * ey + ez * ez;
+                                    if dsq < rsq_f32 { nb.push((dsq, cloud.colors[ju])); }
+                                }
+                            }
+                        }
+                    }
+                }
+                if nb.len() <= 1 { return cloud.colors[i]; }
+                if nb.len() > cap {
+                    nb.select_nth_unstable_by(cap, |a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                    nb.truncate(cap);
+                }
+                let mut best = cloud.colors[i];
+                let mut best_cost = f64::INFINITY;
+                for &(_, ci) in &nb {
+                    let mut cost = 0.0;
+                    for &(_, cj) in &nb {
+                        let (dr, dg, db) = (ci.0 as f64 - cj.0 as f64, ci.1 as f64 - cj.1 as f64, ci.2 as f64 - cj.2 as f64);
+                        cost += (dr * dr + dg * dg + db * db).sqrt();
+                    }
+                    if cost < best_cost { best_cost = cost; best = ci; }
+                }
+                best
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     let mut tri_set: HashSet<(u32, u32, u32), FxBuildHasher> =
         HashSet::with_hasher(FxBuildHasher::default());
 
@@ -316,11 +359,11 @@ pub(crate) fn pointcloud_to_triangles(
                 None => continue,
             }
         };
-        let color = if has_colors { Some(cloud.colors[ia]) } else { None };
-        let vertex_colors = if has_colors {
-            Some([cloud.colors[ia], cloud.colors[ib], cloud.colors[ic]])
+        let (color, vertex_colors) = if has_colors {
+            let cs: &[(u8, u8, u8)] = if denoise { &denoised_colors } else { &cloud.colors };
+            (Some(cs[ia]), Some([cs[ia], cs[ib], cs[ic]]))
         } else {
-            None
+            (None, None)
         };
         let vertex_normals = if has_normals {
             Some([cloud.normals[ia], cloud.normals[ib], cloud.normals[ic]])
@@ -361,8 +404,8 @@ pub(crate) fn pointcloud_to_triangles(
 /// the surface they sample (revealing 3D form) while they still never cull.
 const SPLAT_SIDES: usize = 8;
 const SPLAT_RINGS: &[(f64, f64, Option<f32>)] = &[
-    (0.0, 0.86, None),
-    (0.86, 1.0, Some(0.4)),
+    (0.0, 0.93, None),
+    (0.93, 1.0, Some(0.5)),
 ];
 const SPLAT_MIN_FACE: f64 = 0.34;
 
@@ -467,7 +510,7 @@ pub(crate) fn pointcloud_to_splats(
             } else {
                 let mut ds: Vec<f64> = nbr.iter().map(|&j| positions[j as usize].sub(p).length()).collect();
                 ds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                (ds[3.min(ds.len() - 1)] * 0.75).max(diag * 1e-4)
+                (ds[3.min(ds.len() - 1)] * 0.95).max(diag * 1e-4)
             };
             radii.push(r);
             if let Some(nv) = normals.as_mut() {
@@ -485,6 +528,8 @@ pub(crate) fn pointcloud_to_splats(
         .collect();
 
     let has_colors = cloud.colors.len() == n;
+    let flat_lit = has_colors && config.shading.is_empty();
+    let rings: &[(f64, f64, Option<f32>)] = if flat_lit { &[(0.0, 1.0, None)] } else { SPLAT_RINGS };
     let mut triangles = Vec::with_capacity(n * SPLAT_SIDES * 3);
     for i in 0..n {
         let p = positions[i];
@@ -515,6 +560,7 @@ pub(crate) fn pointcloud_to_splats(
             }
             None => (cam_right, cam_up),
         };
+        let vn = if flat_lit { None } else { Some([shade_n; 3]) };
         let mut push_tri = |v: [Vec3; 3], alpha: Option<f32>| {
             triangles.push(Triangle {
                 vertices: v,
@@ -523,7 +569,7 @@ pub(crate) fn pointcloud_to_splats(
                 vertex_colors,
                 group_id: None,
                 alpha,
-                vertex_normals: Some([shade_n; 3]),
+                vertex_normals: vn,
                 smoothing_group: None,
                 vertex_scalars: None,
                 uvs: None,
@@ -531,7 +577,7 @@ pub(crate) fn pointcloud_to_splats(
             });
         };
         let at = |c: f64, s: f64, rr: f64| p.add(right.scale(r * rr * c)).add(up.scale(r * rr * s));
-        for &(r0, r1, alpha) in SPLAT_RINGS {
+        for &(r0, r1, alpha) in rings {
             for k in 0..SPLAT_SIDES {
                 let (c0, s0) = rim_dir[k];
                 let (c1, s1) = rim_dir[(k + 1) % SPLAT_SIDES];
