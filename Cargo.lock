@@ -284,9 +284,9 @@ dependencies = [
 
 [[package]]
 name = "draco-oxide-decoder"
-version = "0.1.0-alpha.10"
+version = "0.1.0-alpha.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae87180e69a97d7d5db1408bd66c9f05308b948cd0278e898854815a268e01cf"
+checksum = "521c29e7b30c62171799d532277800cabd24fb20611c72b7af38f48b625b79cf"
 dependencies = [
  "draco-oxide-core",
  "remain",
