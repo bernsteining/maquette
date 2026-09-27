@@ -1,8 +1,9 @@
 name: CI image
 
-# Builds the toolchain image the build + pages workflows run inside, and pushes
-# it to ghcr. Only rebuilds when the Dockerfile (or this workflow) changes, so
-# it costs nothing on ordinary code pushes.
+# Builds the toolchain image the build + pages workflows run inside, checks it
+# can build all three plugins and pass `make check`, then pushes it to ghcr.
+# Only rebuilds when the Dockerfile (or this workflow) changes, so it costs
+# nothing on ordinary code pushes.
 
 on:
   push:
@@ -23,7 +24,7 @@ permissions:
 jobs:
   build-push:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -43,11 +44,30 @@ jobs:
             type=raw,value=latest
             type=sha
 
-      - uses: docker/build-push-action@v7
+      - name: Build image (not pushed yet)
+        uses: docker/build-push-action@v7
+        with:
+          context: .github/docker
+          load: true
+          tags: maquette-ci:candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the image (all three wasms + make check)
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w maquette-ci:candidate bash -euc '
+            make wasm gltf-wasm scad-wasm
+            for w in maquette/maquette maquette-gltf/maquette-gltf maquette-scad/maquette-scad; do
+              .github/scripts/wasm-invariants.sh "crates/$w.wasm"
+            done
+            make check
+          '
+
+      - name: Push
+        uses: docker/build-push-action@v7
         with:
           context: .github/docker
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max

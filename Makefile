@@ -189,8 +189,7 @@ package: wasm gltf-wasm
 # compiles there); scad builds natively, so it and the tests run native.
 lint:
 	cargo clippy --target wasm32-unknown-unknown -p maquette-core -p maquette -p maquette-gltf -- -D warnings
-	cargo clippy -p maquette-scad --all-targets -- -D warnings
-	cargo clippy -p maquette-cli --all-targets -- -D warnings
+	cargo clippy -p maquette-scad -p maquette-cli --all-targets -- -D warnings
 
 test:
 	cargo test -p maquette-scad

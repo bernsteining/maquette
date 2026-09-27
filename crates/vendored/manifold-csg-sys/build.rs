@@ -320,7 +320,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build");
     println!("cargo:rerun-if-changed=src/lib.rs");
-    println!("cargo:rerun-if-changed=patches");
+    if Path::new("patches").exists() {
+        println!("cargo:rerun-if-changed=patches");
+    }
 
     // Offline / bring-your-own build override (host only). Lets consumers
     // who can't run the build-script's `git clone` (sandboxed builders like

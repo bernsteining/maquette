@@ -40,8 +40,6 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - name: Ensure clippy component
-        run: rustup component add clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: checks
