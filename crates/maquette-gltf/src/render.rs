@@ -143,11 +143,29 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         let effective_br = if let Some(g) = &config.ground {
             br * g.size_scale as f64
         } else { br };
+        let caster = |t: &crate::scene::Triangle| [t.vertices[0].position, t.vertices[1].position, t.vertices[2].position];
         let maps = crate::cache::shadows_for(shadow_key(scene_key, &raw_lights, up, effective_br, sh_cfg.resolution), || {
-            let caster_tris: Vec<[Vec3; 3]> = scene.triangles.iter().map(|t| {
-                [t.vertices[0].position, t.vertices[1].position, t.vertices[2].position]
-            }).collect();
-            maquette_core::shadow::build_shadow_maps(&caster_tris, &raw_lights, bc, effective_br, up, sh_cfg.resolution)
+            if scene.dynamic.is_empty() || scene.static_key == 0 {
+                let caster_tris: Vec<[Vec3; 3]> = scene.triangles.iter().map(caster).collect();
+                return maquette_core::shadow::build_shadow_maps(&caster_tris, &raw_lights, bc, effective_br, up, sh_cfg.resolution);
+            }
+            let mut moving: Vec<[Vec3; 3]> = Vec::new();
+            for &(a, b) in &scene.dynamic { moving.extend(scene.triangles[a..b].iter().map(caster)); }
+            let mut skey = scene.static_key;
+            for v in [bc.x, bc.y, bc.z] { skey = (skey ^ v.to_bits()).wrapping_mul(0x100000001b3); }
+            let base = crate::cache::static_shadows_for(shadow_key(skey, &raw_lights, up, effective_br, sh_cfg.resolution), || {
+                let mut fixed: Vec<[Vec3; 3]> = Vec::with_capacity(scene.triangles.len());
+                let mut at = 0;
+                for &(a, b) in &scene.dynamic {
+                    fixed.extend(scene.triangles[at..a].iter().map(caster));
+                    at = b;
+                }
+                fixed.extend(scene.triangles[at..].iter().map(caster));
+                maquette_core::shadow::build_shadow_maps(&fixed, &raw_lights, bc, effective_br, up, sh_cfg.resolution)
+            });
+            let mut maps = base.to_vec();
+            for m in maps.iter_mut().flatten() { m.add_casters(&moving); }
+            maps
         });
         let bias = maquette_core::shadow::BiasParams {
             bias: sh_cfg.bias as f64, normal_bias: sh_cfg.normal_bias as f64, slope_bias: sh_cfg.slope_bias as f64,

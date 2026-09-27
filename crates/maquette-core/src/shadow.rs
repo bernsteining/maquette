@@ -28,6 +28,7 @@ pub struct BiasParams {
 }
 
 /// Single-frustum depth map + light-view projection.
+#[derive(Clone)]
 pub struct ShadowMap {
     view: Mat4,
     ortho: bool,
@@ -298,6 +299,7 @@ impl ShadowMap {
 /// A light's shadow: single frustum (directional / spot / external point) or
 /// a 6-face cube (omnidirectional point). Spot could use a tighter cone but
 /// a single frustum covers the outer cone adequately.
+#[derive(Clone)]
 pub enum LightShadow {
     Single(ShadowMap),
     Cube(Box<[ShadowMap; 6]>),
@@ -318,6 +320,12 @@ impl LightShadow {
             LightShadow::Cube(f) => f[cube_face(p, f[0].eye)].lit_pcss(p, normal, b, softness, light_size),
         }
     }
+    /// Rasterise more casters into an existing shadow. Depth keeps the nearest
+    /// value per texel, so splitting casters across calls gives the same map.
+    pub fn add_casters(&mut self, triangles: &[CasterTri]) {
+        self.render(triangles);
+    }
+
     fn render(&mut self, triangles: &[CasterTri]) {
         match self {
             LightShadow::Single(m) => m.render(triangles),

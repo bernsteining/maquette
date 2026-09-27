@@ -378,6 +378,12 @@ pub struct Scene {
     pub cameras: Vec<SceneCamera>,
     pub bbox_min: Vec3,
     pub bbox_max: Vec3,
+    /// Triangle ranges emitted by animated nodes (or skins driven by them).
+    /// Everything outside these ranges is identical at every animation time.
+    pub dynamic: Vec<(usize, usize)>,
+    /// Identifies the scene up to animation time (0 = unknown): together with
+    /// `dynamic`, lets per-time work reuse what the static part produced.
+    pub static_key: u64,
 }
 
 pub use maquette_core::light::{LightKind, PunctualLight};
@@ -419,6 +425,8 @@ impl Scene {
             cameras: Vec::new(),
             bbox_min: Vec3::new( f64::INFINITY,  f64::INFINITY,  f64::INFINITY),
             bbox_max: Vec3::new(-f64::INFINITY, -f64::INFINITY, -f64::INFINITY),
+            dynamic: Vec::new(),
+            static_key: 0,
         }
     }
 
@@ -500,14 +508,51 @@ impl SceneOpts {
 /// Pulls textures from the leaky texture cache (see `cache::textures_for`).
 /// Animation frames of the same asset share texture data via `&'static`
 /// reference — zero clone, zero re-decode.
-pub fn flatten_with_cached_textures(loaded: &LoadedGltf, opts: SceneOpts, bytes: &[u8]) -> Scene {
+/// Like a full flatten, but mesh nodes whose world transform, skin palette and
+/// morph weights match `prev` bit for bit copy their primitives from the
+/// previous frame instead of being re-emitted. Output is identical either way.
+pub fn flatten_with_cached_textures(loaded: &LoadedGltf, opts: SceneOpts, asset_key: u64, prev: Option<(&Scene, &[NodeEmit])>) -> (Scene, Vec<NodeEmit>) {
     let mut scene = Scene::empty();
-    scene.textures = crate::cache::textures_for(bytes, loaded, opts.textures);
+    scene.textures = crate::cache::textures_for(asset_key, loaded, opts.textures);
     scene.materials = collect_materials(loaded);
     let (anim, pointer_writes) = sample_animations(loaded, opts.time, opts.animation_index);
     apply_pointer_writes(&mut scene, &pointer_writes);
-    fill_scene(&mut scene, loaded, &anim, opts.variant, opts.scene_index);
-    scene
+    let emits = fill_scene(&mut scene, loaded, &anim, opts.variant, opts.scene_index, prev);
+    (scene, emits)
+}
+
+/// What one mesh node contributed to a flattened scene, and the inputs it was
+/// emitted from.
+pub struct NodeEmit {
+    node: usize,
+    world: Mat4,
+    palette: Option<Vec<Mat4>>,
+    weights: Option<Vec<f32>>,
+    tris: (usize, usize),
+    lines: (usize, usize),
+    points: (usize, usize),
+    bbox: (Vec3, Vec3),
+}
+
+fn mat_bits_eq(a: &Mat4, b: &Mat4) -> bool {
+    a.0.iter().flatten().zip(b.0.iter().flatten()).all(|(x, y)| x.to_bits() == y.to_bits())
+}
+
+impl NodeEmit {
+    fn matches(&self, node: usize, world: &Mat4, palette: &Option<Vec<Mat4>>, weights: &Option<Vec<f32>>) -> bool {
+        self.node == node
+            && mat_bits_eq(&self.world, world)
+            && match (&self.palette, palette) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| mat_bits_eq(x, y)),
+                _ => false,
+            }
+            && match (&self.weights, weights) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()),
+                _ => false,
+            }
+    }
 }
 
 /// Public entry to `collect_textures` for the leaky texture cache to call.
@@ -604,11 +649,12 @@ pub fn flatten_geometry_only(loaded: &LoadedGltf) -> Scene {
     scene.materials = collect_materials(loaded);
     scene.textures = placeholder_textures_for(loaded.document.textures().len());
     let (anim, _) = sample_animations(loaded, 0.0, None);
-    fill_scene(&mut scene, loaded, &anim, 0, None);
+    fill_scene(&mut scene, loaded, &anim, 0, None, None);
     scene
 }
 
-fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], variant: u32, scene_index: Option<usize>) {
+fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], variant: u32, scene_index: Option<usize>, prev: Option<(&Scene, &[NodeEmit])>) -> Vec<NodeEmit> {
+    let mut emits: Vec<NodeEmit> = Vec::new();
     let world_transforms = compute_world_transforms(loaded, anim);
 
     scene.lights = collect_lights(loaded, &world_transforms);
@@ -618,8 +664,9 @@ fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], varia
         .and_then(|i| loaded.document.scenes().nth(i))
         .or_else(|| loaded.document.default_scene())
         .or_else(|| loaded.document.scenes().next());
-    let Some(root_scene) = root_scene else { return; };
+    let Some(root_scene) = root_scene else { return emits; };
 
+    let dynamic = animated_nodes(loaded);
     let mut stack: Vec<usize> = root_scene.nodes().map(|n| n.index()).collect();
     let mut seen = vec![false; loaded.document.nodes().count()];
 
@@ -634,13 +681,78 @@ fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], varia
             let node_weights = anim.get(node_index).and_then(|a| a.weights.clone())
                 .or_else(|| node.weights().map(|w| w.to_vec()))
                 .or_else(|| mesh.weights().map(|w| w.to_vec()));
-            emit_mesh(scene, loaded, mesh, world, palette.as_deref(), node_weights.as_deref(), variant);
+            let starts = (scene.triangles.len(), scene.lines.len(), scene.points.len());
+            let outer = (scene.bbox_min, scene.bbox_max);
+            let empty = Scene::empty();
+            scene.bbox_min = empty.bbox_min;
+            scene.bbox_max = empty.bbox_max;
+            let reuse = prev.and_then(|(ps, pe)| {
+                pe.get(emits.len()).filter(|e| e.matches(node_index, &world, &palette, &node_weights)).map(|e| (ps, e))
+            });
+            if let Some((ps, e)) = reuse {
+                scene.triangles.extend_from_slice(&ps.triangles[e.tris.0..e.tris.1]);
+                scene.lines.extend_from_slice(&ps.lines[e.lines.0..e.lines.1]);
+                scene.points.extend_from_slice(&ps.points[e.points.0..e.points.1]);
+                scene.bbox_min = e.bbox.0;
+                scene.bbox_max = e.bbox.1;
+            } else {
+                emit_mesh(scene, loaded, mesh, world, palette.as_deref(), node_weights.as_deref(), variant);
+            }
+            let bbox = (scene.bbox_min, scene.bbox_max);
+            scene.bbox_min = outer.0;
+            scene.bbox_max = outer.1;
+            if bbox.0.x <= bbox.1.x {
+                scene.extend_bbox(bbox.0);
+                scene.extend_bbox(bbox.1);
+            }
+            let moves = dynamic[node_index] || node.skin().is_some_and(|sk| sk.joints().any(|j| dynamic[j.index()]));
+            if moves && scene.triangles.len() > starts.0 {
+                scene.dynamic.push((starts.0, scene.triangles.len()));
+            }
+            emits.push(NodeEmit {
+                node: node_index,
+                world,
+                palette,
+                weights: node_weights,
+                tris: (starts.0, scene.triangles.len()),
+                lines: (starts.1, scene.lines.len()),
+                points: (starts.2, scene.points.len()),
+                bbox,
+            });
         }
 
         for child in node.children() {
             stack.push(child.index());
         }
     }
+    emits
+}
+
+fn animated_nodes(loaded: &LoadedGltf) -> Vec<bool> {
+    let n = loaded.document.nodes().count();
+    let mut targeted = vec![false; n];
+    for a in loaded.document.animations() {
+        for ch in a.channels() {
+            if ch.target().property() == gltf::animation::Property::Pointer { continue; }
+            if let Some(nd) = ch.target().node_opt() {
+                if nd.index() < n { targeted[nd.index()] = true; }
+            }
+        }
+    }
+    let mut moves = vec![false; n];
+    let mut visited = vec![false; n];
+    for scene in loaded.document.scenes() {
+        let mut stack: Vec<(usize, bool)> = scene.nodes().map(|nd| (nd.index(), false)).collect();
+        while let Some((idx, parent)) = stack.pop() {
+            if visited[idx] { continue; }
+            visited[idx] = true;
+            moves[idx] = parent || targeted[idx];
+            for c in loaded.document.nodes().nth(idx).unwrap().children() {
+                stack.push((c.index(), moves[idx]));
+            }
+        }
+    }
+    moves
 }
 
 /// Resolve every node's world-space transform in one pass, applying animation

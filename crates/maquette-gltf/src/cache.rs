@@ -5,7 +5,11 @@
 //! a single compilation. Single-threaded inside the wasm sandbox, so we can
 //! `static mut` + `transmute` freely.
 //!
-//! Two-tier cache:
+//! Caches:
+//! * **Parse cache** — the parsed glTF for the most recent asset, so an
+//!   animation frame at a new `time` re-flattens without re-parsing and
+//!   without needing the file bytes again. The previous frame's per-node
+//!   emit records let that re-flatten copy every node that didn't move.
 //! * **Texture cache** — keyed on `(bytes, texture opts)`. Never invalidated
 //!   by animation `time`, so animation frames of the same asset share the
 //!   decoded + mipmapped texture pyramid instead of re-decoding per frame.
@@ -20,11 +24,14 @@ use crate::gltf_loader::LoadedGltf;
 use maquette_core::ibl::IblEnvironment;
 use maquette_core::shadow::LightShadow;
 use maquette_core::math::Vec3;
-use crate::scene::{Scene, SceneOpts, TextureLoadOpts};
+use crate::scene::{NodeEmit, Scene, SceneOpts, TextureLoadOpts};
 use maquette_core::texture::Texture;
 
 static mut SCENE_CACHE: Option<(u64, Scene)> = None;
+static mut LOADED_CACHE: Option<(u64, LoadedGltf)> = None;
+static mut EMIT_CACHE: Option<(u64, Vec<NodeEmit>)> = None;
 static mut SHADOW_CACHE: Vec<(u64, Vec<Option<LightShadow>>)> = Vec::new();
+static mut STATIC_SHADOW_CACHE: Option<(u64, Vec<Option<LightShadow>>)> = None;
 /// Leaky Vec of texture-bundle cache entries. Each entry lives forever, so
 /// references into it are safely `'static`.
 static mut TEXTURE_CACHE: Vec<(u64, Vec<Texture>)> = Vec::new();
@@ -86,15 +93,15 @@ fn ibl_hash_hdr(bytes: &[u8], intensity: f32, rotation: f32) -> u64 {
     h.finish()
 }
 
-/// Get-or-decode the texture list for `(bytes, opts.textures)`. Returned
+/// Get-or-decode the texture list for `(asset, opts.textures)`. Returned
 /// slice lives forever (leaky cache). Called from scene::flatten so that
 /// distinct animation frames of the same asset share the decoded textures.
 pub fn textures_for(
-    bytes: &[u8],
+    asset_key: u64,
     loaded: &LoadedGltf,
     opts: TextureLoadOpts,
 ) -> &'static [Texture] {
-    let key = tex_hash(bytes, opts);
+    let key = tex_hash(asset_key, opts);
     unsafe {
         for (k, v) in TEXTURE_CACHE.iter() {
             if *k == key {
@@ -122,11 +129,23 @@ pub fn scene_for(
         if let Some((k, ref s)) = SCENE_CACHE {
             if k == key { return Ok((key, std::mem::transmute::<&Scene, &'static Scene>(s))); }
         }
-        let Some(bytes) = input.bytes else {
-            return Err("prepared glTF: scene not cached".into());
+        if !matches!(LOADED_CACHE, Some((k, _)) if k == input.key) {
+            if input.bytes.is_none() {
+                return Err("prepared glTF: scene not cached".into());
+            }
+            LOADED_CACHE = None;
+            LOADED_CACHE = Some((input.key, load()?));
+        }
+        let (_, ref loaded) = LOADED_CACHE.as_ref().unwrap();
+        let base = hash(input.key, SceneOpts { time: 0.0, ..opts });
+        let prev = match (&SCENE_CACHE, &EMIT_CACHE) {
+            (Some((_, ps)), Some((b, pe))) if *b == base => Some((ps, pe.as_slice())),
+            _ => None,
         };
-        let scene = crate::scene::flatten_with_cached_textures(&load()?, opts, bytes);
+        let (mut scene, emits) = crate::scene::flatten_with_cached_textures(loaded, opts, input.key, prev);
+        scene.static_key = base;
         SCENE_CACHE = Some((key, scene));
+        EMIT_CACHE = Some((base, emits));
         let (_, ref s) = SCENE_CACHE.as_ref().unwrap();
         Ok((key, std::mem::transmute::<&Scene, &'static Scene>(s)))
     }
@@ -145,6 +164,20 @@ pub fn shadows_for(key: u64, build: impl FnOnce() -> Vec<Option<LightShadow>>) -
         if cache.len() >= 2 { cache.remove(0); }
         cache.push((key, build()));
         std::mem::transmute::<&[Option<LightShadow>], &'static [Option<LightShadow>]>(cache.last().unwrap().1.as_slice())
+    }
+}
+
+/// Get-or-build the shadow maps of a scene's static casters (see
+/// `Scene::dynamic`), kept apart from `shadows_for` so animation frames,
+/// which each add their moving casters on top, don't evict it.
+pub fn static_shadows_for(key: u64, build: impl FnOnce() -> Vec<Option<LightShadow>>) -> &'static [Option<LightShadow>] {
+    unsafe {
+        let slot = &mut *std::ptr::addr_of_mut!(STATIC_SHADOW_CACHE);
+        if !matches!(slot, Some((k, _)) if *k == key) {
+            *slot = None;
+            *slot = Some((key, build()));
+        }
+        std::mem::transmute::<&[Option<LightShadow>], &'static [Option<LightShadow>]>(slot.as_ref().unwrap().1.as_slice())
     }
 }
 
@@ -196,10 +229,10 @@ fn hash(bytes_key: u64, opts: SceneOpts) -> u64 {
     h.finish()
 }
 
-fn tex_hash(bytes: &[u8], opts: TextureLoadOpts) -> u64 {
+fn tex_hash(asset_key: u64, opts: TextureLoadOpts) -> u64 {
     use std::hash::Hasher;
     let mut h = maquette_core::math::FxHasher::default();
-    h.write(bytes);
+    h.write_u64(asset_key);
     h.write_u8(opts.disabled as u8);
     h.write_u32(opts.max_size.unwrap_or(u32::MAX));
     h.finish()
