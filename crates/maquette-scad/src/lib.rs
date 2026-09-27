@@ -24,7 +24,7 @@ mod text;
 use json::Json;
 use manifold_csg::{CrossSection, FillRule, JoinType, Manifold};
 use rustc_hash::FxHashMap;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use wasm_minimal_protocol::*;
 
@@ -43,9 +43,30 @@ thread_local! {
     /// Node address -> structural hash of its subtree (precomputed once per
     /// compile by [`prehash`], read by [`build`] to key the memo cache in O(1)).
     static NODE_HASH: RefCell<FxHashMap<usize, u64>> = RefCell::new(FxHashMap::default());
-    /// (subtree hash, inherited color) -> built geometry. Lets a re-instantiated
-    /// part (bolt/foot/bearing/…) be built once and reused. Reset per compile.
-    static MEMO: RefCell<FxHashMap<(u64, [u8; 4]), Geo>> = RefCell::new(FxHashMap::default());
+    /// (subtree hash, defaults hash, inherited color) -> built geometry and the
+    /// compile that last used it. Lets a re-instantiated part (bolt/foot/
+    /// bearing/…) be built once and reused, and survives across compiles so an
+    /// edit only rebuilds the subtrees it changed.
+    static MEMO: RefCell<FxHashMap<(u64, u64, [u8; 4]), (Geo, u32)>> = RefCell::new(FxHashMap::default());
+    static COMPILE: Cell<(u32, u64)> = const { Cell::new((0, 0)) };
+}
+
+const MEMO_KEEP_COMPILES: u32 = 8;
+const PALETTE_CAP: usize = 1 << 18;
+
+fn begin_compile(tree: &Json, defaults: &Defaults) {
+    let generation = COMPILE.with(|c| c.get().0).wrapping_add(1);
+    COMPILE.with(|c| c.set((generation, defaults.cache_key())));
+    NODE_HASH.with(|m| {
+        let mut m = m.borrow_mut();
+        m.clear();
+        prehash(tree, &mut m);
+    });
+    if PALETTE.with(|p| p.borrow().len()) > PALETTE_CAP {
+        PALETTE.with(|p| p.borrow_mut().clear());
+        MEMO.with(|m| m.borrow_mut().clear());
+    }
+    MEMO.with(|m| m.borrow_mut().retain(|_, (_, used)| generation.wrapping_sub(*used) <= MEMO_KEEP_COMPILES));
 }
 
 /// Structural (content) hash of a JSON subtree, computed bottom-up in a single
@@ -118,6 +139,19 @@ impl Defaults {
     /// sites, one of which will inevitably be forgotten).
     fn from_opts(opts: &[u8], bin: &[u8]) -> Self {
         Self { seg: opt_seg(opts), bin: parse_bin(bin), smooth_normals: opt_smooth_normals(opts) }
+    }
+
+    fn cache_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.seg.hash(&mut h);
+        let mut names: Vec<&String> = self.bin.keys().collect();
+        names.sort();
+        for name in names {
+            name.hash(&mut h);
+            self.bin[name].hash(&mut h);
+        }
+        h.finish()
     }
 }
 
@@ -339,12 +373,14 @@ fn build(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> {
     let Some(hk) = hk else {
         return build_uncached(node, color, d);
     };
-    let ck = (hk, color.0);
-    if let Some(g) = MEMO.with(|m| m.borrow().get(&ck).cloned()) {
+    let (generation, defaults_key) = COMPILE.with(|c| c.get());
+    let ck = (hk, defaults_key, color.0);
+    let hit = MEMO.with(|m| m.borrow_mut().get_mut(&ck).map(|(g, used)| { *used = generation; g.clone() }));
+    if let Some(g) = hit {
         return Ok(g);
     }
     let g = build_uncached(node, color, d)?;
-    MEMO.with(|m| m.borrow_mut().insert(ck, g.clone()));
+    MEMO.with(|m| m.borrow_mut().insert(ck, (g.clone(), generation)));
     Ok(g)
 }
 
@@ -1157,13 +1193,7 @@ fn opt_smooth_normals(opts: &[u8]) -> Option<f64> {
 /// and serialize the resulting solid to PLY. A top-level 2D result is extruded to
 /// a thin plate so it renders (OpenSCAD shows 2D output flat in the XY plane).
 fn finish(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
-    PALETTE.with(|p| p.borrow_mut().clear());
-    NODE_HASH.with(|m| {
-        let mut m = m.borrow_mut();
-        m.clear();
-        prehash(tree, &mut m);
-    });
-    MEMO.with(|m| m.borrow_mut().clear());
+    begin_compile(tree, defaults);
     let mesh = build(tree, DEFAULT_RGB, defaults)?.to_manifold_extruding();
     if mesh.is_empty() {
         return Err("scad: empty result (no geometry)".into());
@@ -1182,13 +1212,7 @@ fn finish(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
 /// doing hidden-line removal, and we deliberately don't want to reimplement
 /// what maquette's SVG mode already does.
 fn finish_svg(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
-    PALETTE.with(|p| p.borrow_mut().clear());
-    NODE_HASH.with(|m| {
-        let mut m = m.borrow_mut();
-        m.clear();
-        prehash(tree, &mut m);
-    });
-    MEMO.with(|m| m.borrow_mut().clear());
+    begin_compile(tree, defaults);
     let geo = build(tree, DEFAULT_RGB, defaults)?;
     let (cs, color) = match geo {
         Geo::D2(c, col) => (c, col),
@@ -1312,13 +1336,7 @@ fn build_scad_svg(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<V
 /// `get_gltf_info` — bbox_min / bbox_max / center / radius + Manifold-only
 /// numbers (volume, surface_area, num_tri, num_vert, genus).
 fn finish_info(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
-    PALETTE.with(|p| p.borrow_mut().clear());
-    NODE_HASH.with(|m| {
-        let mut m = m.borrow_mut();
-        m.clear();
-        prehash(tree, &mut m);
-    });
-    MEMO.with(|m| m.borrow_mut().clear());
+    begin_compile(tree, defaults);
     let mesh = build(tree, DEFAULT_RGB, defaults)?.to_manifold_extruding();
     let (mn, mx) = match mesh.bounding_box() {
         Some(bb) => (bb.min(), bb.max()),
@@ -1363,13 +1381,7 @@ fn build_scad_info(src: &[u8], files: &[u8], opts: &[u8], bin: &[u8]) -> Result<
 /// pack them into a length-prefixed blob the Typst side splits into an
 /// array of `bytes`. Framing: [u32 n][per-part: u32 len, bytes].
 fn finish_parts(tree: &Json, defaults: &Defaults) -> Result<Vec<u8>, String> {
-    PALETTE.with(|p| p.borrow_mut().clear());
-    NODE_HASH.with(|m| {
-        let mut m = m.borrow_mut();
-        m.clear();
-        prehash(tree, &mut m);
-    });
-    MEMO.with(|m| m.borrow_mut().clear());
+    begin_compile(tree, defaults);
     let mesh = build(tree, DEFAULT_RGB, defaults)?.to_manifold_extruding();
     if mesh.is_empty() {
         return Err("scad: empty result (no geometry)".into());
@@ -1412,13 +1424,7 @@ fn finish_raycast(tree: &Json, defaults: &Defaults, ray: &[u8]) -> Result<Vec<u8
     let end = v3(&r, "end").ok_or("raycast: ray.end must be [x,y,z]")?;
     finite_all(&origin, "raycast")?;
     finite_all(&end, "raycast")?;
-    PALETTE.with(|p| p.borrow_mut().clear());
-    NODE_HASH.with(|m| {
-        let mut m = m.borrow_mut();
-        m.clear();
-        prehash(tree, &mut m);
-    });
-    MEMO.with(|m| m.borrow_mut().clear());
+    begin_compile(tree, defaults);
     let mesh = build(tree, DEFAULT_RGB, defaults)?.to_manifold_extruding();
     let hits = mesh.ray_cast(origin, end);
     let mut out = String::with_capacity(64 + hits.len() * 96);
