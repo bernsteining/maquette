@@ -173,27 +173,55 @@ fn build_obj_textures(
     Ok((textures, tex_index))
 }
 
-fn cached_ply(data: &[u8], key: u64, config: &RenderConfig) -> Result<Vec<parser::Triangle>, String> {
+enum PlyTriangles {
+    Cached(&'static [parser::Triangle], u64),
+    Owned(Vec<parser::Triangle>),
+}
+
+impl PlyTriangles {
+    fn triangles(&self) -> &[parser::Triangle] {
+        match self {
+            PlyTriangles::Cached(t, _) => t,
+            PlyTriangles::Owned(t) => t,
+        }
+    }
+    fn mesh_key(&self) -> Option<u64> {
+        match self {
+            PlyTriangles::Cached(_, key) => Some(*key),
+            PlyTriangles::Owned(_) => None,
+        }
+    }
+}
+
+fn load_ply(data: &[u8]) -> Result<u64, String> {
+    if let Some(key) = prepared::key_of(data) {
+        return if cache::get_ply(key).is_some() { Ok(key) } else { Err("prepared mesh: PLY not cached".into()) };
+    }
+    let key = cache::hash(data);
+    if cache::get_ply(key).is_none() {
+        cache::put_ply(key, ply_parser::parse_ply(data)?);
+    }
+    Ok(key)
+}
+
+fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<(u64, PlyTriangles), String> {
     let want = config.color_map_property.as_str();
     if !want.is_empty() {
-        return match ply_parser::parse_ply_with(data, Some(want))? {
-            ply_parser::PlyData::Mesh(t) => Ok(t),
-            ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(&cloud, config)),
+        if prepared::key_of(data).is_some() {
+            return Err("prepared PLY can't take color_map_property; pass the raw file".into());
+        }
+        let tris = match ply_parser::parse_ply_with(data, Some(want))? {
+            ply_parser::PlyData::Mesh(t) => t,
+            ply_parser::PlyData::Points(cloud) => cloud_to_triangles(&cloud, config),
         };
+        return Ok((cache::hash(data), PlyTriangles::Owned(tris)));
     }
-    if let Some(ply) = cache::get_ply(key) {
-        return match ply {
-            ply_parser::PlyData::Mesh(t) => Ok(t.clone()),
-            ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(cloud, config)),
-        };
-    }
-    let ply = ply_parser::parse_ply(data)?;
-    cache::put_ply(key, ply);
-    let cached = cache::get_ply(key).unwrap();
-    match cached {
-        ply_parser::PlyData::Mesh(t) => Ok(t.clone()),
-        ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(cloud, config)),
-    }
+    let key = load_ply(data)?;
+    let tris = match cache::get_ply(key).unwrap() {
+        ply_parser::PlyData::Mesh(t) => PlyTriangles::Cached(t, key),
+        ply_parser::PlyData::Points(cloud) => PlyTriangles::Owned(cloud_to_triangles(cloud, config)),
+    };
+    Ok((key, tris))
 }
 
 fn cloud_to_triangles(cloud: &ply_parser::PointCloud, config: &RenderConfig) -> Vec<parser::Triangle> {
@@ -342,32 +370,29 @@ fn get_obj_info(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> 
 /// Entry point: receives PLY bytes + JSON config, returns SVG string.
 #[wasm_func]
 fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-    let key = cache::hash(ply_data);
     let mut config = parse_config(config_json)?;
-    let triangles = cached_ply(ply_data, key, &config)?;
+    let (key, tris) = cached_ply(ply_data, &config)?;
     apply_pointcloud_matte(key, &mut config);
     let empty = HashMap::new();
-    Ok(render::render(&triangles, &config, &empty, None, None).into_bytes())
+    Ok(render::render(tris.triangles(), &config, &empty, tris.mesh_key(), tris.mesh_key()).into_bytes())
 }
 
 /// Entry point: receives PLY bytes + JSON config, returns PNG bytes.
 #[wasm_func]
 fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-    let key = cache::hash(ply_data);
     let mut config = parse_config(config_json)?;
-    let triangles = cached_ply(ply_data, key, &config)?;
+    let (key, tris) = cached_ply(ply_data, &config)?;
     apply_pointcloud_matte(key, &mut config);
     let empty = HashMap::new();
-    render::render_raster(&triangles, &config, &empty, None, None, &[])
+    render::render_raster(tris.triangles(), &config, &empty, tris.mesh_key(), tris.mesh_key(), &[])
 }
 
 /// Returns JSON with model info (triangle count, bbox, etc.) for PLY.
 #[wasm_func]
 fn get_ply_info(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-    let key = cache::hash(ply_data);
     let config = parse_config(config_json)?;
-    let triangles = cached_ply(ply_data, key, &config)?;
-    Ok(render::get_info(&triangles, &config).into_bytes())
+    let (_, tris) = cached_ply(ply_data, &config)?;
+    Ok(render::get_info(tris.triangles(), &config).into_bytes())
 }
 
 #[cfg(not(target_arch = "wasm32"))]

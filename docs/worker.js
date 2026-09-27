@@ -3,7 +3,7 @@ async function compileModule(url) {
   catch { return await WebAssembly.compile(await (await fetch(url)).arrayBuffer()); }
 }
 
-const HANDLE_FNS = new Set(["render_obj", "render_obj_png", "render_stl", "render_stl_png", "get_obj_info", "get_stl_info"]);
+const HANDLE_FNS = new Set(["render_obj", "render_obj_png", "render_stl", "render_stl_png", "render_ply", "render_ply_png", "get_obj_info", "get_stl_info", "get_ply_info"]);
 
 function makePlugin(url) {
   let argParts = [], result = new Uint8Array(), inst = null, compiled = null, ensuring = null, active = null, handle = null;
