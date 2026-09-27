@@ -89,6 +89,12 @@ pub trait PixelShader {
     /// Shade one pixel (called from the scalar scanline remainder). Returns
     /// `None` to discard the fragment (mask alpha).
     fn shade_scalar(&self, pos: Vec3, normal: Vec3, uv: [f32; 2], uv1: [f32; 2], uv2: [f32; 2], color: [f32; 4], tangent: [f32; 4]) -> Option<[f32; 4]>;
+    /// The `keep` mask `shade4` would return for these inputs, computed
+    /// without the rest of the shading. Lets the deferred depth pass resolve
+    /// alpha-masked coverage exactly. Default: keep every lane.
+    fn alpha_keep4(&self, _in: &ShadeIn4) -> v128 {
+        i32x4_splat(-1)
+    }
 }
 
 pub struct PixelBuffer {
@@ -401,7 +407,6 @@ impl PixelBuffer {
             self.oit_reveal = vec![1.0f32; n];
             self.oit_used = true;
         }
-        let mark = matches!(blend, BlendMode::Overwrite) && !self.vis.is_empty();
         let mut sink = ImmediateSink {
             varyings: &varyings,
             shader,
@@ -410,19 +415,24 @@ impl PixelBuffer {
             zbuf: &mut self.zbuf,
             oit_accum: &mut self.oit_accum,
             oit_reveal: &mut self.oit_reveal,
-            owners: if mark { Some(Owners { vis: &mut self.vis, owned: &mut self.owned }) } else { None },
         };
         unsafe { for_each_fragment(&setup, self.width, &mut sink) };
     }
 
     /// Start a deferred opaque pass for up to `triangles` triangles: until
     /// [`end_deferred`](Self::end_deferred), [`rasterize_depth_id`](Self::rasterize_depth_id)
-    /// records which triangle owns each pixel, and `Overwrite` draws through
-    /// [`rasterize_triangle_shaded`](Self::rasterize_triangle_shaded) (alpha-masked
-    /// materials, which can discard) claim the pixels they write.
+    /// and [`rasterize_mask_depth_id`](Self::rasterize_mask_depth_id) record which
+    /// triangle owns each pixel; [`resolve_owners`](Self::resolve_owners) then
+    /// tells which triangles won any pixel at all.
     pub fn begin_deferred(&mut self, triangles: usize) {
         self.vis = vec![0; self.width * self.height];
         self.owned = vec![0; triangles];
+    }
+
+    pub fn resolve_owners(&mut self) {
+        for &v in &self.vis {
+            if v != 0 { self.owned[v as usize - 1] = 1; }
+        }
     }
 
     pub fn end_deferred(&mut self) {
@@ -441,8 +451,34 @@ impl PixelBuffer {
             zk_v: [f32x4_splat(zk[0]), f32x4_splat(zk[1]), f32x4_splat(zk[2])],
             owner: id as u32 + 1,
             zbuf: &mut self.zbuf,
-            owners: Owners { vis: &mut self.vis, owned: &mut self.owned },
+            vis: &mut self.vis,
         };
+        unsafe { for_each_fragment(&setup, self.width, &mut sink) };
+    }
+
+    /// Depth pass for alpha-masked triangle `id`: like
+    /// [`rasterize_depth_id`](Self::rasterize_depth_id), but a fragment only
+    /// counts when the shader's alpha test ([`PixelShader::alpha_keep4`]) keeps
+    /// it, exactly as immediate shading would have discarded it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rasterize_mask_depth_id<S: PixelShader>(
+        &mut self,
+        id: usize,
+        pts: &[(f64, f64); 3],
+        depths: &[f64; 3],
+        zbuf_depths: &[f64; 3],
+        positions: &[Vec3; 3],
+        normals: &[Vec3; 3],
+        uvs: &[[f32; 2]; 3],
+        uvs1: &[[f32; 2]; 3],
+        uvs2: &[[f32; 2]; 3],
+        colors: &[[f32; 4]; 3],
+        tangents: &[[f32; 4]; 3],
+        shader: &S,
+    ) {
+        let Some(setup) = TriSetup::new(pts, self.width, self.height) else { return };
+        let varyings = Varyings::new(depths, zbuf_depths, positions, normals, uvs, uvs1, uvs2, colors, tangents);
+        let mut sink = MaskDepthSink { varyings: &varyings, shader, owner: id as u32 + 1, zbuf: &mut self.zbuf, vis: &mut self.vis };
         unsafe { for_each_fragment(&setup, self.width, &mut sink) };
     }
 
@@ -1023,23 +1059,6 @@ impl TriSetup {
     }
 }
 
-const MASK_OWNER: u32 = u32::MAX;
-
-struct Owners<'a> {
-    vis: &'a mut [u32],
-    owned: &'a mut [u32],
-}
-
-impl Owners<'_> {
-    #[inline(always)]
-    unsafe fn claim(&mut self, idx: usize, owner: u32) {
-        let old = *self.vis.get_unchecked(idx);
-        if old != 0 && old != MASK_OWNER { *self.owned.get_unchecked_mut(old as usize - 1) -= 1; }
-        *self.vis.get_unchecked_mut(idx) = owner;
-        if owner != MASK_OWNER { *self.owned.get_unchecked_mut(owner as usize - 1) += 1; }
-    }
-}
-
 struct ScalarIn {
     zbuf_key: f32,
     pos: Vec3,
@@ -1221,7 +1240,6 @@ struct ImmediateSink<'a, S: PixelShader> {
     zbuf: &'a mut [f32],
     oit_accum: &'a mut [f32],
     oit_reveal: &'a mut [f32],
-    owners: Option<Owners<'a>>,
 }
 
 impl<S: PixelShader> FragmentSink for ImmediateSink<'_, S> {
@@ -1235,12 +1253,6 @@ impl<S: PixelShader> FragmentSink for ImmediateSink<'_, S> {
         if wmask == 0 { return; }
         let out = self.shader.shade4(self.varyings.inputs4(w, depth_v));
         write_lane_masked(self.pixels, self.zbuf, self.oit_accum, self.oit_reveal, idx0, wmask, zbuf_key_v, &out, self.blend);
-        if let Some(owners) = &mut self.owners {
-            let written = wmask & i32x4_bitmask(out.keep);
-            for lane in 0..4 {
-                if written & (1 << lane) != 0 { owners.claim(idx0 + lane, MASK_OWNER); }
-            }
-        }
     }
 
     #[inline(always)]
@@ -1250,7 +1262,6 @@ impl<S: PixelShader> FragmentSink for ImmediateSink<'_, S> {
             let i = self.varyings.inputs1(w0s, w1s, w2s, zbuf_key);
             if let Some(rgba) = self.shader.shade_scalar(i.pos, i.normal, i.uv, i.uv1, i.uv2, i.color, i.tan) {
                 write_pixel(self.pixels, self.zbuf, self.oit_accum, self.oit_reveal, idx, i.zbuf_key, rgba, self.blend);
-                if let Some(owners) = &mut self.owners { owners.claim(idx, MASK_OWNER); }
             }
         }
     }
@@ -1261,7 +1272,14 @@ struct DepthSink<'a> {
     zk_v: [v128; 3],
     owner: u32,
     zbuf: &'a mut [f32],
-    owners: Owners<'a>,
+    vis: &'a mut [u32],
+}
+
+#[inline(always)]
+unsafe fn claim4(zbuf: &mut [f32], vis: &mut [u32], idx0: usize, zbuf_key_v: v128, zbuf_v: v128, pass: v128, owner: u32) {
+    v128_store(zbuf.as_mut_ptr().add(idx0) as *mut v128, v128_bitselect(zbuf_key_v, zbuf_v, pass));
+    let vp = vis.as_mut_ptr().add(idx0) as *mut v128;
+    v128_store(vp, v128_bitselect(i32x4_splat(owner as i32), v128_load(vp as *const v128), pass));
 }
 
 impl FragmentSink for DepthSink<'_> {
@@ -1270,12 +1288,7 @@ impl FragmentSink for DepthSink<'_> {
         let zbuf_key_v = Varyings::lerp_v(w, &self.zk_v);
         let zbuf_v = v128_load(self.zbuf.as_ptr().add(idx0) as *const v128);
         let pass = v128_and(inside, f32x4_gt(zbuf_key_v, zbuf_v));
-        let wmask = i32x4_bitmask(pass);
-        if wmask == 0 { return; }
-        v128_store(self.zbuf.as_mut_ptr().add(idx0) as *mut v128, v128_bitselect(zbuf_key_v, zbuf_v, pass));
-        for lane in 0..4 {
-            if wmask & (1 << lane) != 0 { self.owners.claim(idx0 + lane, self.owner); }
-        }
+        if i32x4_bitmask(pass) != 0 { claim4(self.zbuf, self.vis, idx0, zbuf_key_v, zbuf_v, pass, self.owner); }
     }
 
     #[inline(always)]
@@ -1283,7 +1296,52 @@ impl FragmentSink for DepthSink<'_> {
         let zbuf_key = w0s * self.zk[0] + w1s * self.zk[1] + w2s * self.zk[2];
         if zbuf_key > *self.zbuf.get_unchecked(idx) {
             *self.zbuf.get_unchecked_mut(idx) = zbuf_key;
-            self.owners.claim(idx, self.owner);
+            *self.vis.get_unchecked_mut(idx) = self.owner;
+        }
+    }
+}
+
+fn splat_inputs(i: &ScalarIn) -> ShadeIn4 {
+    ShadeIn4 {
+        pos_x: f32x4_splat(i.pos.x as f32), pos_y: f32x4_splat(i.pos.y as f32), pos_z: f32x4_splat(i.pos.z as f32),
+        n_x: f32x4_splat(i.normal.x as f32), n_y: f32x4_splat(i.normal.y as f32), n_z: f32x4_splat(i.normal.z as f32),
+        uv_u: f32x4_splat(i.uv[0]), uv_v: f32x4_splat(i.uv[1]),
+        uv1_u: f32x4_splat(i.uv1[0]), uv1_v: f32x4_splat(i.uv1[1]),
+        uv2_u: f32x4_splat(i.uv2[0]), uv2_v: f32x4_splat(i.uv2[1]),
+        col_r: f32x4_splat(i.color[0]), col_g: f32x4_splat(i.color[1]), col_b: f32x4_splat(i.color[2]), col_a: f32x4_splat(i.color[3]),
+        tan_x: f32x4_splat(i.tan[0]), tan_y: f32x4_splat(i.tan[1]), tan_z: f32x4_splat(i.tan[2]), tan_w: f32x4_splat(i.tan[3]),
+    }
+}
+
+struct MaskDepthSink<'a, S: PixelShader> {
+    varyings: &'a Varyings,
+    shader: &'a S,
+    owner: u32,
+    zbuf: &'a mut [f32],
+    vis: &'a mut [u32],
+}
+
+impl<S: PixelShader> FragmentSink for MaskDepthSink<'_, S> {
+    #[inline(always)]
+    unsafe fn group(&mut self, idx0: usize, w: [v128; 3], inside: v128) {
+        let depth_v = self.varyings.depth_v(w);
+        let zbuf_key_v = self.varyings.zbuf_key_v(w);
+        let zbuf_v = v128_load(self.zbuf.as_ptr().add(idx0) as *const v128);
+        let pass = v128_and(inside, f32x4_gt(zbuf_key_v, zbuf_v));
+        if i32x4_bitmask(pass) == 0 { return; }
+        let pass = v128_and(pass, self.shader.alpha_keep4(&self.varyings.inputs4(w, depth_v)));
+        if i32x4_bitmask(pass) != 0 { claim4(self.zbuf, self.vis, idx0, zbuf_key_v, zbuf_v, pass, self.owner); }
+    }
+
+    #[inline(always)]
+    unsafe fn single(&mut self, idx: usize, w0s: f32, w1s: f32, w2s: f32) {
+        let zbuf_key = self.varyings.zbuf_key_s(w0s, w1s, w2s);
+        if zbuf_key > *self.zbuf.get_unchecked(idx) {
+            let keep = self.shader.alpha_keep4(&splat_inputs(&self.varyings.inputs1(w0s, w1s, w2s, zbuf_key)));
+            if i32x4_extract_lane::<0>(keep) != 0 {
+                *self.zbuf.get_unchecked_mut(idx) = zbuf_key;
+                *self.vis.get_unchecked_mut(idx) = self.owner;
+            }
         }
     }
 }

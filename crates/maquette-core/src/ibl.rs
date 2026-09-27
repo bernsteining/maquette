@@ -30,6 +30,17 @@ struct MipF32 {
     width: u32,
     height: u32,
     rgb: Vec<f32>,
+    dirs: Vec<(f32, f32, f32)>,
+}
+
+impl MipF32 {
+    fn new(width: u32, height: u32, rgb: Vec<f32>) -> Self {
+        let (inv_mw, inv_mh) = (1.0 / width as f32, 1.0 / height as f32);
+        let dirs = (0..height)
+            .flat_map(|y| (0..width).map(move |x| octahedral_decode((x as f32 + 0.5) * inv_mw, (y as f32 + 0.5) * inv_mh)))
+            .collect();
+        Self { width, height, rgb, dirs }
+    }
 }
 
 pub struct IblEnvironment {
@@ -76,7 +87,7 @@ impl IblEnvironment {
     }
 
     fn finish(base_rgb: Vec<f32>) -> Self {
-        let mut mips = vec![MipF32 { width: SIDE, height: SIDE, rgb: base_rgb }];
+        let mut mips = vec![MipF32::new(SIDE, SIDE, base_rgb)];
         loop {
             let cur = mips.last().unwrap();
             if cur.width <= 4 || cur.height <= 4 { break; }
@@ -216,7 +227,7 @@ fn build_diffuse_irradiance(mips: &[MipF32]) -> MipF32 {
             rgb[o + 2] = sum_b * inv_w;
         }
     }
-    MipF32 { width: OUT_SIDE, height: OUT_SIDE, rgb }
+    MipF32::new(OUT_SIDE, OUT_SIDE, rgb)
 }
 
 /// Inverse of `octahedral_encode` — used at build time to fill the map.
@@ -274,29 +285,23 @@ fn sample_seam_aware(mip: &MipF32, dx: f32, dy: f32, dz: f32) -> [f32; 3] {
     let qz = dz * inv_len;
 
     let sw = mip.width as usize;
-    let inv_mw = 1.0 / mw;
-    let inv_mh = 1.0 / mh;
 
     let ix = 1.0 - fx;
     let iy = 1.0 - fy;
 
-    let (tu, tv) = ((x0 as f32 + 0.5) * inv_mw, (y0 as f32 + 0.5) * inv_mh);
-    let (tdx, tdy, tdz) = octahedral_decode(tu, tv);
+    let (tdx, tdy, tdz) = mip.dirs[y0 as usize * sw + x0 as usize];
     let w00 = (qx * tdx + qy * tdy + qz * tdz).fmax(0.0) * ix * iy;
     let off00 = (y0 as usize * sw + x0 as usize) * 3;
 
-    let (tu, tv) = ((x1 as f32 + 0.5) * inv_mw, (y0 as f32 + 0.5) * inv_mh);
-    let (tdx, tdy, tdz) = octahedral_decode(tu, tv);
+    let (tdx, tdy, tdz) = mip.dirs[y0 as usize * sw + x1 as usize];
     let w10 = (qx * tdx + qy * tdy + qz * tdz).fmax(0.0) * fx * iy;
     let off10 = (y0 as usize * sw + x1 as usize) * 3;
 
-    let (tu, tv) = ((x0 as f32 + 0.5) * inv_mw, (y1 as f32 + 0.5) * inv_mh);
-    let (tdx, tdy, tdz) = octahedral_decode(tu, tv);
+    let (tdx, tdy, tdz) = mip.dirs[y1 as usize * sw + x0 as usize];
     let w01 = (qx * tdx + qy * tdy + qz * tdz).fmax(0.0) * ix * fy;
     let off01 = (y1 as usize * sw + x0 as usize) * 3;
 
-    let (tu, tv) = ((x1 as f32 + 0.5) * inv_mw, (y1 as f32 + 0.5) * inv_mh);
-    let (tdx, tdy, tdz) = octahedral_decode(tu, tv);
+    let (tdx, tdy, tdz) = mip.dirs[y1 as usize * sw + x1 as usize];
     let w11 = (qx * tdx + qy * tdy + qz * tdz).fmax(0.0) * fx * fy;
     let off11 = (y1 as usize * sw + x1 as usize) * 3;
 
@@ -336,5 +341,5 @@ fn downsample_2x(src: &MipF32) -> MipF32 {
             }
         }
     }
-    MipF32 { width: nw, height: nh, rgb }
+    MipF32::new(nw, nh, rgb)
 }

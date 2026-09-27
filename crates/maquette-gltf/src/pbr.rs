@@ -379,6 +379,7 @@ pub struct MaterialShader<'a> {
     lod_mr: f32,
     lod_emissive: f32,
     lod_occlusion: f32,
+    occlusion_from_mr: bool,
     lod_normal: f32,
 
     base_r_f: v128, base_g_f: v128, base_b_f: v128, alpha_f: v128,
@@ -507,6 +508,12 @@ impl<'a> MaterialShader<'a> {
             lod_mr:        lod_for(mr_tex),
             lod_emissive:  lod_for(em_tex),
             lod_occlusion: lod_for(oc_tex),
+            occlusion_from_mr: match (mr_tex, oc_tex) {
+                (Some(a), Some(b)) => std::ptr::eq(a, b)
+                    && material.texcoord_mr == material.texcoord_occlusion
+                    && same_transform(&material.xform_mr, &material.xform_occlusion),
+                _ => false,
+            },
             lod_normal:    lod_for(n_tex),
 
             base_r_f: f32x4_splat(material.base_color[0]),
@@ -650,7 +657,9 @@ impl<'a> MaterialShader<'a> {
                     0.0,
                 ];
             }
-            if let Some(t) = self.occlusion_tex {
+            if self.occlusion_from_mr {
+                occ[$i] = mr[$i][0];
+            } else if let Some(t) = self.occlusion_tex {
                 occ[$i] = t.sample_lod(self.material.xform_occlusion.apply(pick(self.material.texcoord_occlusion)), self.lod_occlusion)[0];
             }
             if let Some(t) = self.normal_tex {
@@ -1204,6 +1213,28 @@ impl<'a> PixelShader for MaterialShader<'a> {
     /// Fix: splat the scalar inputs into all 4 lanes and call `shade4`,
     /// then extract lane 0. Guarantees pixel-perfect consistency between
     /// SIMD and scalar paths.
+    fn alpha_keep4(&self, in_: &ShadeIn4) -> v128 {
+        let default_keep = i32x4_splat(-1i32);
+        if self.mask_cutoff.is_none() { return default_keep; }
+        let alpha = match self.base_tex {
+            Some(t) => {
+                let mut a = [0.0f32; 4];
+                macro_rules! lane { ($i:tt) => {
+                    let uv = match self.material.texcoord_base {
+                        2 => [f32x4_extract_lane::<$i>(in_.uv2_u), f32x4_extract_lane::<$i>(in_.uv2_v)],
+                        1 => [f32x4_extract_lane::<$i>(in_.uv1_u), f32x4_extract_lane::<$i>(in_.uv1_v)],
+                        _ => [f32x4_extract_lane::<$i>(in_.uv_u), f32x4_extract_lane::<$i>(in_.uv_v)],
+                    };
+                    a[$i] = t.sample_lod(self.material.xform_base.apply(uv), self.lod_base)[3];
+                } }
+                lane!(0); lane!(1); lane!(2); lane!(3);
+                f32x4_mul(f32x4(a[0], a[1], a[2], a[3]), self.alpha_f)
+            }
+            None => self.alpha_f,
+        };
+        apply_mask_cutoff(f32x4_mul(alpha, in_.col_a), self.mask_cutoff, default_keep)
+    }
+
     fn shade_scalar(&self, pos: Vec3, normal: Vec3, uv: [f32; 2], uv1: [f32; 2], uv2: [f32; 2], color: [f32; 4], tangent: [f32; 4]) -> Option<[f32; 4]> {
         let in4 = ShadeIn4 {
             pos_x: f32x4_splat(pos.x as f32),
@@ -1253,6 +1284,11 @@ fn refract_scalar(v: Vec3, n: Vec3, eta: f64) -> (f64, f64, f64) {
     let tz = eta * -v.z + coef * n.z;
     let len = (tx * tx + ty * ty + tz * tz).sqrt().fmax(1e-12);
     (tx / len, ty / len, tz / len)
+}
+
+fn same_transform(a: &crate::scene::TextureTransform, b: &crate::scene::TextureTransform) -> bool {
+    let bits = |t: &crate::scene::TextureTransform| [t.scale[0], t.scale[1], t.offset[0], t.offset[1], t.rot_cos, t.rot_sin].map(f32::to_bits);
+    bits(a) == bits(b)
 }
 
 /// Apply the material's alpha cutoff to a lane mask.

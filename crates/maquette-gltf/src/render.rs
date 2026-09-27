@@ -259,13 +259,17 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         match material.alpha_mode {
             AlphaMode::Blend => blend_queue.push(prepared),
             AlphaMode::Opaque | AlphaMode::Mask if transmissive => blend_queue.push(prepared),
-            AlphaMode::Mask => shade_triangle(buffer, &pbr, material, &prepared, BlendMode::Overwrite),
+            AlphaMode::Mask => {
+                mask_depth(buffer, &pbr, material, &prepared, deferred.len());
+                deferred.push((prepared, material));
+            }
             AlphaMode::Opaque => {
                 buffer.rasterize_depth_id(&prepared.pts, &prepared.zbuf_depths, deferred.len());
                 deferred.push((prepared, material));
             }
         }
     }
+    buffer.resolve_owners();
     for (id, (prepared, material)) in deferred.iter().enumerate() {
         if buffer.owns_pixels(id) {
             shade_triangle_deferred(buffer, &pbr, material, prepared, id);
@@ -344,6 +348,12 @@ enum Projection {
     Orthographic { half_w: f64, half_h: f64 },
 }
 
+enum Pass {
+    Immediate(BlendMode),
+    MaskDepth,
+    Deferred,
+}
+
 struct PreparedTriangle<'a> {
     tri: &'a Triangle,
     pts: [(f64, f64); 3],
@@ -363,7 +373,17 @@ fn shade_triangle(
     prepared: &PreparedTriangle,
     blend: BlendMode,
 ) {
-    shade_with(buffer, pbr, material, prepared, Some(blend), 0);
+    shade_with(buffer, pbr, material, prepared, Pass::Immediate(blend), 0);
+}
+
+fn mask_depth(
+    buffer: &mut PixelBuffer,
+    pbr: &PbrContext,
+    material: &crate::scene::Material,
+    prepared: &PreparedTriangle,
+    id: usize,
+) {
+    shade_with(buffer, pbr, material, prepared, Pass::MaskDepth, id);
 }
 
 fn shade_triangle_deferred(
@@ -373,7 +393,7 @@ fn shade_triangle_deferred(
     prepared: &PreparedTriangle,
     id: usize,
 ) {
-    shade_with(buffer, pbr, material, prepared, None, id);
+    shade_with(buffer, pbr, material, prepared, Pass::Deferred, id);
 }
 
 fn shade_with(
@@ -381,7 +401,7 @@ fn shade_with(
     pbr: &PbrContext,
     material: &crate::scene::Material,
     prepared: &PreparedTriangle,
-    blend: Option<BlendMode>,
+    pass: Pass,
     deferred_id: usize,
 ) {
     let tri = prepared.tri;
@@ -420,13 +440,18 @@ fn shade_with(
     let lod_scale = compute_lod_scale(&prepared.pts, tri) as f32 * xform_area_scale;
 
     let shader = MaterialShader::new(pbr, material, &prepared.textures, mask_cutoff, lod_scale);
-    match blend {
-        Some(blend) => buffer.rasterize_triangle_shaded(
+    match pass {
+        Pass::Immediate(blend) => buffer.rasterize_triangle_shaded(
             &prepared.pts, &prepared.depths, &prepared.zbuf_depths,
             &positions, &normals, &uvs, &uvs1, &uvs2, &colors, &tangents,
             blend, &shader,
         ),
-        None => buffer.shade_deferred(
+        Pass::MaskDepth => buffer.rasterize_mask_depth_id(
+            deferred_id, &prepared.pts, &prepared.depths, &prepared.zbuf_depths,
+            &positions, &normals, &uvs, &uvs1, &uvs2, &colors, &tangents,
+            &shader,
+        ),
+        Pass::Deferred => buffer.shade_deferred(
             deferred_id, &prepared.pts, &prepared.depths, &prepared.zbuf_depths,
             &positions, &normals, &uvs, &uvs1, &uvs2, &colors, &tangents,
             &shader,
