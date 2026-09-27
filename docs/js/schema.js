@@ -4,7 +4,7 @@ const PROJ = ["perspective","orthographic","isometric","dimetric","trimetric","m
 const SCHEMA = [
   { s: "Point cloud (PLY)", open: true, when: (s, l, m) => m._ext === "ply" && !m._mol && !m.scad, fields: [
     { k: "point_splat", label: "Splat as points (no surface)", help: "PLY clouds: draw points as round splats instead of reconstructing a surface.", t: "bool", def: false, omitIf: v => v === false,
-      onSet: (v, s) => { if (v) { s._psPrev = s.point_size; s.point_size = 0; } else if (s._psPrev != null) { s.point_size = s._psPrev; } return true; } },
+      onSet: (v, s) => { if (v) { s._psPrev = s.point_size; s.point_size = 0.012; } else if (s._psPrev != null) { s.point_size = s._psPrev; } return true; } },
     { k: "point_size", label: "Point size / radius (0 = auto)", help: "PLY clouds: kNN radius, or splat radius when splatting (0 = auto).", t: "num", def: 0, step: 0.001, min: 0, omitIf: v => v === 0 },
     { k: "point_neighbors", label: "Neighbors k (higher = fewer holes)", help: "PLY clouds: neighbors per point (higher = fewer holes, slower).", t: "num", def: 12, omitIf: v => v === 12, when: s => !s.point_splat },
     { k: "point_boundary", label: "Boundary cut angle ° (0 = off)", help: "PLY clouds: cut connections across a normal jump > this angle° (0 = keep all).", t: "num", def: 60, omitIf: v => v === 60, when: s => !s.point_splat },
