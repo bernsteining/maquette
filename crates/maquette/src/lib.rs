@@ -314,6 +314,15 @@ fn prepare_obj(obj_data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(prepared::encode(cache::hash(obj_data), &triangles, &groups))
 }
 
+/// 16-byte handle for a model: a prepared-blob header carrying its cache key.
+/// After one call has parsed the model into this instance, the OBJ/STL entry
+/// points accept the handle in place of the file, skipping the copy and the
+/// re-hash; on a cache miss they fail and the caller resends the file.
+#[wasm_func]
+fn model_key(data: &[u8]) -> Result<Vec<u8>, String> {
+    Ok(prepared::header(prepared::key_of(data).unwrap_or_else(|| cache::hash(data))))
+}
+
 /// Returns JSON with model info (triangle count, bbox, etc.) for STL.
 #[wasm_func]
 fn get_stl_info(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
@@ -412,4 +421,5 @@ pub mod native {
     pub fn get_ply_info(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::get_ply_info(d, c) }
     pub fn prepare_stl(d: &[u8]) -> Result<Vec<u8>, String> { super::prepare_stl(d) }
     pub fn prepare_obj(d: &[u8]) -> Result<Vec<u8>, String> { super::prepare_obj(d) }
+    pub fn model_key(d: &[u8]) -> Result<Vec<u8>, String> { super::model_key(d) }
 }

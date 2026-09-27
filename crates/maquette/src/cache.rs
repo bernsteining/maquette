@@ -89,7 +89,7 @@ pub fn get_smooth(key: u64) -> Option<&'static SmoothData> {
 }
 
 pub fn put_smooth(key: u64, data: SmoothData) {
-    unsafe { (*addr_of_mut!(SMOOTH_CACHE)).push((key, data)) }
+    unsafe { push_bounded(&mut *addr_of_mut!(SMOOTH_CACHE), key, data) }
 }
 
 /// Preprocessed-mesh cache, keyed by a hash that combines the model-data hash
@@ -101,5 +101,12 @@ pub fn get_prep(key: u64) -> Option<&'static (Vec<Triangle>, Vec3, Vec3)> {
 }
 
 pub fn put_prep(key: u64, data: (Vec<Triangle>, Vec3, Vec3)) {
-    unsafe { (*addr_of_mut!(PREP_CACHE)).push((key, data)) }
+    unsafe { push_bounded(&mut *addr_of_mut!(PREP_CACHE), key, data) }
+}
+
+const DERIVED_CAP: usize = 16;
+
+fn push_bounded<T>(cache: &mut Vec<(u64, T)>, key: u64, data: T) {
+    if cache.len() >= DERIVED_CAP { cache.remove(0); }
+    cache.push((key, data));
 }

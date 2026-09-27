@@ -36,6 +36,15 @@ pub fn key_of(data: &[u8]) -> Option<u64> {
     }
 }
 
+/// Header-only blob for `key`: accepted wherever a prepared blob is, and served
+/// from the per-instance model cache when that key is already parsed there
+/// (otherwise decoding it fails as truncated).
+pub fn header(key: u64) -> Vec<u8> {
+    let mut out = MAGIC.to_vec();
+    out.extend_from_slice(&key.to_le_bytes());
+    out
+}
+
 pub fn encode(key: u64, triangles: &[Triangle], groups: &HashMap<u32, GroupAppearance>) -> Vec<u8> {
     let mut out = Vec::with_capacity(20 + triangles.len() * 104);
     out.extend_from_slice(MAGIC);

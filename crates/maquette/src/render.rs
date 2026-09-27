@@ -736,6 +736,65 @@ fn build_shadow_data(
     Some(ShadowData { maps, bias, strength, softness: cfg.softness, factors, per_pixel, tint, light_sizes, ambient_keep_base })
 }
 
+fn shadow_cache_key(
+    prep_base: u64,
+    has_smooth: bool,
+    lights: &[ResolvedLight],
+    config: &RenderConfig,
+    group_styles: &HashMap<u32, GroupAppearance>,
+    allow_per_pixel: bool,
+) -> Option<u64> {
+    #[inline]
+    fn m(h: u64, x: u64) -> u64 { (h ^ x).wrapping_mul(0x100000001b3) }
+    let cfg = config.shadows.as_ref()?;
+    let mut h = m(prep_cache_key(prep_base, config), 0x5AD0);
+    h = m(h, has_smooth as u64 | (allow_per_pixel as u64) << 1);
+    for l in lights {
+        h = m(h, l.kind as u64);
+        for v in [l.vector.x, l.vector.y, l.vector.z, l.size] { h = m(h, v.to_bits()); }
+        h = m(h, l.cast_shadow as u64);
+    }
+    for v in [cfg.bias, cfg.normal_bias, cfg.slope_bias, cfg.strength, cfg.light_size, config.opacity, config.ambient.intensity] {
+        h = m(h, v.to_bits());
+    }
+    for &u in &config.up { h = m(h, u.to_bits()); }
+    h = m(h, cfg.resolution as u64);
+    h = m(h, cfg.softness as u64);
+    h = m(h, cfg.per_pixel as u64 | (cfg.omni as u64) << 1);
+    for &b in cfg.color.as_bytes() { h = m(h, b as u64); }
+    let groups = group_styles.iter().fold(0u64, |acc, (gid, g)| {
+        acc ^ m(m(0xcbf2_9ce4_8422_2325, *gid as u64), g.opacity.map_or(u64::MAX, f64::to_bits))
+    });
+    Some(m(h, groups))
+}
+
+fn shadow_data_for<'a>(
+    owned: &'a mut Option<ShadowData>,
+    prep_key: Option<u64>,
+    tris: &[Triangle],
+    lights: &[ResolvedLight],
+    smooth: Option<&smooth::SmoothData>,
+    config: &RenderConfig,
+    group_styles: &HashMap<u32, GroupAppearance>,
+    bc: Vec3,
+    br: f64,
+    allow_per_pixel: bool,
+) -> Option<&'a ShadowData> {
+    static mut CACHE: Vec<(u64, Option<ShadowData>)> = Vec::new();
+    let build = || build_shadow_data(tris, lights, smooth, config, group_styles, bc, br, allow_per_pixel);
+    let Some(key) = prep_key.and_then(|p| shadow_cache_key(p, smooth.is_some(), lights, config, group_styles, allow_per_pixel)) else {
+        *owned = build();
+        return owned.as_ref();
+    };
+    let cache = unsafe { &mut *std::ptr::addr_of_mut!(CACHE) };
+    if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
+        return cache[i].1.as_ref();
+    }
+    if cache.len() >= 2 { cache.remove(0); }
+    cache.push((key, build()));
+    cache.last().unwrap().1.as_ref()
+}
+
 /// `[(i / 255)^p for i in 0..256]`, memoized per exponent across calls: each
 /// table costs 256 software `powf`, and a document re-renders with the same
 /// shininess / fresnel / SSS exponents over and over.
@@ -1778,8 +1837,9 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
     let lights = resolve_lights(config);
-    let shadow_data = build_shadow_data(&tris, &lights, smooth_data, config, group_styles, bc, br, false);
-    let mut projected = project_triangles(&tris, smooth_data, config, &view, config.width, config.height, br, false, group_styles, &lights, shadow_data.as_ref());
+    let mut shadow_owned = None;
+    let shadow_data = shadow_data_for(&mut shadow_owned, prep_key, &tris, &lights, smooth_data, config, group_styles, bc, br, false);
+    let mut projected = project_triangles(&tris, smooth_data, config, &view, config.width, config.height, br, false, group_styles, &lights, shadow_data);
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, config.width, config.height));
     }
@@ -2514,9 +2574,10 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
     let lights = resolve_lights(config);
-    let shadow_data = build_shadow_data(&tris, &lights, smooth_data, config, group_styles, bc, br, true);
+    let mut shadow_owned = None;
+    let shadow_data = shadow_data_for(&mut shadow_owned, prep_key, &tris, &lights, smooth_data, config, group_styles, bc, br, true);
     crate::prof::mark(13);
-    let mut projected = project_triangles(&tris, smooth_data, config, &view, vw, vh, br, false, group_styles, &lights, shadow_data.as_ref());
+    let mut projected = project_triangles(&tris, smooth_data, config, &view, vw, vh, br, false, group_styles, &lights, shadow_data);
     crate::prof::mark(14);
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, vw, vh));
@@ -2547,7 +2608,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
                         continue;
                     }
                 }
-                match (shadow_data.as_ref(), tri.pp) {
+                match (shadow_data, tri.pp) {
                     (Some(sd), Some((wp, normal))) => {
                         let cols = tri.vertex_colors.unwrap_or([(tri.r, tri.g, tri.b); 3]);
                         let world = [[wp[0].x, wp[0].y, wp[0].z], [wp[1].x, wp[1].y, wp[1].z], [wp[2].x, wp[2].y, wp[2].z]];
