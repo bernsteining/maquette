@@ -19,6 +19,7 @@
 //! - KHR_lights_punctual multi-light dispatch (point + spot + distance falloff).
 //! - IBL from a baked cubemap for real ambient reflection.
 
+use maquette_core::math::FloatExt;
 use maquette_core::color::srgb_to_linear_f01;
 use maquette_core::math::Vec3;
 use maquette_core::rasterizer::{PixelShader, ShadeIn4, ShadeOut4};
@@ -51,7 +52,7 @@ impl SplattedLight {
     pub fn from_light(l: &crate::scene::PunctualLight) -> Self {
         use crate::scene::LightKind;
         let (cone_scale, cone_offset) = if l.kind == LightKind::Spot {
-            let denom = (l.inner_cone_cos - l.outer_cone_cos).max(1e-4);
+            let denom = (l.inner_cone_cos - l.outer_cone_cos).fmax(1e-4);
             let scale = 1.0 / denom;
             (scale, -l.outer_cone_cos * scale)
         } else { (0.0, 0.0) };
@@ -165,16 +166,16 @@ impl PbrContext {
             return [base[0], base[1], base[2], alpha];
         }
 
-        let alpha_g = (roughness * roughness).max(0.001);
+        let alpha_g = (roughness * roughness).fmax(0.001);
         let ior_f0 = {
             let n = material.ior;
             let x = (n - 1.0) / (n + 1.0);
             x * x
         };
         let dielectric_f0 = [
-            (ior_f0 * material.specular_color[0] * material.specular_factor).min(1.0),
-            (ior_f0 * material.specular_color[1] * material.specular_factor).min(1.0),
-            (ior_f0 * material.specular_color[2] * material.specular_factor).min(1.0),
+            (ior_f0 * material.specular_color[0] * material.specular_factor).fmin(1.0),
+            (ior_f0 * material.specular_color[1] * material.specular_factor).fmin(1.0),
+            (ior_f0 * material.specular_color[2] * material.specular_factor).fmin(1.0),
         ];
         let f0 = mix3(dielectric_f0, base, metallic);
         let diffuse = scale3(base, 1.0 - metallic);
@@ -186,19 +187,19 @@ impl PbrContext {
             (self.camera_pos.z - world_pos.z) as f32,
         ];
         normalize_in_place(&mut v);
-        let n_dot_v = dot3(n, v).max(0.0);
+        let n_dot_v = dot3(n, v).fmax(0.0);
 
         let mut r = 0.0_f32;
         let mut g = 0.0_f32;
         let mut b = 0.0_f32;
-        let alpha_cc = (material.clearcoat_roughness * material.clearcoat_roughness).max(0.001);
+        let alpha_cc = (material.clearcoat_roughness * material.clearcoat_roughness).fmax(0.001);
         let has_clearcoat = material.clearcoat_factor > 0.0;
         let has_sheen = material.sheen_color.iter().any(|c| *c > 0.0);
-        let alpha_s = (material.sheen_roughness * material.sheen_roughness).max(1e-4);
+        let alpha_s = (material.sheen_roughness * material.sheen_roughness).fmax(1e-4);
 
         for (light_idx, light) in self.lights.iter().enumerate() {
             let (l, atten) = resolve_light_scalar(light, world_pos);
-            let n_dot_l = dot3(n, l).max(0.0);
+            let n_dot_l = dot3(n, l).fmax(0.0);
             if n_dot_l <= 0.0 || n_dot_v <= 0.0 { continue; }
             let shadow = self.shadows.get(light_idx).and_then(|s| s.as_ref())
                 .map(|sh| {
@@ -213,8 +214,8 @@ impl PbrContext {
 
             let mut h = [v[0] + l[0], v[1] + l[1], v[2] + l[2]];
             normalize_in_place(&mut h);
-            let n_dot_h = dot3(n, h).max(0.0);
-            let v_dot_h = dot3(v, h).max(0.0);
+            let n_dot_h = dot3(n, h).fmax(0.0);
+            let v_dot_h = dot3(v, h).fmax(0.0);
 
             let d = ggx_d(n_dot_h, alpha_g);
             let v_geom = smith_v(n_dot_v, n_dot_l, alpha_g);
@@ -237,7 +238,7 @@ impl PbrContext {
             if has_clearcoat {
                 let d_cc = ggx_d(n_dot_h, alpha_cc);
                 let v_cc = smith_v(n_dot_v, n_dot_l, alpha_cc);
-                let f_cc = 0.04 + (1.0 - 0.04) * (1.0 - v_dot_h).max(0.0).powi(5);
+                let f_cc = 0.04 + (1.0 - 0.04) * (1.0 - v_dot_h).fmax(0.0).powi(5);
                 let spec_cc = d_cc * v_cc * f_cc * n_dot_l;
                 let cc = material.clearcoat_factor;
                 let cc_atten = 1.0 - cc * f_cc;
@@ -248,7 +249,7 @@ impl PbrContext {
 
             if has_sheen {
                 let inv_alpha = 1.0 / alpha_s;
-                let sin2h = (1.0 - n_dot_h * n_dot_h).max(0.0);
+                let sin2h = (1.0 - n_dot_h * n_dot_h).fmax(0.0);
                 let d_s = (2.0 + inv_alpha) / (2.0 * std::f32::consts::PI) * sin2h.powf(inv_alpha * 0.5);
                 let v_s = 1.0 / (4.0 * (n_dot_l + n_dot_v - n_dot_l * n_dot_v));
                 let s_common = d_s * v_s * n_dot_l;
@@ -299,12 +300,12 @@ fn resolve_light_scalar(light: &SplattedLight, world_pos: Vec3) -> ([f32; 3], [f
             let tx = px - world_pos.x as f32;
             let ty = py - world_pos.y as f32;
             let tz = pz - world_pos.z as f32;
-            let dist2 = (tx*tx + ty*ty + tz*tz).max(1e-8);
+            let dist2 = (tx*tx + ty*ty + tz*tz).fmax(1e-8);
             let inv_dist = 1.0 / dist2.sqrt();
             let lx = tx * inv_dist;
             let ly = ty * inv_dist;
             let lz = tz * inv_dist;
-            let dist_atten = 1.0 / dist2.max(1e-4);
+            let dist_atten = 1.0 / dist2.fmax(1e-4);
             let range_inv = f32x4_extract_lane::<0>(light.range_inv);
             let dr = dist2.sqrt() * range_inv;
             let dr4 = dr * dr * dr * dr;
@@ -313,7 +314,7 @@ fn resolve_light_scalar(light: &SplattedLight, world_pos: Vec3) -> ([f32; 3], [f
             if light.kind == LightKind::Spot {
                 let cos_scale = f32x4_extract_lane::<0>(light.cone_scale);
                 let cos_off = f32x4_extract_lane::<0>(light.cone_offset);
-                let cos_theta = (-(dx * lx + dy * ly + dz * lz)).max(0.0);
+                let cos_theta = (-(dx * lx + dy * ly + dz * lz)).fmax(0.0);
                 let cone = (cos_theta * cos_scale + cos_off).clamp(0.0, 1.0);
                 atten *= cone;
             }
@@ -487,10 +488,10 @@ impl<'a> MaterialShader<'a> {
         let em_tex   = tex(material.emissive_texture);
         let oc_tex   = tex(material.occlusion_texture);
         let n_tex    = tex(material.normal_texture);
-        let half_log_scale = 0.5 * (lod_scale.max(1e-30)).log2();
+        let half_log_scale = 0.5 * (lod_scale.fmax(1e-30)).log2();
         let lod_for = |t: Option<&Texture>| -> f32 {
             let Some(t) = t else { return 0.0; };
-            (half_log_scale + t.lod_bias).max(0.0)
+            (half_log_scale + t.lod_bias).fmax(0.0)
         };
         Self {
             ctx,
@@ -548,7 +549,7 @@ impl<'a> MaterialShader<'a> {
             up_z: f32x4_splat(ctx.world_up.z as f32),
 
             clearcoat_factor: f32x4_splat(material.clearcoat_factor),
-            clearcoat_alpha:  f32x4_splat((material.clearcoat_roughness * material.clearcoat_roughness).max(0.001)),
+            clearcoat_alpha:  f32x4_splat((material.clearcoat_roughness * material.clearcoat_roughness).fmax(0.001)),
             has_clearcoat:    material.clearcoat_factor > 0.0,
             clearcoat_normal_tex: tex(material.clearcoat_normal_texture),
             clearcoat_normal_scale: f32x4_splat(material.clearcoat_normal_scale),
@@ -1241,7 +1242,7 @@ impl<'a> PixelShader for MaterialShader<'a> {
 /// Scalar counterpart to `refract_v3`. See it for algorithm.
 #[inline]
 fn refract_scalar(v: Vec3, n: Vec3, eta: f64) -> (f64, f64, f64) {
-    let ndv = n.dot(v).max(0.0);
+    let ndv = n.dot(v).fmax(0.0);
     let k = 1.0 - eta * eta * (1.0 - ndv * ndv);
     if k < 0.0 {
         return (-v.x, -v.y, -v.z);
@@ -1250,7 +1251,7 @@ fn refract_scalar(v: Vec3, n: Vec3, eta: f64) -> (f64, f64, f64) {
     let tx = eta * -v.x + coef * n.x;
     let ty = eta * -v.y + coef * n.y;
     let tz = eta * -v.z + coef * n.z;
-    let len = (tx * tx + ty * ty + tz * tz).sqrt().max(1e-12);
+    let len = (tx * tx + ty * ty + tz * tz).sqrt().fmax(1e-12);
     (tx / len, ty / len, tz / len)
 }
 
@@ -1476,7 +1477,7 @@ fn normalize_v3(vx: v128, vy: v128, vz: v128) -> (v128, v128, v128) {
 fn ggx_d(n_dot_h: f32, alpha: f32) -> f32 {
     let a2 = alpha * alpha;
     let denom = n_dot_h * n_dot_h * (a2 - 1.0) + 1.0;
-    a2 / (std::f32::consts::PI * denom * denom).max(1e-7)
+    a2 / (std::f32::consts::PI * denom * denom).fmax(1e-7)
 }
 
 #[inline]
@@ -1484,12 +1485,12 @@ fn smith_v(n_dot_v: f32, n_dot_l: f32, alpha: f32) -> f32 {
     let a2 = alpha * alpha;
     let ggx_v = n_dot_l * ((n_dot_v * n_dot_v * (1.0 - a2)) + a2).sqrt();
     let ggx_l = n_dot_v * ((n_dot_l * n_dot_l * (1.0 - a2)) + a2).sqrt();
-    0.5 / (ggx_v + ggx_l).max(1e-7)
+    0.5 / (ggx_v + ggx_l).fmax(1e-7)
 }
 
 #[inline]
 fn fresnel_schlick(v_dot_h: f32, f0: [f32; 3]) -> [f32; 3] {
-    let x = (1.0 - v_dot_h).max(0.0);
+    let x = (1.0 - v_dot_h).fmax(0.0);
     let x5 = x * x * x * x * x;
     [
         f0[0] + (1.0 - f0[0]) * x5,

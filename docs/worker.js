@@ -3,10 +3,10 @@ async function compileModule(url) {
   catch { return await WebAssembly.compile(await (await fetch(url)).arrayBuffer()); }
 }
 
-const HANDLE_FNS = new Set(["render_obj", "render_obj_png", "render_stl", "render_stl_png", "render_ply", "render_ply_png", "get_obj_info", "get_stl_info", "get_ply_info"]);
+const HANDLE_FNS = new Set(["render_obj", "render_obj_png", "render_stl", "render_stl_png", "render_ply", "render_ply_png", "get_obj_info", "get_stl_info", "get_ply_info", "render_gltf"]);
 
 function makePlugin(url) {
-  let argParts = [], result = new Uint8Array(), inst = null, compiled = null, ensuring = null, active = null, handle = null;
+  let argParts = [], result = new Uint8Array(), inst = null, compiled = null, ensuring = null, active = null, handle = null, handleMisses = 0;
   const models = new Map();
   const imports = { typst_env: {
     wasm_minimal_protocol_write_args_to_buffer: (ptr) => {
@@ -30,14 +30,21 @@ function makePlugin(url) {
       active = bytes || models.get(key);
       if (!active) throw new Error(`${url}: no cached model for key: ${key}`);
       handle = null;
+      handleMisses = 0;
     },
     call(fn, args, withModel) {
       if (!withModel) return invoke(fn, args);
       if (!active) throw new Error(`${url}: no model bound`);
       const canHandle = HANDLE_FNS.has(fn) && handle !== false && "model_key" in inst.exports;
       if (canHandle && handle) {
-        try { return invoke(fn, [handle, ...args]); }
-        catch (e) { if (e instanceof WebAssembly.RuntimeError) throw e; handle = false; }
+        try {
+          const out = invoke(fn, [handle, ...args]);
+          handleMisses = 0;
+          return out;
+        } catch (e) {
+          if (e instanceof WebAssembly.RuntimeError) throw e;
+          if (++handleMisses >= 2) handle = false;
+        }
       }
       const out = invoke(fn, [active, ...args]);
       if (canHandle && handle === null) handle = invoke("model_key", [active]);

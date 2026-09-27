@@ -9,6 +9,7 @@
 /// slot is here now so materials, rasterizer, and shader all agree on the
 /// vertex layout before we start wiring the sampler.
 
+use maquette_core::math::FloatExt;
 use crate::gltf_loader::LoadedGltf;
 use maquette_core::math::{Mat4, Vec3};
 use maquette_core::texture::{build_mips, Filter, MipLevel, Texture, Wrap};
@@ -208,21 +209,21 @@ impl MaterialPrecomp {
                 1.0
             } else {
                 let c = m.attenuation_color[ch].clamp(1e-6, 1.0);
-                let t = m.thickness_factor / m.attenuation_distance.max(1e-6);
+                let t = m.thickness_factor / m.attenuation_distance.fmax(1e-6);
                 c.powf(t)
             }
         };
         Self {
             dielectric_f0: [
-                (x2 * m.specular_color[0] * m.specular_factor).min(1.0),
-                (x2 * m.specular_color[1] * m.specular_factor).min(1.0),
-                (x2 * m.specular_color[2] * m.specular_factor).min(1.0),
+                (x2 * m.specular_color[0] * m.specular_factor).fmin(1.0),
+                (x2 * m.specular_color[1] * m.specular_factor).fmin(1.0),
+                (x2 * m.specular_color[2] * m.specular_factor).fmin(1.0),
             ],
-            sheen_inv_alpha: 1.0 / (m.sheen_roughness * m.sheen_roughness).max(1e-4),
+            sheen_inv_alpha: 1.0 / (m.sheen_roughness * m.sheen_roughness).fmax(1e-4),
             volume_attenuation: [vol(0), vol(1), vol(2)],
-            ior_ratio:   1.0 / m.ior.max(1.0001),
-            ior_ratio_r: 1.0 / (m.ior - 0.02 * m.dispersion).max(1.0001),
-            ior_ratio_b: 1.0 / (m.ior + 0.02 * m.dispersion).max(1.0001),
+            ior_ratio:   1.0 / m.ior.fmax(1.0001),
+            ior_ratio_r: 1.0 / (m.ior - 0.02 * m.dispersion).fmax(1.0001),
+            ior_ratio_b: 1.0 / (m.ior + 0.02 * m.dispersion).fmax(1.0001),
             anisotropy_cos_rot: m.anisotropy_rotation.cos(),
             anisotropy_sin_rot: m.anisotropy_rotation.sin(),
         }
@@ -441,7 +442,7 @@ impl Scene {
             0.5 * (self.bbox_min.z + self.bbox_max.z),
         );
         let radius = 0.5 * (self.bbox_max - self.bbox_min).length();
-        (center, radius.max(1e-6))
+        (center, radius.fmax(1e-6))
     }
 }
 
@@ -809,7 +810,7 @@ fn spec_gloss_to_mr(diffuse: [f32; 4], spec: [f32; 3], gloss: f32) -> ([f32; 4],
     const DIELECTRIC_SPEC: f32 = 0.04;
     const EPS: f32 = 1e-6;
     let roughness = (1.0 - gloss).clamp(0.0, 1.0);
-    let spec_max = spec[0].max(spec[1]).max(spec[2]);
+    let spec_max = spec[0].fmax(spec[1]).fmax(spec[2]);
     let one_minus_spec = 1.0 - spec_max;
     let diff_lum = 0.299 * diffuse[0] + 0.587 * diffuse[1] + 0.114 * diffuse[2];
     let spec_lum = 0.299 * spec[0] + 0.587 * spec[1] + 0.114 * spec[2];
@@ -819,7 +820,7 @@ fn spec_gloss_to_mr(diffuse: [f32; 4], spec: [f32; 3], gloss: f32) -> ([f32; 4],
         let a = DIELECTRIC_SPEC;
         let b = diff_lum * one_minus_spec / (1.0 - DIELECTRIC_SPEC + EPS) + spec_lum - 2.0 * DIELECTRIC_SPEC;
         let c = DIELECTRIC_SPEC - spec_lum;
-        let disc = (b * b - 4.0 * a * c).max(0.0);
+        let disc = (b * b - 4.0 * a * c).fmax(0.0);
         let m = ((-b + disc.sqrt()) / (2.0 * a)).clamp(0.0, 1.0);
         let inv_1m = 1.0 / (1.0 - m + EPS);
         let base_dielectric = [
@@ -1348,7 +1349,7 @@ fn sample_flat(times: &[f32], flat: &[f32], n: usize, t: f32, interp: gltf::anim
         }
         I::CubicSpline => {
             let i1 = (i + 1).min(times.len().saturating_sub(1));
-            let dt = (times[i1] - times[i]).max(1e-9);
+            let dt = (times[i1] - times[i]).fmax(1e-9);
             let (t2, t3) = (alpha * alpha, alpha * alpha * alpha);
             let (h00, h10, h01, h11) = (
                 2.0 * t3 - 3.0 * t2 + 1.0,
@@ -2092,7 +2093,7 @@ fn read_vec_f32<const N: usize>(accessor: &gltf::Accessor, loaded: &LoadedGltf) 
                 DataType::U16 => u16::from_le_bytes(buf[ko..ko+2].try_into().unwrap()) as f32 * scale,
                 DataType::U32 => u32::from_le_bytes(buf[ko..ko+4].try_into().unwrap()) as f32,
             };
-            elem[k] = if signed_clamp { f.max(-1.0) } else { f };
+            elem[k] = if signed_clamp { f.fmax(-1.0) } else { f };
         }
         out.push(elem);
     }

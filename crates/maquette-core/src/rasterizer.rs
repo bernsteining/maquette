@@ -108,6 +108,8 @@ pub struct PixelBuffer {
     /// Set to true on the first WBOIT write. `composite_oit` short-circuits
     /// when false.
     pub oit_used: bool,
+    vis: Vec<u32>,
+    owned: Vec<u32>,
 }
 
 impl PixelBuffer {
@@ -237,6 +239,8 @@ impl PixelBuffer {
             oit_accum: Vec::new(),
             oit_reveal: Vec::new(),
             oit_used: false,
+            vis: Vec::new(),
+            owned: Vec::new(),
         }
     }
 
@@ -389,256 +393,98 @@ impl PixelBuffer {
         blend: BlendMode,
         shader: &S,
     ) {
-        let setup = match TriSetup::new(pts, self.width, self.height) {
-            Some(s) => s,
-            None => return,
-        };
-        let width = self.width;
-        let d0 = depths[0] as f32;
-        let d1 = depths[1] as f32;
-        let d2 = depths[2] as f32;
-        let zk0 = zbuf_depths[0] as f32;
-        let zk1 = zbuf_depths[1] as f32;
-        let zk2 = zbuf_depths[2] as f32;
-
-        let pd_pos = [
-            (positions[0].x as f32 * d0, positions[0].y as f32 * d0, positions[0].z as f32 * d0),
-            (positions[1].x as f32 * d1, positions[1].y as f32 * d1, positions[1].z as f32 * d1),
-            (positions[2].x as f32 * d2, positions[2].y as f32 * d2, positions[2].z as f32 * d2),
-        ];
-        let pd_n = [
-            (normals[0].x as f32 * d0, normals[0].y as f32 * d0, normals[0].z as f32 * d0),
-            (normals[1].x as f32 * d1, normals[1].y as f32 * d1, normals[1].z as f32 * d1),
-            (normals[2].x as f32 * d2, normals[2].y as f32 * d2, normals[2].z as f32 * d2),
-        ];
-        let pd_uv = [
-            (uvs[0][0] * d0, uvs[0][1] * d0),
-            (uvs[1][0] * d1, uvs[1][1] * d1),
-            (uvs[2][0] * d2, uvs[2][1] * d2),
-        ];
-        let pd_uv1 = [
-            (uvs1[0][0] * d0, uvs1[0][1] * d0),
-            (uvs1[1][0] * d1, uvs1[1][1] * d1),
-            (uvs1[2][0] * d2, uvs1[2][1] * d2),
-        ];
-        let pd_uv2 = [
-            (uvs2[0][0] * d0, uvs2[0][1] * d0),
-            (uvs2[1][0] * d1, uvs2[1][1] * d1),
-            (uvs2[2][0] * d2, uvs2[2][1] * d2),
-        ];
-        let pd_col = [
-            (colors[0][0] * d0, colors[0][1] * d0, colors[0][2] * d0, colors[0][3] * d0),
-            (colors[1][0] * d1, colors[1][1] * d1, colors[1][2] * d1, colors[1][3] * d1),
-            (colors[2][0] * d2, colors[2][1] * d2, colors[2][2] * d2, colors[2][3] * d2),
-        ];
-        let pd_tan = [
-            (tangents[0][0] * d0, tangents[0][1] * d0, tangents[0][2] * d0),
-            (tangents[1][0] * d1, tangents[1][1] * d1, tangents[1][2] * d1),
-            (tangents[2][0] * d2, tangents[2][1] * d2, tangents[2][2] * d2),
-        ];
-        let tan_w_splat = tangents[0][3];
-
+        let Some(setup) = TriSetup::new(pts, self.width, self.height) else { return };
+        let varyings = Varyings::new(depths, zbuf_depths, positions, normals, uvs, uvs1, uvs2, colors, tangents);
         if matches!(blend, BlendMode::WBOIT) && !self.oit_used {
             let n = self.width * self.height;
             self.oit_accum = vec![0.0f32; n * 4];
             self.oit_reveal = vec![1.0f32; n];
             self.oit_used = true;
         }
+        let mark = matches!(blend, BlendMode::Overwrite) && !self.vis.is_empty();
+        let mut sink = ImmediateSink {
+            varyings: &varyings,
+            shader,
+            blend,
+            pixels: &mut self.pixels,
+            zbuf: &mut self.zbuf,
+            oit_accum: &mut self.oit_accum,
+            oit_reveal: &mut self.oit_reveal,
+            owners: if mark { Some(Owners { vis: &mut self.vis, owned: &mut self.owned }) } else { None },
+        };
+        unsafe { for_each_fragment(&setup, self.width, &mut sink) };
+    }
 
-        let zbuf = &mut self.zbuf;
-        let pixels = &mut self.pixels;
-        let oit_accum = &mut self.oit_accum;
-        let oit_reveal = &mut self.oit_reveal;
+    /// Start a deferred opaque pass for up to `triangles` triangles: until
+    /// [`end_deferred`](Self::end_deferred), [`rasterize_depth_id`](Self::rasterize_depth_id)
+    /// records which triangle owns each pixel, and `Overwrite` draws through
+    /// [`rasterize_triangle_shaded`](Self::rasterize_triangle_shaded) (alpha-masked
+    /// materials, which can discard) claim the pixels they write.
+    pub fn begin_deferred(&mut self, triangles: usize) {
+        self.vis = vec![0; self.width * self.height];
+        self.owned = vec![0; triangles];
+    }
 
-        unsafe {
-            let d0v = f32x4_splat(d0);
-            let d1v = f32x4_splat(d1);
-            let d2v = f32x4_splat(d2);
-            let zk0v = f32x4_splat(zk0);
-            let zk1v = f32x4_splat(zk1);
-            let zk2v = f32x4_splat(zk2);
-            let zero = f32x4_splat(0.0);
-            let one = f32x4_splat(1.0);
+    pub fn end_deferred(&mut self) {
+        self.vis = Vec::new();
+        self.owned = Vec::new();
+    }
 
-            let pdv_pos_x = [f32x4_splat(pd_pos[0].0), f32x4_splat(pd_pos[1].0), f32x4_splat(pd_pos[2].0)];
-            let pdv_pos_y = [f32x4_splat(pd_pos[0].1), f32x4_splat(pd_pos[1].1), f32x4_splat(pd_pos[2].1)];
-            let pdv_pos_z = [f32x4_splat(pd_pos[0].2), f32x4_splat(pd_pos[1].2), f32x4_splat(pd_pos[2].2)];
-            let pdv_n_x   = [f32x4_splat(pd_n[0].0),   f32x4_splat(pd_n[1].0),   f32x4_splat(pd_n[2].0)];
-            let pdv_n_y   = [f32x4_splat(pd_n[0].1),   f32x4_splat(pd_n[1].1),   f32x4_splat(pd_n[2].1)];
-            let pdv_n_z   = [f32x4_splat(pd_n[0].2),   f32x4_splat(pd_n[1].2),   f32x4_splat(pd_n[2].2)];
-            let pdv_uv_u  = [f32x4_splat(pd_uv[0].0),  f32x4_splat(pd_uv[1].0),  f32x4_splat(pd_uv[2].0)];
-            let pdv_uv_v  = [f32x4_splat(pd_uv[0].1),  f32x4_splat(pd_uv[1].1),  f32x4_splat(pd_uv[2].1)];
-            let pdv_uv1_u = [f32x4_splat(pd_uv1[0].0), f32x4_splat(pd_uv1[1].0), f32x4_splat(pd_uv1[2].0)];
-            let pdv_uv1_v = [f32x4_splat(pd_uv1[0].1), f32x4_splat(pd_uv1[1].1), f32x4_splat(pd_uv1[2].1)];
-            let pdv_uv2_u = [f32x4_splat(pd_uv2[0].0), f32x4_splat(pd_uv2[1].0), f32x4_splat(pd_uv2[2].0)];
-            let pdv_uv2_v = [f32x4_splat(pd_uv2[0].1), f32x4_splat(pd_uv2[1].1), f32x4_splat(pd_uv2[2].1)];
-            let pdv_col_r = [f32x4_splat(pd_col[0].0), f32x4_splat(pd_col[1].0), f32x4_splat(pd_col[2].0)];
-            let pdv_col_g = [f32x4_splat(pd_col[0].1), f32x4_splat(pd_col[1].1), f32x4_splat(pd_col[2].1)];
-            let pdv_col_b = [f32x4_splat(pd_col[0].2), f32x4_splat(pd_col[1].2), f32x4_splat(pd_col[2].2)];
-            let pdv_col_a = [f32x4_splat(pd_col[0].3), f32x4_splat(pd_col[1].3), f32x4_splat(pd_col[2].3)];
-            let pdv_tan_x = [f32x4_splat(pd_tan[0].0), f32x4_splat(pd_tan[1].0), f32x4_splat(pd_tan[2].0)];
-            let pdv_tan_y = [f32x4_splat(pd_tan[0].1), f32x4_splat(pd_tan[1].1), f32x4_splat(pd_tan[2].1)];
-            let pdv_tan_z = [f32x4_splat(pd_tan[0].2), f32x4_splat(pd_tan[1].2), f32x4_splat(pd_tan[2].2)];
-            let tan_w_v   = f32x4_splat(tan_w_splat);
+    /// Depth-only pass for opaque triangle `id`: the same coverage, depth key
+    /// and strict z-test as `rasterize_triangle_shaded`, but instead of shading
+    /// it records `id` as the owner of every pixel it wins.
+    pub fn rasterize_depth_id(&mut self, pts: &[(f64, f64); 3], zbuf_depths: &[f64; 3], id: usize) {
+        let Some(setup) = TriSetup::new(pts, self.width, self.height) else { return };
+        let zk = [zbuf_depths[0] as f32, zbuf_depths[1] as f32, zbuf_depths[2] as f32];
+        let mut sink = DepthSink {
+            zk,
+            zk_v: [f32x4_splat(zk[0]), f32x4_splat(zk[1]), f32x4_splat(zk[2])],
+            owner: id as u32 + 1,
+            zbuf: &mut self.zbuf,
+            owners: Owners { vis: &mut self.vis, owned: &mut self.owned },
+        };
+        unsafe { for_each_fragment(&setup, self.width, &mut sink) };
+    }
 
-            let mut row_w0 = setup.row_w0;
-            let mut row_w1 = setup.row_w1;
-            let mut row_w2 = setup.row_w2;
+    pub fn owns_pixels(&self, id: usize) -> bool {
+        self.owned.get(id).is_some_and(|&n| n > 0)
+    }
 
-            for py in setup.min_y..=setup.max_y {
-                if let Some((xl, xr)) = setup.scanline(row_w0, row_w1, row_w2) {
-                    let offset = (xl - setup.min_x) as f64;
-                    let w0_base = (row_w0 + offset * setup.dw0_dx) as f32;
-                    let w1_base = (row_w1 + offset * setup.dw1_dx) as f32;
-                    let w2_base = (row_w2 + offset * setup.dw2_dx) as f32;
-                    let dw0 = setup.dw0_dx as f32;
-                    let dw1 = setup.dw1_dx as f32;
-                    let dw2 = setup.dw2_dx as f32;
-
-                    let mut w0v = f32x4(w0_base, w0_base + dw0, w0_base + 2.0 * dw0, w0_base + 3.0 * dw0);
-                    let mut w1v = f32x4(w1_base, w1_base + dw1, w1_base + 2.0 * dw1, w1_base + 3.0 * dw1);
-                    let mut w2v = f32x4(w2_base, w2_base + dw2, w2_base + 2.0 * dw2, w2_base + 3.0 * dw2);
-                    let dw0_dx4 = f32x4_splat(dw0 * 4.0);
-                    let dw1_dx4 = f32x4_splat(dw1 * 4.0);
-                    let dw2_dx4 = f32x4_splat(dw2 * 4.0);
-
-                    let row_base = py * width;
-                    let mut px = xl;
-
-                    while px + 3 <= xr {
-                        let inside = v128_and(v128_and(
-                            f32x4_ge(w0v, zero), f32x4_ge(w1v, zero)), f32x4_ge(w2v, zero));
-                        let in_mask = i32x4_bitmask(inside);
-
-                        if in_mask != 0 {
-                            let depth_v = f32x4_add(f32x4_add(
-                                f32x4_mul(w0v, d0v), f32x4_mul(w1v, d1v)), f32x4_mul(w2v, d2v));
-                            let zbuf_key_v = f32x4_add(f32x4_add(
-                                f32x4_mul(w0v, zk0v), f32x4_mul(w1v, zk1v)), f32x4_mul(w2v, zk2v));
-                            let idx0 = row_base + px;
-                            let zbuf_v = v128_load(zbuf.as_ptr().add(idx0) as *const v128);
-                            let pass = v128_and(inside, f32x4_gt(zbuf_key_v, zbuf_v));
-                            let wmask = i32x4_bitmask(pass);
-
-                            if wmask != 0 {
-                                let inv_depth_v = f32x4_div(one, depth_v);
-
-                                let interp = |a: &[v128; 3]| -> v128 {
-                                    let num = f32x4_add(
-                                        f32x4_add(f32x4_mul(w0v, a[0]), f32x4_mul(w1v, a[1])),
-                                        f32x4_mul(w2v, a[2]),
-                                    );
-                                    f32x4_mul(num, inv_depth_v)
-                                };
-                                let pos_x = interp(&pdv_pos_x);
-                                let pos_y = interp(&pdv_pos_y);
-                                let pos_z = interp(&pdv_pos_z);
-                                let nx_raw = interp(&pdv_n_x);
-                                let ny_raw = interp(&pdv_n_y);
-                                let nz_raw = interp(&pdv_n_z);
-                                let uv_u  = interp(&pdv_uv_u);
-                                let uv_v  = interp(&pdv_uv_v);
-                                let uv1_u = interp(&pdv_uv1_u);
-                                let uv1_v = interp(&pdv_uv1_v);
-                                let uv2_u = interp(&pdv_uv2_u);
-                                let uv2_v = interp(&pdv_uv2_v);
-                                let col_r = interp(&pdv_col_r);
-                                let col_g = interp(&pdv_col_g);
-                                let col_b = interp(&pdv_col_b);
-                                let col_a = interp(&pdv_col_a);
-                                let tan_x = interp(&pdv_tan_x);
-                                let tan_y = interp(&pdv_tan_y);
-                                let tan_z = interp(&pdv_tan_z);
-
-                                let n_len2 = f32x4_add(
-                                    f32x4_add(f32x4_mul(nx_raw, nx_raw), f32x4_mul(ny_raw, ny_raw)),
-                                    f32x4_mul(nz_raw, nz_raw),
-                                );
-                                let n_inv_len = f32x4_div(one, f32x4_sqrt(f32x4_max(n_len2, f32x4_splat(1e-14))));
-                                let n_x = f32x4_mul(nx_raw, n_inv_len);
-                                let n_y = f32x4_mul(ny_raw, n_inv_len);
-                                let n_z = f32x4_mul(nz_raw, n_inv_len);
-
-                                let out = shader.shade4(ShadeIn4 {
-                                    pos_x, pos_y, pos_z,
-                                    n_x, n_y, n_z,
-                                    uv_u, uv_v,
-                                    uv1_u, uv1_v,
-                                    uv2_u, uv2_v,
-                                    col_r, col_g, col_b, col_a,
-                                    tan_x, tan_y, tan_z, tan_w: tan_w_v,
-                                });
-
-                                write_lane_masked(pixels, zbuf, oit_accum, oit_reveal, idx0, wmask, zbuf_key_v, &out, blend);
-                            }
-                        }
-
-                        w0v = f32x4_add(w0v, dw0_dx4);
-                        w1v = f32x4_add(w1v, dw1_dx4);
-                        w2v = f32x4_add(w2v, dw2_dx4);
-                        px += 4;
-                    }
-
-                    let mut w0s = f32x4_extract_lane::<0>(w0v);
-                    let mut w1s = f32x4_extract_lane::<0>(w1v);
-                    let mut w2s = f32x4_extract_lane::<0>(w2v);
-                    while px <= xr {
-                        if w0s >= 0.0 && w1s >= 0.0 && w2s >= 0.0 {
-                            let depth = w0s * d0 + w1s * d1 + w2s * d2;
-                            let zbuf_key = w0s * zk0 + w1s * zk1 + w2s * zk2;
-                            let idx = row_base + px;
-                            if zbuf_key > *zbuf.get_unchecked(idx) {
-                                let inv_depth = 1.0 / depth;
-                                let pos = Vec3::new(
-                                    ((w0s * pd_pos[0].0 + w1s * pd_pos[1].0 + w2s * pd_pos[2].0) * inv_depth) as f64,
-                                    ((w0s * pd_pos[0].1 + w1s * pd_pos[1].1 + w2s * pd_pos[2].1) * inv_depth) as f64,
-                                    ((w0s * pd_pos[0].2 + w1s * pd_pos[1].2 + w2s * pd_pos[2].2) * inv_depth) as f64,
-                                );
-                                let n_raw = Vec3::new(
-                                    ((w0s * pd_n[0].0 + w1s * pd_n[1].0 + w2s * pd_n[2].0) * inv_depth) as f64,
-                                    ((w0s * pd_n[0].1 + w1s * pd_n[1].1 + w2s * pd_n[2].1) * inv_depth) as f64,
-                                    ((w0s * pd_n[0].2 + w1s * pd_n[1].2 + w2s * pd_n[2].2) * inv_depth) as f64,
-                                );
-                                let normal = n_raw.normalized();
-                                let uv = [
-                                    (w0s * pd_uv[0].0 + w1s * pd_uv[1].0 + w2s * pd_uv[2].0) * inv_depth,
-                                    (w0s * pd_uv[0].1 + w1s * pd_uv[1].1 + w2s * pd_uv[2].1) * inv_depth,
-                                ];
-                                let uv1 = [
-                                    (w0s * pd_uv1[0].0 + w1s * pd_uv1[1].0 + w2s * pd_uv1[2].0) * inv_depth,
-                                    (w0s * pd_uv1[0].1 + w1s * pd_uv1[1].1 + w2s * pd_uv1[2].1) * inv_depth,
-                                ];
-                                let uv2 = [
-                                    (w0s * pd_uv2[0].0 + w1s * pd_uv2[1].0 + w2s * pd_uv2[2].0) * inv_depth,
-                                    (w0s * pd_uv2[0].1 + w1s * pd_uv2[1].1 + w2s * pd_uv2[2].1) * inv_depth,
-                                ];
-                                let color = [
-                                    (w0s * pd_col[0].0 + w1s * pd_col[1].0 + w2s * pd_col[2].0) * inv_depth,
-                                    (w0s * pd_col[0].1 + w1s * pd_col[1].1 + w2s * pd_col[2].1) * inv_depth,
-                                    (w0s * pd_col[0].2 + w1s * pd_col[1].2 + w2s * pd_col[2].2) * inv_depth,
-                                    (w0s * pd_col[0].3 + w1s * pd_col[1].3 + w2s * pd_col[2].3) * inv_depth,
-                                ];
-                                let tan = [
-                                    (w0s * pd_tan[0].0 + w1s * pd_tan[1].0 + w2s * pd_tan[2].0) * inv_depth,
-                                    (w0s * pd_tan[0].1 + w1s * pd_tan[1].1 + w2s * pd_tan[2].1) * inv_depth,
-                                    (w0s * pd_tan[0].2 + w1s * pd_tan[1].2 + w2s * pd_tan[2].2) * inv_depth,
-                                    tan_w_splat,
-                                ];
-                                if let Some(rgba) = shader.shade_scalar(pos, normal, uv, uv1, uv2, color, tan) {
-                                    write_pixel(pixels, zbuf, oit_accum, oit_reveal, idx, zbuf_key as f32, rgba, blend);
-                                }
-                            }
-                        }
-                        w0s += dw0; w1s += dw1; w2s += dw2;
-                        px += 1;
-                    }
-                }
-
-                row_w0 += setup.dw0_dy;
-                row_w1 += setup.dw1_dy;
-                row_w2 += setup.dw2_dy;
-            }
-        }
+    /// Shade the pixels opaque triangle `id` still owns after the depth pass,
+    /// with the exact inputs the immediate path would have used for them, packed
+    /// four per shader call. Produces the same pixels as shading every triangle
+    /// immediately in submission order, running the shader once per visible
+    /// pixel instead of once per passing fragment.
+    #[allow(clippy::too_many_arguments)]
+    pub fn shade_deferred<S: PixelShader>(
+        &mut self,
+        id: usize,
+        pts: &[(f64, f64); 3],
+        depths: &[f64; 3],
+        zbuf_depths: &[f64; 3],
+        positions: &[Vec3; 3],
+        normals: &[Vec3; 3],
+        uvs: &[[f32; 2]; 3],
+        uvs1: &[[f32; 2]; 3],
+        uvs2: &[[f32; 2]; 3],
+        colors: &[[f32; 4]; 3],
+        tangents: &[[f32; 4]; 3],
+        shader: &S,
+    ) {
+        let Some(setup) = TriSetup::new(pts, self.width, self.height) else { return };
+        let varyings = Varyings::new(depths, zbuf_depths, positions, normals, uvs, uvs1, uvs2, colors, tangents);
+        let mut sink = DeferredSink {
+            varyings: &varyings,
+            shader,
+            owner: id as u32 + 1,
+            vis: &self.vis,
+            pixels: &mut self.pixels,
+            lanes: [[0.0; 20]; 4],
+            idx: [0; 4],
+            len: 0,
+        };
+        unsafe { for_each_fragment(&setup, self.width, &mut sink) };
+        sink.flush();
     }
 
     /// Screen-Space Ambient Occlusion. Modulates the RGB pixel buffer by a
@@ -805,7 +651,7 @@ impl PixelBuffer {
             width: self.width, height: self.height,
             pixels: self.pixels.clone(),
             zbuf: self.zbuf.clone(),
-            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false,
+            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false, vis: Vec::new(), owned: Vec::new(),
         }; }
         if factor == 2 { return self.downsample_2x(); }
         if factor == 4 { return self.downsample_2x().downsample_2x(); }
@@ -856,7 +702,7 @@ impl PixelBuffer {
             }
         }
         Self { width: nw, height: nh, pixels, zbuf,
-            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false }
+            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false, vis: Vec::new(), owned: Vec::new() }
     }
 
     /// SIMD 2× downsample: processes 4 output pixels per iteration using
@@ -956,7 +802,7 @@ impl PixelBuffer {
         }
 
         Self { width: nw, height: nh, pixels: out, zbuf,
-            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false }
+            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false, vis: Vec::new(), owned: Vec::new() }
     }
 
     /// Expand opaque RGB → straight RGBA8 (alpha = 255). Vectorised: each
@@ -1174,5 +1020,354 @@ impl TriSetup {
         let xr = (((right + 1.0) as usize).min(self.max_x)).min(self.max_x);
         if xl > xr { return None; }
         Some((xl, xr))
+    }
+}
+
+const MASK_OWNER: u32 = u32::MAX;
+
+struct Owners<'a> {
+    vis: &'a mut [u32],
+    owned: &'a mut [u32],
+}
+
+impl Owners<'_> {
+    #[inline(always)]
+    unsafe fn claim(&mut self, idx: usize, owner: u32) {
+        let old = *self.vis.get_unchecked(idx);
+        if old != 0 && old != MASK_OWNER { *self.owned.get_unchecked_mut(old as usize - 1) -= 1; }
+        *self.vis.get_unchecked_mut(idx) = owner;
+        if owner != MASK_OWNER { *self.owned.get_unchecked_mut(owner as usize - 1) += 1; }
+    }
+}
+
+struct ScalarIn {
+    zbuf_key: f32,
+    pos: Vec3,
+    normal: Vec3,
+    uv: [f32; 2],
+    uv1: [f32; 2],
+    uv2: [f32; 2],
+    color: [f32; 4],
+    tan: [f32; 4],
+}
+
+struct Varyings {
+    d: [f32; 3],
+    zk: [f32; 3],
+    pd_pos: [(f32, f32, f32); 3],
+    pd_n: [(f32, f32, f32); 3],
+    pd_uv: [(f32, f32); 3],
+    pd_uv1: [(f32, f32); 3],
+    pd_uv2: [(f32, f32); 3],
+    pd_col: [(f32, f32, f32, f32); 3],
+    pd_tan: [(f32, f32, f32); 3],
+    tan_w: f32,
+    d_v: [v128; 3],
+    zk_v: [v128; 3],
+    v: [[v128; 3]; 19],
+    tan_w_v: v128,
+}
+
+impl Varyings {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        depths: &[f64; 3], zbuf_depths: &[f64; 3], positions: &[Vec3; 3], normals: &[Vec3; 3],
+        uvs: &[[f32; 2]; 3], uvs1: &[[f32; 2]; 3], uvs2: &[[f32; 2]; 3], colors: &[[f32; 4]; 3], tangents: &[[f32; 4]; 3],
+    ) -> Self {
+        let d = [depths[0] as f32, depths[1] as f32, depths[2] as f32];
+        let zk = [zbuf_depths[0] as f32, zbuf_depths[1] as f32, zbuf_depths[2] as f32];
+        let pd_pos = [0, 1, 2].map(|i| (positions[i].x as f32 * d[i], positions[i].y as f32 * d[i], positions[i].z as f32 * d[i]));
+        let pd_n = [0, 1, 2].map(|i| (normals[i].x as f32 * d[i], normals[i].y as f32 * d[i], normals[i].z as f32 * d[i]));
+        let pd_uv = [0, 1, 2].map(|i| (uvs[i][0] * d[i], uvs[i][1] * d[i]));
+        let pd_uv1 = [0, 1, 2].map(|i| (uvs1[i][0] * d[i], uvs1[i][1] * d[i]));
+        let pd_uv2 = [0, 1, 2].map(|i| (uvs2[i][0] * d[i], uvs2[i][1] * d[i]));
+        let pd_col = [0, 1, 2].map(|i| (colors[i][0] * d[i], colors[i][1] * d[i], colors[i][2] * d[i], colors[i][3] * d[i]));
+        let pd_tan = [0, 1, 2].map(|i| (tangents[i][0] * d[i], tangents[i][1] * d[i], tangents[i][2] * d[i]));
+        let splat3 = |f: &dyn Fn(usize) -> f32| [f32x4_splat(f(0)), f32x4_splat(f(1)), f32x4_splat(f(2))];
+        let v = [
+            splat3(&|i| pd_pos[i].0), splat3(&|i| pd_pos[i].1), splat3(&|i| pd_pos[i].2),
+            splat3(&|i| pd_n[i].0), splat3(&|i| pd_n[i].1), splat3(&|i| pd_n[i].2),
+            splat3(&|i| pd_uv[i].0), splat3(&|i| pd_uv[i].1),
+            splat3(&|i| pd_uv1[i].0), splat3(&|i| pd_uv1[i].1),
+            splat3(&|i| pd_uv2[i].0), splat3(&|i| pd_uv2[i].1),
+            splat3(&|i| pd_col[i].0), splat3(&|i| pd_col[i].1), splat3(&|i| pd_col[i].2), splat3(&|i| pd_col[i].3),
+            splat3(&|i| pd_tan[i].0), splat3(&|i| pd_tan[i].1), splat3(&|i| pd_tan[i].2),
+        ];
+        Self {
+            d, zk, pd_pos, pd_n, pd_uv, pd_uv1, pd_uv2, pd_col, pd_tan,
+            tan_w: tangents[0][3],
+            d_v: [f32x4_splat(d[0]), f32x4_splat(d[1]), f32x4_splat(d[2])],
+            zk_v: [f32x4_splat(zk[0]), f32x4_splat(zk[1]), f32x4_splat(zk[2])],
+            v,
+            tan_w_v: f32x4_splat(tangents[0][3]),
+        }
+    }
+
+    #[inline(always)]
+    fn lerp_v(w: [v128; 3], a: &[v128; 3]) -> v128 {
+        f32x4_add(f32x4_add(f32x4_mul(w[0], a[0]), f32x4_mul(w[1], a[1])), f32x4_mul(w[2], a[2]))
+    }
+
+    #[inline(always)]
+    fn depth_v(&self, w: [v128; 3]) -> v128 { Self::lerp_v(w, &self.d_v) }
+
+    #[inline(always)]
+    fn zbuf_key_v(&self, w: [v128; 3]) -> v128 { Self::lerp_v(w, &self.zk_v) }
+
+    #[inline(always)]
+    fn inputs4(&self, w: [v128; 3], depth_v: v128) -> ShadeIn4 {
+        let one = f32x4_splat(1.0);
+        let inv_depth_v = f32x4_div(one, depth_v);
+        let interp = |a: &[v128; 3]| f32x4_mul(Self::lerp_v(w, a), inv_depth_v);
+        let v = &self.v;
+        let (nx_raw, ny_raw, nz_raw) = (interp(&v[3]), interp(&v[4]), interp(&v[5]));
+        let n_len2 = f32x4_add(f32x4_add(f32x4_mul(nx_raw, nx_raw), f32x4_mul(ny_raw, ny_raw)), f32x4_mul(nz_raw, nz_raw));
+        let n_inv_len = f32x4_div(one, f32x4_sqrt(f32x4_max(n_len2, f32x4_splat(1e-14))));
+        ShadeIn4 {
+            pos_x: interp(&v[0]), pos_y: interp(&v[1]), pos_z: interp(&v[2]),
+            n_x: f32x4_mul(nx_raw, n_inv_len), n_y: f32x4_mul(ny_raw, n_inv_len), n_z: f32x4_mul(nz_raw, n_inv_len),
+            uv_u: interp(&v[6]), uv_v: interp(&v[7]),
+            uv1_u: interp(&v[8]), uv1_v: interp(&v[9]),
+            uv2_u: interp(&v[10]), uv2_v: interp(&v[11]),
+            col_r: interp(&v[12]), col_g: interp(&v[13]), col_b: interp(&v[14]), col_a: interp(&v[15]),
+            tan_x: interp(&v[16]), tan_y: interp(&v[17]), tan_z: interp(&v[18]), tan_w: self.tan_w_v,
+        }
+    }
+
+    #[inline(always)]
+    fn depth_s(&self, w0s: f32, w1s: f32, w2s: f32) -> f32 { w0s * self.d[0] + w1s * self.d[1] + w2s * self.d[2] }
+
+    #[inline(always)]
+    fn zbuf_key_s(&self, w0s: f32, w1s: f32, w2s: f32) -> f32 { w0s * self.zk[0] + w1s * self.zk[1] + w2s * self.zk[2] }
+
+    #[inline(always)]
+    fn inputs1(&self, w0s: f32, w1s: f32, w2s: f32, zbuf_key: f32) -> ScalarIn {
+        let inv_depth = 1.0 / self.depth_s(w0s, w1s, w2s);
+        let l = |a: f32, b: f32, c: f32| (w0s * a + w1s * b + w2s * c) * inv_depth;
+        let (p, n, uv, uv1, uv2, col, tan) = (&self.pd_pos, &self.pd_n, &self.pd_uv, &self.pd_uv1, &self.pd_uv2, &self.pd_col, &self.pd_tan);
+        ScalarIn {
+            zbuf_key,
+            pos: Vec3::new(l(p[0].0, p[1].0, p[2].0) as f64, l(p[0].1, p[1].1, p[2].1) as f64, l(p[0].2, p[1].2, p[2].2) as f64),
+            normal: Vec3::new(l(n[0].0, n[1].0, n[2].0) as f64, l(n[0].1, n[1].1, n[2].1) as f64, l(n[0].2, n[1].2, n[2].2) as f64).normalized(),
+            uv: [l(uv[0].0, uv[1].0, uv[2].0), l(uv[0].1, uv[1].1, uv[2].1)],
+            uv1: [l(uv1[0].0, uv1[1].0, uv1[2].0), l(uv1[0].1, uv1[1].1, uv1[2].1)],
+            uv2: [l(uv2[0].0, uv2[1].0, uv2[2].0), l(uv2[0].1, uv2[1].1, uv2[2].1)],
+            color: [l(col[0].0, col[1].0, col[2].0), l(col[0].1, col[1].1, col[2].1), l(col[0].2, col[1].2, col[2].2), l(col[0].3, col[1].3, col[2].3)],
+            tan: [l(tan[0].0, tan[1].0, tan[2].0), l(tan[0].1, tan[1].1, tan[2].1), l(tan[0].2, tan[1].2, tan[2].2), self.tan_w],
+        }
+    }
+}
+
+trait FragmentSink {
+    unsafe fn group(&mut self, idx0: usize, w: [v128; 3], inside: v128);
+    unsafe fn single(&mut self, idx: usize, w0s: f32, w1s: f32, w2s: f32);
+}
+
+#[inline(always)]
+unsafe fn for_each_fragment<K: FragmentSink>(setup: &TriSetup, width: usize, sink: &mut K) {
+    let zero = f32x4_splat(0.0);
+    let mut row_w0 = setup.row_w0;
+    let mut row_w1 = setup.row_w1;
+    let mut row_w2 = setup.row_w2;
+    for py in setup.min_y..=setup.max_y {
+        if let Some((xl, xr)) = setup.scanline(row_w0, row_w1, row_w2) {
+            let offset = (xl - setup.min_x) as f64;
+            let w0_base = (row_w0 + offset * setup.dw0_dx) as f32;
+            let w1_base = (row_w1 + offset * setup.dw1_dx) as f32;
+            let w2_base = (row_w2 + offset * setup.dw2_dx) as f32;
+            let dw0 = setup.dw0_dx as f32;
+            let dw1 = setup.dw1_dx as f32;
+            let dw2 = setup.dw2_dx as f32;
+            let mut w0v = f32x4(w0_base, w0_base + dw0, w0_base + 2.0 * dw0, w0_base + 3.0 * dw0);
+            let mut w1v = f32x4(w1_base, w1_base + dw1, w1_base + 2.0 * dw1, w1_base + 3.0 * dw1);
+            let mut w2v = f32x4(w2_base, w2_base + dw2, w2_base + 2.0 * dw2, w2_base + 3.0 * dw2);
+            let dw0_dx4 = f32x4_splat(dw0 * 4.0);
+            let dw1_dx4 = f32x4_splat(dw1 * 4.0);
+            let dw2_dx4 = f32x4_splat(dw2 * 4.0);
+            let row_base = py * width;
+            let mut px = xl;
+            while px + 3 <= xr {
+                let inside = v128_and(v128_and(f32x4_ge(w0v, zero), f32x4_ge(w1v, zero)), f32x4_ge(w2v, zero));
+                if i32x4_bitmask(inside) != 0 {
+                    sink.group(row_base + px, [w0v, w1v, w2v], inside);
+                }
+                w0v = f32x4_add(w0v, dw0_dx4);
+                w1v = f32x4_add(w1v, dw1_dx4);
+                w2v = f32x4_add(w2v, dw2_dx4);
+                px += 4;
+            }
+            let mut w0s = f32x4_extract_lane::<0>(w0v);
+            let mut w1s = f32x4_extract_lane::<0>(w1v);
+            let mut w2s = f32x4_extract_lane::<0>(w2v);
+            while px <= xr {
+                if w0s >= 0.0 && w1s >= 0.0 && w2s >= 0.0 {
+                    sink.single(row_base + px, w0s, w1s, w2s);
+                }
+                w0s += dw0; w1s += dw1; w2s += dw2;
+                px += 1;
+            }
+        }
+        row_w0 += setup.dw0_dy;
+        row_w1 += setup.dw1_dy;
+        row_w2 += setup.dw2_dy;
+    }
+}
+
+struct ImmediateSink<'a, S: PixelShader> {
+    varyings: &'a Varyings,
+    shader: &'a S,
+    blend: BlendMode,
+    pixels: &'a mut [u8],
+    zbuf: &'a mut [f32],
+    oit_accum: &'a mut [f32],
+    oit_reveal: &'a mut [f32],
+    owners: Option<Owners<'a>>,
+}
+
+impl<S: PixelShader> FragmentSink for ImmediateSink<'_, S> {
+    #[inline(always)]
+    unsafe fn group(&mut self, idx0: usize, w: [v128; 3], inside: v128) {
+        let depth_v = self.varyings.depth_v(w);
+        let zbuf_key_v = self.varyings.zbuf_key_v(w);
+        let zbuf_v = v128_load(self.zbuf.as_ptr().add(idx0) as *const v128);
+        let pass = v128_and(inside, f32x4_gt(zbuf_key_v, zbuf_v));
+        let wmask = i32x4_bitmask(pass);
+        if wmask == 0 { return; }
+        let out = self.shader.shade4(self.varyings.inputs4(w, depth_v));
+        write_lane_masked(self.pixels, self.zbuf, self.oit_accum, self.oit_reveal, idx0, wmask, zbuf_key_v, &out, self.blend);
+        if let Some(owners) = &mut self.owners {
+            let written = wmask & i32x4_bitmask(out.keep);
+            for lane in 0..4 {
+                if written & (1 << lane) != 0 { owners.claim(idx0 + lane, MASK_OWNER); }
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn single(&mut self, idx: usize, w0s: f32, w1s: f32, w2s: f32) {
+        let zbuf_key = self.varyings.zbuf_key_s(w0s, w1s, w2s);
+        if zbuf_key > *self.zbuf.get_unchecked(idx) {
+            let i = self.varyings.inputs1(w0s, w1s, w2s, zbuf_key);
+            if let Some(rgba) = self.shader.shade_scalar(i.pos, i.normal, i.uv, i.uv1, i.uv2, i.color, i.tan) {
+                write_pixel(self.pixels, self.zbuf, self.oit_accum, self.oit_reveal, idx, i.zbuf_key, rgba, self.blend);
+                if let Some(owners) = &mut self.owners { owners.claim(idx, MASK_OWNER); }
+            }
+        }
+    }
+}
+
+struct DepthSink<'a> {
+    zk: [f32; 3],
+    zk_v: [v128; 3],
+    owner: u32,
+    zbuf: &'a mut [f32],
+    owners: Owners<'a>,
+}
+
+impl FragmentSink for DepthSink<'_> {
+    #[inline(always)]
+    unsafe fn group(&mut self, idx0: usize, w: [v128; 3], inside: v128) {
+        let zbuf_key_v = Varyings::lerp_v(w, &self.zk_v);
+        let zbuf_v = v128_load(self.zbuf.as_ptr().add(idx0) as *const v128);
+        let pass = v128_and(inside, f32x4_gt(zbuf_key_v, zbuf_v));
+        let wmask = i32x4_bitmask(pass);
+        if wmask == 0 { return; }
+        v128_store(self.zbuf.as_mut_ptr().add(idx0) as *mut v128, v128_bitselect(zbuf_key_v, zbuf_v, pass));
+        for lane in 0..4 {
+            if wmask & (1 << lane) != 0 { self.owners.claim(idx0 + lane, self.owner); }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn single(&mut self, idx: usize, w0s: f32, w1s: f32, w2s: f32) {
+        let zbuf_key = w0s * self.zk[0] + w1s * self.zk[1] + w2s * self.zk[2];
+        if zbuf_key > *self.zbuf.get_unchecked(idx) {
+            *self.zbuf.get_unchecked_mut(idx) = zbuf_key;
+            self.owners.claim(idx, self.owner);
+        }
+    }
+}
+
+struct DeferredSink<'a, S: PixelShader> {
+    varyings: &'a Varyings,
+    shader: &'a S,
+    owner: u32,
+    vis: &'a [u32],
+    pixels: &'a mut [u8],
+    lanes: [[f32; 20]; 4],
+    idx: [usize; 4],
+    len: usize,
+}
+
+impl<S: PixelShader> DeferredSink<'_, S> {
+    #[inline(always)]
+    fn push(&mut self, idx: usize, values: [f32; 20]) {
+        self.lanes[self.len] = values;
+        self.idx[self.len] = idx;
+        self.len += 1;
+        if self.len == 4 { self.flush(); }
+    }
+
+    fn flush(&mut self) {
+        if self.len == 0 { return; }
+        for l in self.len..4 { self.lanes[l] = self.lanes[0]; }
+        let a = |k: usize| f32x4(self.lanes[0][k], self.lanes[1][k], self.lanes[2][k], self.lanes[3][k]);
+        let out = self.shader.shade4(ShadeIn4 {
+            pos_x: a(0), pos_y: a(1), pos_z: a(2), n_x: a(3), n_y: a(4), n_z: a(5),
+            uv_u: a(6), uv_v: a(7), uv1_u: a(8), uv1_v: a(9), uv2_u: a(10), uv2_v: a(11),
+            col_r: a(12), col_g: a(13), col_b: a(14), col_a: a(15),
+            tan_x: a(16), tan_y: a(17), tan_z: a(18), tan_w: a(19),
+        });
+        let mut rgb = [[0.0f32; 4]; 3];
+        for (c, v) in [out.r, out.g, out.b].into_iter().enumerate() {
+            unsafe { v128_store(rgb[c].as_mut_ptr() as *mut v128, v) };
+        }
+        for l in 0..self.len {
+            let p = self.idx[l] * 3;
+            self.pixels[p] = crate::color::linear_to_srgb(rgb[0][l]);
+            self.pixels[p + 1] = crate::color::linear_to_srgb(rgb[1][l]);
+            self.pixels[p + 2] = crate::color::linear_to_srgb(rgb[2][l]);
+        }
+        self.len = 0;
+    }
+}
+
+#[inline(always)]
+fn lane_values(i: &ShadeIn4, lane: usize) -> [f32; 20] {
+    let mut out = [0.0f32; 20];
+    let fields = [i.pos_x, i.pos_y, i.pos_z, i.n_x, i.n_y, i.n_z, i.uv_u, i.uv_v, i.uv1_u, i.uv1_v, i.uv2_u, i.uv2_v,
+        i.col_r, i.col_g, i.col_b, i.col_a, i.tan_x, i.tan_y, i.tan_z, i.tan_w];
+    for (k, f) in fields.into_iter().enumerate() {
+        let mut lanes = [0.0f32; 4];
+        unsafe { v128_store(lanes.as_mut_ptr() as *mut v128, f) };
+        out[k] = lanes[lane];
+    }
+    out
+}
+
+impl<S: PixelShader> FragmentSink for DeferredSink<'_, S> {
+    #[inline(always)]
+    unsafe fn group(&mut self, idx0: usize, w: [v128; 3], inside: v128) {
+        let inside = i32x4_bitmask(inside);
+        let mut mine = 0u8;
+        for lane in 0..4 {
+            if inside & (1 << lane) != 0 && *self.vis.get_unchecked(idx0 + lane) == self.owner { mine |= 1 << lane; }
+        }
+        if mine == 0 { return; }
+        let inputs = self.varyings.inputs4(w, self.varyings.depth_v(w));
+        for lane in 0..4 {
+            if mine & (1 << lane) != 0 { self.push(idx0 + lane, lane_values(&inputs, lane)); }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn single(&mut self, idx: usize, w0s: f32, w1s: f32, w2s: f32) {
+        if *self.vis.get_unchecked(idx) != self.owner { return; }
+        let i = self.varyings.inputs1(w0s, w1s, w2s, 0.0);
+        self.push(idx, [
+            i.pos.x as f32, i.pos.y as f32, i.pos.z as f32, i.normal.x as f32, i.normal.y as f32, i.normal.z as f32,
+            i.uv[0], i.uv[1], i.uv1[0], i.uv1[1], i.uv2[0], i.uv2[1],
+            i.color[0], i.color[1], i.color[2], i.color[3], i.tan[0], i.tan[1], i.tan[2], i.tan[3],
+        ]);
     }
 }

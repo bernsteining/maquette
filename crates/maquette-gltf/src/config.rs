@@ -4,6 +4,7 @@
 /// transitively via `gltf-rs`, so this costs nothing extra and skips writing
 /// a hand-rolled JSON parser like maquette's.
 
+use maquette_core::math::FloatExt;
 use serde_json::Value;
 
 #[derive(Clone, Copy)]
@@ -315,10 +316,10 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
             "antialias"     => if let Some(n) = as_usize(v) { cfg.antialias = n.clamp(1, 4); }
             "fxaa"          => if let Some(b) = v.as_bool() { cfg.fxaa = b; }
             "tone_mapping"  => if let Some(s) = v.as_str()  { cfg.tone_mapping = s.to_string(); }
-            "exposure"      => if let Some(f) = v.as_f64() { cfg.exposure = f.max(0.0); }
+            "exposure"      => if let Some(f) = v.as_f64() { cfg.exposure = f.fmax(0.0); }
             "no_textures"   => if let Some(b) = v.as_bool() { cfg.no_textures = b; }
             "texture_max_size" => cfg.texture_max_size = as_usize(v).map(|n| n as u32).filter(|&n| n >= 4),
-            "time"          => if let Some(f) = v.as_f64() { cfg.time = f.max(0.0); }
+            "time"          => if let Some(f) = v.as_f64() { cfg.time = f.fmax(0.0); }
             "material_variant" => if let Some(n) = as_usize(v) { cfg.material_variant = n as u32; }
             _ => {}
         }
@@ -328,7 +329,7 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
 
 fn as_usize(v: &Value) -> Option<usize> {
     v.as_u64().map(|n| n as usize)
-        .or_else(|| v.as_f64().map(|n| n.max(0.0) as usize))
+        .or_else(|| v.as_f64().map(|n| n.fmax(0.0) as usize))
 }
 
 fn parse_ibl(v: &Value) -> Option<IblCfg> {
@@ -346,7 +347,7 @@ fn parse_ibl(v: &Value) -> Option<IblCfg> {
                 c.ground = [maquette_core::color::srgb_to_linear(r), maquette_core::color::srgb_to_linear(g), maquette_core::color::srgb_to_linear(b)];
             }
             if let Some(f) = o.get("intensity").and_then(|x| x.as_f64()) {
-                c.intensity = (f as f32).max(0.0);
+                c.intensity = (f as f32).fmax(0.0);
             }
             if let Some(f) = o.get("rotation").and_then(|x| x.as_f64()) {
                 c.rotation = f as f32;
@@ -427,7 +428,7 @@ fn parse_ssao(v: &Value) -> Option<SsaoCfg> {
             let mut c = SsaoCfg::default();
             if let Some(n) = o.get("samples").and_then(|x| x.as_u64()) { c.samples = (n as usize).clamp(4, 64); }
             if let Some(f) = o.get("radius").and_then(|x| x.as_f64())  { c.radius = f.clamp(0.01, 2.0); }
-            if let Some(f) = o.get("bias").and_then(|x| x.as_f64())    { c.bias = f.max(0.0); }
+            if let Some(f) = o.get("bias").and_then(|x| x.as_f64())    { c.bias = f.fmax(0.0); }
             if let Some(f) = o.get("strength").and_then(|x| x.as_f64()) { c.strength = f.clamp(0.0, 2.0); }
             Some(c)
         }

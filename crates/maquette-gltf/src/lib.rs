@@ -12,6 +12,7 @@ mod cache;
 mod config;
 mod gltf_loader;
 mod pbr;
+mod prof;
 mod render;
 mod scene;
 
@@ -43,6 +44,14 @@ fn get_last_panic() -> Vec<u8> {
     LAST_PANIC.with(|p| p.borrow().clone().into_bytes())
 }
 
+
+/// 16-byte handle for a GLB/glTF file. Once a render has cached its scene,
+/// `render_gltf` accepts the handle in place of the file, skipping the copy and
+/// the re-hash; on a scene-cache miss it fails and the caller resends the file.
+#[wasm_func]
+fn model_key(gltf_data: &[u8]) -> Result<Vec<u8>, String> {
+    Ok(cache::SceneInput::new(gltf_data, &[]).handle())
+}
 
 /// Render a glTF (JSON) or GLB (binary) file to raw RGBA bytes.
 ///
@@ -92,13 +101,16 @@ fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_b
         }
     }
     let opts = scene::SceneOpts::from_config(&config);
-    let (scene_key, scene) = cache::scene_for(gltf_data, opts, || {
+    prof::mark(1);
+    let input = cache::SceneInput::new(gltf_data, sidecars_bundle);
+    let (scene_key, scene) = cache::scene_for(&input, opts, || {
         if sidecars_bundle.is_empty() {
             gltf_loader::parse(gltf_data)
         } else {
             gltf_loader::parse_split(gltf_data, sidecars_bundle)
         }
     })?;
+    prof::mark(2);
     Ok(render::render(scene, scene_key, &config))
 }
 
@@ -216,6 +228,10 @@ pub mod native {
 
     pub fn render_gltf_split(gltf_data: &[u8], config_json: &[u8], sidecars_bundle: &[u8]) -> Result<Vec<u8>, String> {
         render_impl(gltf_data, config_json, &[], sidecars_bundle)
+    }
+
+    pub fn model_key(gltf_data: &[u8]) -> Result<Vec<u8>, String> {
+        super::model_key(gltf_data)
     }
 
     pub fn get_gltf_info(gltf_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {

@@ -16,6 +16,7 @@
 /// Deferred: SSAO / FXAA / tone mapping (phase 3), texture sampling (phase 2),
 /// animations (phase 6).
 
+use maquette_core::math::FloatExt;
 use crate::config::RenderConfig;
 use maquette_core::math::{Mat4, Vec3};
 use crate::pbr::{IblContext, MaterialShader, PbrContext, SplattedLight, ToneMap};
@@ -30,12 +31,15 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     let (bg, transparent) = resolve_background(&config.background);
 
     let mut buffer = PixelBuffer::new(width * factor, height * factor, bg);
+    crate::prof::mark(10);
 
     if !scene.triangles.is_empty() || !scene.lines.is_empty() || !scene.points.is_empty() {
         rasterize_scene(&mut buffer, scene, scene_key, config);
     }
 
+    crate::prof::mark(14);
     buffer.composite_oit();
+    crate::prof::mark(15);
 
     if let Some(ssao) = &config.ssao {
         buffer.apply_ssao(&SSAOParams {
@@ -46,18 +50,23 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
         });
     }
 
+    crate::prof::mark(16);
     let mut buffer = buffer.downsample(factor);
+    crate::prof::mark(17);
 
     if config.fxaa {
         maquette_core::fxaa::apply_fxaa(&mut buffer.pixels, buffer.width, buffer.height);
     }
+    crate::prof::mark(18);
 
     let (w, h, rgba) = if transparent {
         buffer.to_rgba8_transparent()
     } else {
         buffer.to_rgba8()
     };
-    encode_raw_rgba(w, h, rgba)
+    let out = encode_raw_rgba(w, h, rgba);
+    crate::prof::mark(19);
+    out
 }
 
 fn shadow_key(scene_key: u64, lights: &[crate::scene::PunctualLight], up: Vec3, radius: f64, resolution: usize) -> u64 {
@@ -84,8 +93,8 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         let proj = match sc.fov_y_deg {
             Some(fov) => Projection::Perspective { fov_deg: fov },
             None => Projection::Orthographic {
-                half_h: sc.ortho_half_height.max(1e-6),
-                half_w: sc.ortho_half_width.max(1e-6),
+                half_h: sc.ortho_half_height.fmax(1e-6),
+                half_w: sc.ortho_half_width.fmax(1e-6),
             },
         };
         (sc.position, view, proj, sc.znear.unwrap_or(1e-4), sc.zfar)
@@ -187,7 +196,10 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         shadow_pcss_light_size,
     };
 
+    crate::prof::mark(11);
     let mut blend_queue: Vec<PreparedTriangle> = Vec::new();
+    let mut deferred: Vec<(PreparedTriangle, &Material)> = Vec::new();
+    buffer.begin_deferred(scene.triangles.len() + ground_tris.len());
 
     let all_tris = scene.triangles.iter().chain(ground_tris.iter());
     for tri in all_tris {
@@ -247,17 +259,27 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         match material.alpha_mode {
             AlphaMode::Blend => blend_queue.push(prepared),
             AlphaMode::Opaque | AlphaMode::Mask if transmissive => blend_queue.push(prepared),
-            AlphaMode::Opaque | AlphaMode::Mask => {
-                shade_triangle(buffer, &pbr, material, &prepared, BlendMode::Overwrite);
+            AlphaMode::Mask => shade_triangle(buffer, &pbr, material, &prepared, BlendMode::Overwrite),
+            AlphaMode::Opaque => {
+                buffer.rasterize_depth_id(&prepared.pts, &prepared.zbuf_depths, deferred.len());
+                deferred.push((prepared, material));
             }
         }
     }
+    for (id, (prepared, material)) in deferred.iter().enumerate() {
+        if buffer.owns_pixels(id) {
+            shade_triangle_deferred(buffer, &pbr, material, prepared, id);
+        }
+    }
+    buffer.end_deferred();
 
+    crate::prof::mark(12);
     for prepared in &blend_queue {
         let material = &scene.materials[prepared.tri.material_id as usize];
         shade_triangle(buffer, &pbr, material, prepared, BlendMode::WBOIT);
     }
 
+    crate::prof::mark(13);
     for pt in &scene.points {
         let vp = view.transform_point(pt.p.position);
         if vp.z >= -znear { continue; }
@@ -341,6 +363,27 @@ fn shade_triangle(
     prepared: &PreparedTriangle,
     blend: BlendMode,
 ) {
+    shade_with(buffer, pbr, material, prepared, Some(blend), 0);
+}
+
+fn shade_triangle_deferred(
+    buffer: &mut PixelBuffer,
+    pbr: &PbrContext,
+    material: &crate::scene::Material,
+    prepared: &PreparedTriangle,
+    id: usize,
+) {
+    shade_with(buffer, pbr, material, prepared, None, id);
+}
+
+fn shade_with(
+    buffer: &mut PixelBuffer,
+    pbr: &PbrContext,
+    material: &crate::scene::Material,
+    prepared: &PreparedTriangle,
+    blend: Option<BlendMode>,
+    deferred_id: usize,
+) {
     let tri = prepared.tri;
     let positions = [
         tri.vertices[0].position, tri.vertices[1].position, tri.vertices[2].position,
@@ -377,20 +420,18 @@ fn shade_triangle(
     let lod_scale = compute_lod_scale(&prepared.pts, tri) as f32 * xform_area_scale;
 
     let shader = MaterialShader::new(pbr, material, &prepared.textures, mask_cutoff, lod_scale);
-    buffer.rasterize_triangle_shaded(
-        &prepared.pts,
-        &prepared.depths,
-        &prepared.zbuf_depths,
-        &positions,
-        &normals,
-        &uvs,
-        &uvs1,
-        &uvs2,
-        &colors,
-        &tangents,
-        blend,
-        &shader,
-    );
+    match blend {
+        Some(blend) => buffer.rasterize_triangle_shaded(
+            &prepared.pts, &prepared.depths, &prepared.zbuf_depths,
+            &positions, &normals, &uvs, &uvs1, &uvs2, &colors, &tangents,
+            blend, &shader,
+        ),
+        None => buffer.shade_deferred(
+            deferred_id, &prepared.pts, &prepared.depths, &prepared.zbuf_depths,
+            &positions, &normals, &uvs, &uvs1, &uvs2, &colors, &tangents,
+            &shader,
+        ),
+    }
 }
 
 #[inline]

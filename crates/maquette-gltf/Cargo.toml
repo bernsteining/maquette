@@ -11,6 +11,9 @@ crate-type = ["cdylib", "rlib"]
 # the crate name's dash-to-underscore conversion.
 name = "maquette_gltf"
 
+[features]
+prof = []
+
 [dependencies]
 maquette-core = { path = "../maquette-core" }
 wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }

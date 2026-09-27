@@ -113,15 +113,18 @@ pub fn textures_for(
 /// entirely. The compute path uses the texture cache above so animation frames
 /// don't redo the ~150 ms decode+mip cost per frame.
 pub fn scene_for(
-    bytes: &[u8],
+    input: &SceneInput,
     opts: SceneOpts,
     load: impl FnOnce() -> Result<LoadedGltf, String>,
 ) -> Result<(u64, &'static Scene), String> {
-    let key = hash(bytes, opts);
+    let key = hash(input.key, opts);
     unsafe {
         if let Some((k, ref s)) = SCENE_CACHE {
             if k == key { return Ok((key, std::mem::transmute::<&Scene, &'static Scene>(s))); }
         }
+        let Some(bytes) = input.bytes else {
+            return Err("prepared glTF: scene not cached".into());
+        };
         let scene = crate::scene::flatten_with_cached_textures(&load()?, opts, bytes);
         SCENE_CACHE = Some((key, scene));
         let (_, ref s) = SCENE_CACHE.as_ref().unwrap();
@@ -145,10 +148,45 @@ pub fn shadows_for(key: u64, build: impl FnOnce() -> Vec<Option<LightShadow>>) -
     }
 }
 
-fn hash(bytes: &[u8], opts: SceneOpts) -> u64 {
+/// What identifies a render's asset: a key over the glTF bytes (plus any
+/// sidecar bundle), and the bytes themselves unless the caller passed only a
+/// 16-byte handle, in which case the scene must already be cached.
+pub struct SceneInput<'a> {
+    pub key: u64,
+    pub bytes: Option<&'a [u8]>,
+}
+
+const HANDLE_MAGIC: &[u8; 8] = b"\0MQGLTF\x01";
+
+impl<'a> SceneInput<'a> {
+    pub fn new(gltf: &'a [u8], sidecars: &[u8]) -> Self {
+        if gltf.len() == 16 && gltf[..8] == HANDLE_MAGIC[..] {
+            return Self { key: u64::from_le_bytes(gltf[8..].try_into().unwrap()), bytes: None };
+        }
+        Self { key: bytes_key(gltf, sidecars), bytes: Some(gltf) }
+    }
+
+    pub fn handle(&self) -> Vec<u8> {
+        let mut out = HANDLE_MAGIC.to_vec();
+        out.extend_from_slice(&self.key.to_le_bytes());
+        out
+    }
+}
+
+fn bytes_key(gltf: &[u8], sidecars: &[u8]) -> u64 {
     use std::hash::Hasher;
     let mut h = maquette_core::math::FxHasher::default();
-    h.write(bytes);
+    h.write_u64(gltf.len() as u64);
+    h.write(gltf);
+    h.write_u64(sidecars.len() as u64);
+    h.write(sidecars);
+    h.finish()
+}
+
+fn hash(bytes_key: u64, opts: SceneOpts) -> u64 {
+    use std::hash::Hasher;
+    let mut h = maquette_core::math::FxHasher::default();
+    h.write_u64(bytes_key);
     h.write_u8(opts.textures.disabled as u8);
     h.write_u32(opts.textures.max_size.unwrap_or(u32::MAX));
     h.write_u32(opts.time.to_bits());

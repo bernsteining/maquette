@@ -130,7 +130,7 @@ Documentation contains many examples showcasing all the features, with each exam
 
 ## Beyond Typst
 
-The same renderer also ships as a native binary and as language bindings — headless, deterministic, no GL/GPU. See each README:
+The same renderer also ships as a native binary and as language bindings. See each README:
 
 | Target | What | Get it |
 |---|---|---|

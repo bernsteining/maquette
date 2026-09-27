@@ -23,7 +23,11 @@ impl Hasher for FxHasher {
     fn finish(&self) -> u64 { self.0 }
     #[inline]
     fn write(&mut self, bytes: &[u8]) {
-        for &b in bytes {
+        let mut words = bytes.chunks_exact(8);
+        for w in &mut words {
+            self.0 = (self.0 ^ u64::from_le_bytes(w.try_into().unwrap())).wrapping_mul(SEED);
+        }
+        for &b in words.remainder() {
             self.0 = (self.0 ^ b as u64).wrapping_mul(SEED);
         }
     }
