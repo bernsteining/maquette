@@ -10,7 +10,7 @@ use crate::color::{linear_to_srgb, parse_hex_color, srgb_to_linear};
 use crate::math::{quantize, fx_hashmap_cap, FxBuildHasher, FxHashMap, Mat4, Vec3, ViewMatSimd};
 use crate::outline;
 use crate::parser::Triangle;
-use crate::rasterizer::PixelBuffer;
+use maquette_core::rasterizer::PixelBuffer;
 use crate::smooth;
 use crate::projection::*;
 use crate::shading::*;
@@ -2712,13 +2712,13 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     if let Some(ref ssao) = config.ssao {
         if !is_wireframe {
-            let ssao_params = crate::ssao::SSAOParams {
+            let ssao_params = maquette_core::ssao::SSAOParams {
                 samples: ssao.samples,
                 radius: ssao.radius,
                 bias: ssao.bias,
                 strength: ssao.strength,
             };
-            buf.apply_ssao(&ssao_params);
+            buf.apply_ssao::<maquette_core::ssao::Tiled16>(&ssao_params);
         }
     }
 

@@ -1,32 +1,16 @@
-use crate::math::FloatExt;
-/// Software triangle rasterizer with z-buffer.
-///
-/// Lean port of maquette's rasterizer keeping the SIMD scanline fill and
-/// z-test. Deferred to v3 (copy from maquette when needed): Hi-Z tiles,
-/// wireframe/shadow-mask rasterization, SSAO, FXAA, downsample-with-coverage.
-/// The scanline SIMD core is the piece that took work to get right, so it's
-/// preserved verbatim.
-///
-/// Two rasterization paths:
-///   * `rasterize_triangle` — flat color, kept for future wireframe/shadow-mask work.
-///   * `rasterize_triangle_shaded` — per-vertex attributes (position, normal, UV)
-///     interpolated perspective-correctly. Shader returns `Option<[f32; 4]>`
-///     per pixel; `None` discards (mask alpha), `Some` writes with the
-///     requested `BlendMode`. SIMD handles coverage + depth test; the shader
-///     call itself runs scalar per pixel for now — vectorising the BRDF body
-///     is a v3 concern (Cook-Torrance's transcendentals need polynomial
-///     approximations to SIMD well).
+//! Software triangle rasterizer shared by the maquette plugin family: one
+//! z-buffered RGB `PixelBuffer` with the flat/smooth/textured/hatch fills,
+//! the shaded and deferred paths, and the post passes.
 
-use crate::math::Vec3;
+use crate::math::{FloatExt, Vec3};
 
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use crate::simd::*;
-use std::cell::RefCell;
 
-thread_local! {
-    static AO_BUFFER:    RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
-    static FLAT_OFFSETS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
-    static Z_BIASES:     RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
-}
+mod fill;
+mod post;
+
+const HIZ_SHIFT: usize = 4;
+const HIZ_SIZE: usize = 1 << HIZ_SHIFT;
 
 /// Per-pixel write behaviour once the shader has produced a linear RGBA sample.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -97,6 +81,7 @@ pub trait PixelShader {
     }
 }
 
+#[derive(Default)]
 pub struct PixelBuffer {
     pub width: usize,
     pub height: usize,
@@ -116,9 +101,44 @@ pub struct PixelBuffer {
     pub oit_used: bool,
     vis: Vec<u32>,
     owned: Vec<u32>,
+    tcov: Vec<f32>,
+    bg: [f32; 3],
+    /// Hi-Z: conservative lower bound on min zbuf per 16×16 tile.
+    hiz: Vec<f32>,
+    hiz_tiles_x: usize,
+    /// Per tile still at −∞: how many pixels (row-major within the tile) are
+    /// already known covered, and the minimum depth seen over them, so
+    /// `hiz_resume` continues where the last scan stopped.
+    hiz_scan: Vec<(u16, f32)>,
+    /// Per incomplete tile: zbuf index of the empty pixel that stopped the last
+    /// scan. While it stays empty the tile can't be complete, which the skip
+    /// test checks inline without resuming the scan.
+    hiz_block: Vec<u32>,
 }
 
 impl PixelBuffer {
+    pub fn new(width: usize, height: usize, bg: (u8, u8, u8)) -> Self {
+        let n = width * height;
+        let pixel = [bg.0, bg.1, bg.2];
+        let pixels = pixel.repeat(n);
+        let hiz_tiles_x = (width + HIZ_SIZE - 1) >> HIZ_SHIFT;
+        let hiz_tiles_y = (height + HIZ_SIZE - 1) >> HIZ_SHIFT;
+        Self {
+            width,
+            height,
+            pixels,
+            zbuf: vec![f32::NEG_INFINITY; n],
+            bg: [bg.0 as f32, bg.1 as f32, bg.2 as f32],
+            hiz: vec![f32::NEG_INFINITY; hiz_tiles_x * hiz_tiles_y],
+            hiz_tiles_x,
+            hiz_scan: vec![(0, f32::INFINITY); hiz_tiles_x * hiz_tiles_y],
+            hiz_block: (0..hiz_tiles_x * hiz_tiles_y)
+                .map(|t| (((t / hiz_tiles_x) << HIZ_SHIFT) * width + ((t % hiz_tiles_x) << HIZ_SHIFT)) as u32)
+                .collect(),
+            ..Default::default()
+        }
+    }
+
     /// Composite the WBOIT accum + reveal buffers over the opaque pixel
     /// buffer. Call once, after all triangles/points/lines have been
     /// rasterized. No-op when no translucent geometry was drawn.
@@ -189,7 +209,7 @@ impl PixelBuffer {
     /// linear interp of z and colour. Used by glTF LINES / LINE_STRIP /
     /// LINE_LOOP primitives. Bresenham-ish stepping via DDA — good enough
     /// for 1-pixel unlit primitives, no anti-aliasing.
-    pub fn draw_line(
+    pub fn draw_line_depth(
         &mut self,
         a: (f64, f64),
         b: (f64, f64),
@@ -232,144 +252,6 @@ impl PixelBuffer {
             cr += scr; cg += scg; cb += scb; ca += sca;
         }
         let _ = (x1, y1);
-    }
-
-    pub fn new(width: usize, height: usize, bg: (u8, u8, u8)) -> Self {
-        let n = width * height;
-        let pixel = [bg.0, bg.1, bg.2];
-        Self {
-            width,
-            height,
-            pixels: pixel.repeat(n),
-            zbuf: vec![f32::NEG_INFINITY; n],
-            oit_accum: Vec::new(),
-            oit_reveal: Vec::new(),
-            oit_used: false,
-            vis: Vec::new(),
-            owned: Vec::new(),
-        }
-    }
-
-    /// Rasterize a filled triangle with z-buffer depth testing.
-    /// Scanline clipping + f32x4 SIMD (4 pixels per iteration).
-    ///
-    /// Kept for future wireframe / shadow-mask work; the PBR path uses
-    /// `rasterize_triangle_shaded` and this method is otherwise unused.
-    #[allow(dead_code)]
-    pub fn rasterize_triangle(
-        &mut self,
-        pts: &[(f64, f64); 3],
-        depths: &[f64; 3],
-        r: u8,
-        g: u8,
-        b: u8,
-    ) {
-        let setup = match TriSetup::new(pts, self.width, self.height) {
-            Some(s) => s,
-            None => return,
-        };
-        let width = self.width;
-        let zbuf = &mut self.zbuf;
-        let pixels = &mut self.pixels;
-
-        let d0 = depths[0] as f32;
-        let d1 = depths[1] as f32;
-        let d2 = depths[2] as f32;
-
-        unsafe {
-            let d0v = f32x4_splat(d0);
-            let d1v = f32x4_splat(d1);
-            let d2v = f32x4_splat(d2);
-            let zero = f32x4_splat(0.0);
-
-            let mut row_w0 = setup.row_w0;
-            let mut row_w1 = setup.row_w1;
-            let mut row_w2 = setup.row_w2;
-
-            for py in setup.min_y..=setup.max_y {
-                if let Some((xl, xr)) = setup.scanline(row_w0, row_w1, row_w2) {
-                    let offset = (xl - setup.min_x) as f64;
-                    let w0_base = (row_w0 + offset * setup.dw0_dx) as f32;
-                    let w1_base = (row_w1 + offset * setup.dw1_dx) as f32;
-                    let w2_base = (row_w2 + offset * setup.dw2_dx) as f32;
-                    let dw0 = setup.dw0_dx as f32;
-                    let dw1 = setup.dw1_dx as f32;
-                    let dw2 = setup.dw2_dx as f32;
-
-                    let mut w0v = f32x4(w0_base, w0_base + dw0, w0_base + 2.0 * dw0, w0_base + 3.0 * dw0);
-                    let mut w1v = f32x4(w1_base, w1_base + dw1, w1_base + 2.0 * dw1, w1_base + 3.0 * dw1);
-                    let mut w2v = f32x4(w2_base, w2_base + dw2, w2_base + 2.0 * dw2, w2_base + 3.0 * dw2);
-                    let dw0_dx4 = f32x4_splat(dw0 * 4.0);
-                    let dw1_dx4 = f32x4_splat(dw1 * 4.0);
-                    let dw2_dx4 = f32x4_splat(dw2 * 4.0);
-
-                    let row_base = py * width;
-                    let mut px = xl;
-
-                    while px + 3 <= xr {
-                        let inside = v128_and(v128_and(
-                            f32x4_ge(w0v, zero), f32x4_ge(w1v, zero)), f32x4_ge(w2v, zero));
-                        let in_mask = i32x4_bitmask(inside);
-
-                        if in_mask != 0 {
-                            let depth_v = f32x4_add(f32x4_add(
-                                f32x4_mul(w0v, d0v), f32x4_mul(w1v, d1v)), f32x4_mul(w2v, d2v));
-                            let idx0 = row_base + px;
-                            let zbuf_v = v128_load(zbuf.as_ptr().add(idx0) as *const v128);
-                            let pass = v128_and(inside, f32x4_gt(depth_v, zbuf_v));
-                            let wmask = i32x4_bitmask(pass);
-
-                            if wmask & 1 != 0 {
-                                *zbuf.get_unchecked_mut(idx0) = f32x4_extract_lane::<0>(depth_v);
-                                let p = pixels.as_mut_ptr().add(idx0 * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
-                            }
-                            if wmask & 2 != 0 {
-                                *zbuf.get_unchecked_mut(idx0 + 1) = f32x4_extract_lane::<1>(depth_v);
-                                let p = pixels.as_mut_ptr().add((idx0 + 1) * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
-                            }
-                            if wmask & 4 != 0 {
-                                *zbuf.get_unchecked_mut(idx0 + 2) = f32x4_extract_lane::<2>(depth_v);
-                                let p = pixels.as_mut_ptr().add((idx0 + 2) * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
-                            }
-                            if wmask & 8 != 0 {
-                                *zbuf.get_unchecked_mut(idx0 + 3) = f32x4_extract_lane::<3>(depth_v);
-                                let p = pixels.as_mut_ptr().add((idx0 + 3) * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
-                            }
-                        }
-
-                        w0v = f32x4_add(w0v, dw0_dx4);
-                        w1v = f32x4_add(w1v, dw1_dx4);
-                        w2v = f32x4_add(w2v, dw2_dx4);
-                        px += 4;
-                    }
-
-                    let mut w0s = f32x4_extract_lane::<0>(w0v);
-                    let mut w1s = f32x4_extract_lane::<0>(w1v);
-                    let mut w2s = f32x4_extract_lane::<0>(w2v);
-                    while px <= xr {
-                        if w0s >= 0.0 && w1s >= 0.0 && w2s >= 0.0 {
-                            let depth = w0s * d0 + w1s * d1 + w2s * d2;
-                            let idx = row_base + px;
-                            if depth > *zbuf.get_unchecked(idx) {
-                                *zbuf.get_unchecked_mut(idx) = depth;
-                                let p = pixels.as_mut_ptr().add(idx * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
-                            }
-                        }
-                        w0s += dw0; w1s += dw1; w2s += dw2;
-                        px += 1;
-                    }
-                }
-
-                row_w0 += setup.dw0_dy;
-                row_w1 += setup.dw1_dy;
-                row_w2 += setup.dw2_dy;
-            }
-        }
     }
 
     /// Rasterize a triangle with per-vertex attributes (position, normal, UV)
@@ -522,376 +404,6 @@ impl PixelBuffer {
         unsafe { for_each_fragment(&setup, self.width, &mut sink) };
         sink.flush();
     }
-
-    /// Screen-Space Ambient Occlusion. Modulates the RGB pixel buffer by a
-    /// per-pixel AO term derived from the depth buffer + bilateral blur.
-    /// Ported from maquette (SSAO is format-agnostic — depth+RGB in, RGB out).
-    pub fn apply_ssao(&mut self, params: &crate::ssao::SSAOParams) {
-        let w = self.width;
-        let h = self.height;
-        let w_i32 = w as i32;
-        let h_i32 = h as i32;
-
-        let mut zmin = f32::MAX;
-        let mut zmax = f32::MIN;
-        for &d in &self.zbuf {
-            if d != f32::NEG_INFINITY {
-                if d < zmin { zmin = d; }
-                if d > zmax { zmax = d; }
-            }
-        }
-        let depth_range = (zmax - zmin).fmax(0.001);
-
-        let radius_px = (params.radius * w.min(h) as f64) as f32;
-        let bias_scaled = params.bias as f32 * depth_range;
-        let strength = params.strength as f32;
-        let offsets = crate::ssao::precompute_sample_offsets(params.samples, radius_px, bias_scaled);
-
-        let num_samples = offsets[0].len();
-        let batches = num_samples / 4;
-        let n_rot = crate::ssao::NOISE_ROTATIONS;
-        let mut flat_offsets = FLAT_OFFSETS.with(|c| std::mem::take(&mut *c.borrow_mut()));
-        let mut z_biases     = Z_BIASES    .with(|c| std::mem::take(&mut *c.borrow_mut()));
-        flat_offsets.clear(); flat_offsets.resize(n_rot * num_samples, 0);
-        z_biases.clear();     z_biases.resize(n_rot * num_samples, 0.0);
-        let mut max_dx = 0i32;
-        let mut max_dy = 0i32;
-        for (p, pattern) in offsets.iter().enumerate() {
-            for (s, sample) in pattern.iter().enumerate() {
-                flat_offsets[p * num_samples + s] = sample.dy * w_i32 + sample.dx;
-                z_biases[p * num_samples + s] = sample.z_bias;
-                max_dx = max_dx.max(sample.dx.abs());
-                max_dy = max_dy.max(sample.dy.abs());
-            }
-        }
-
-        let margin_x = max_dx;
-        let margin_y = max_dy;
-        let interior_x_end = (w_i32 - margin_x).max(margin_x);
-        let interior_y_end = (h_i32 - margin_y).max(margin_y);
-        let neg_inf_v = f32x4_splat(f32::NEG_INFINITY);
-        let zbuf_ptr = self.zbuf.as_ptr();
-
-        let mut ao_buffer = AO_BUFFER.with(|c| std::mem::take(&mut *c.borrow_mut()));
-        ao_buffer.clear();
-        ao_buffer.resize(w * h, 1.0);
-
-        macro_rules! ssao_scalar_pixel {
-            ($x:expr, $y:expr, $idx:expr) => {
-                let depth = unsafe { *self.zbuf.get_unchecked($idx) };
-                if depth != f32::NEG_INFINITY {
-                    let pattern = &offsets[crate::ssao::noise_index($x, $y)];
-                    let mut occlusion = 0u32;
-                    let mut valid = 0u32;
-                    for s in pattern {
-                        let sx = $x + s.dx;
-                        let sy = $y + s.dy;
-                        if sx < 0 || sx >= w_i32 || sy < 0 || sy >= h_i32 { continue; }
-                        let sd = unsafe { *self.zbuf.get_unchecked(sy as usize * w + sx as usize) };
-                        if sd == f32::NEG_INFINITY { continue; }
-                        valid += 1;
-                        if sd > depth + s.z_bias { occlusion += 1; }
-                    }
-                    if valid > 0 {
-                        unsafe { *ao_buffer.get_unchecked_mut($idx) =
-                            (1.0 - (occlusion as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
-                    }
-                }
-            };
-        }
-
-        for y in 0..h_i32 {
-            let row = y as usize * w;
-            let is_interior_y = y >= margin_y && y < interior_y_end;
-
-            if !is_interior_y {
-                for x in 0..w_i32 {
-                    let idx = row + x as usize;
-                    ssao_scalar_pixel!(x, y, idx);
-                }
-            } else {
-                for x in 0..margin_x.min(w_i32) {
-                    let idx = row + x as usize;
-                    ssao_scalar_pixel!(x, y, idx);
-                }
-                for x in margin_x..interior_x_end {
-                    let idx = row + x as usize;
-                    let depth = unsafe { *self.zbuf.get_unchecked(idx) };
-                    if depth == f32::NEG_INFINITY { continue; }
-                    let pi = crate::ssao::noise_index(x, y);
-                    let offs = unsafe { flat_offsets.as_ptr().add(pi * num_samples) };
-                    let zbs = unsafe { z_biases.as_ptr().add(pi * num_samples) };
-                    let idx_i32 = idx as i32;
-                    let depth_v = f32x4_splat(depth);
-                    let mut valid = 0u32;
-                    let mut occluded = 0u32;
-                    for b in 0..batches {
-                        let base = b * 4;
-                        let o0 = unsafe { *offs.add(base) };
-                        let o1 = unsafe { *offs.add(base + 1) };
-                        let o2 = unsafe { *offs.add(base + 2) };
-                        let o3 = unsafe { *offs.add(base + 3) };
-                        let sd4 = f32x4(
-                            unsafe { *zbuf_ptr.add((idx_i32 + o0) as usize) },
-                            unsafe { *zbuf_ptr.add((idx_i32 + o1) as usize) },
-                            unsafe { *zbuf_ptr.add((idx_i32 + o2) as usize) },
-                            unsafe { *zbuf_ptr.add((idx_i32 + o3) as usize) },
-                        );
-                        let valid_mask = f32x4_ne(sd4, neg_inf_v);
-                        let zb4 = unsafe { v128_load(zbs.add(base) as *const v128) };
-                        let threshold = f32x4_add(depth_v, zb4);
-                        let occ_mask = v128_and(f32x4_gt(sd4, threshold), valid_mask);
-                        valid += i32x4_bitmask(valid_mask).count_ones();
-                        occluded += i32x4_bitmask(occ_mask).count_ones();
-                    }
-                    for s in batches * 4..num_samples {
-                        let sd = unsafe { *zbuf_ptr.add((idx_i32 + *offs.add(s)) as usize) };
-                        if sd == f32::NEG_INFINITY { continue; }
-                        valid += 1;
-                        if sd > depth + unsafe { *zbs.add(s) } { occluded += 1; }
-                    }
-                    if valid > 0 {
-                        unsafe { *ao_buffer.get_unchecked_mut(idx) =
-                            (1.0 - (occluded as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
-                    }
-                }
-                for x in interior_x_end..w_i32 {
-                    let idx = row + x as usize;
-                    ssao_scalar_pixel!(x, y, idx);
-                }
-            }
-        }
-
-        let blurred = crate::ssao::bilateral_blur_separable(&ao_buffer, &self.zbuf, w, h, 4);
-
-        unsafe {
-            for i in 0..w * h {
-                let ao = *blurred.get_unchecked(i);
-                let p = self.pixels.as_mut_ptr().add(i * 3);
-                *p        = (*p        as f32 * ao + 0.5) as u8;
-                *p.add(1) = (*p.add(1) as f32 * ao + 0.5) as u8;
-                *p.add(2) = (*p.add(2) as f32 * ao + 0.5) as u8;
-            }
-        }
-
-        AO_BUFFER   .with(|c| *c.borrow_mut() = ao_buffer);
-        FLAT_OFFSETS.with(|c| *c.borrow_mut() = flat_offsets);
-        Z_BIASES    .with(|c| *c.borrow_mut() = z_biases);
-    }
-
-    /// Downsample by an integer factor via box filter — SIMD-accelerated for
-    /// factor=2 and factor=4 (two passes of 2×). Used for SSAA. Copied
-    /// verbatim from maquette (format-agnostic).
-    pub fn downsample(&self, factor: usize) -> Self {
-        if factor <= 1 { return Self {
-            width: self.width, height: self.height,
-            pixels: self.pixels.clone(),
-            zbuf: self.zbuf.clone(),
-            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false, vis: Vec::new(), owned: Vec::new(),
-        }; }
-        if factor == 2 { return self.downsample_2x(); }
-        if factor == 4 { return self.downsample_2x().downsample_2x(); }
-        let nw = self.width / factor;
-        let nh = self.height / factor;
-        let count = (factor * factor) as u32;
-        let half = count / 2;
-        let src_w = self.width;
-        let mut pixels = vec![0u8; nw * nh * 3];
-        for ny in 0..nh {
-            let src_y_base = ny * factor;
-            for nx in 0..nw {
-                let src_x_base = nx * factor;
-                let mut sum_r = 0u32;
-                let mut sum_g = 0u32;
-                let mut sum_b = 0u32;
-                for sy in 0..factor {
-                    let row_base = ((src_y_base + sy) * src_w + src_x_base) * 3;
-                    for sx in 0..factor {
-                        let si = row_base + sx * 3;
-                        unsafe {
-                            sum_r += *self.pixels.get_unchecked(si) as u32;
-                            sum_g += *self.pixels.get_unchecked(si + 1) as u32;
-                            sum_b += *self.pixels.get_unchecked(si + 2) as u32;
-                        }
-                    }
-                }
-                let di = (ny * nw + nx) * 3;
-                unsafe {
-                    *pixels.get_unchecked_mut(di) = ((sum_r + half) / count) as u8;
-                    *pixels.get_unchecked_mut(di + 1) = ((sum_g + half) / count) as u8;
-                    *pixels.get_unchecked_mut(di + 2) = ((sum_b + half) / count) as u8;
-                }
-            }
-        }
-        let mut zbuf = vec![f32::NEG_INFINITY; nw * nh];
-        for ny in 0..nh {
-            for nx in 0..nw {
-                let mut z = f32::NEG_INFINITY;
-                for sy in 0..factor {
-                    for sx in 0..factor {
-                        let si = (ny * factor + sy) * src_w + nx * factor + sx;
-                        let sz = self.zbuf[si];
-                        if sz != f32::NEG_INFINITY && sz > z { z = sz; }
-                    }
-                }
-                zbuf[ny * nw + nx] = z;
-            }
-        }
-        Self { width: nw, height: nh, pixels, zbuf,
-            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false, vis: Vec::new(), owned: Vec::new() }
-    }
-
-    /// SIMD 2× downsample: processes 4 output pixels per iteration using
-    /// byte shuffles to deinterleave RGB, u16 widening for accumulation,
-    /// and re-interleave for output. Ported verbatim from maquette.
-    fn downsample_2x(&self) -> Self {
-        let nw = self.width / 2;
-        let nh = self.height / 2;
-        let src_w3 = self.width * 3;
-        let src = &self.pixels;
-        let mut out = vec![0u8; nw * nh * 3];
-
-        unsafe {
-            let half_v = i16x8_splat(2);
-
-            for ny in 0..nh {
-                let row0 = ny * 2 * src_w3;
-                let row1 = row0 + src_w3;
-                let mut nx = 0usize;
-
-                while nx + 4 <= nw {
-                    let sx = nx * 6;
-                    let a0 = v128_load(src.as_ptr().add(row0 + sx) as *const v128);
-                    let b0 = v128_load(src.as_ptr().add(row0 + sx + 8) as *const v128);
-                    let a1 = v128_load(src.as_ptr().add(row1 + sx) as *const v128);
-                    let b1 = v128_load(src.as_ptr().add(row1 + sx + 8) as *const v128);
-
-                    let even0 = i8x16_shuffle::<
-                        0, 6, 12, 26,  1, 7, 13, 27,  2, 8, 14, 28,  0, 0, 0, 0
-                    >(a0, b0);
-                    let odd0 = i8x16_shuffle::<
-                        3, 9, 15, 29,  4, 10, 24, 30,  5, 11, 25, 31,  0, 0, 0, 0
-                    >(a0, b0);
-                    let sum0_lo = i16x8_add(
-                        u16x8_extend_low_u8x16(even0), u16x8_extend_low_u8x16(odd0));
-                    let sum0_hi = i16x8_add(
-                        u16x8_extend_high_u8x16(even0), u16x8_extend_high_u8x16(odd0));
-
-                    let even1 = i8x16_shuffle::<
-                        0, 6, 12, 26,  1, 7, 13, 27,  2, 8, 14, 28,  0, 0, 0, 0
-                    >(a1, b1);
-                    let odd1 = i8x16_shuffle::<
-                        3, 9, 15, 29,  4, 10, 24, 30,  5, 11, 25, 31,  0, 0, 0, 0
-                    >(a1, b1);
-                    let sum1_lo = i16x8_add(
-                        u16x8_extend_low_u8x16(even1), u16x8_extend_low_u8x16(odd1));
-                    let sum1_hi = i16x8_add(
-                        u16x8_extend_high_u8x16(even1), u16x8_extend_high_u8x16(odd1));
-
-                    let avg_lo = u16x8_shr(i16x8_add(
-                        i16x8_add(sum0_lo, sum1_lo), half_v), 2);
-                    let avg_hi = u16x8_shr(i16x8_add(
-                        i16x8_add(sum0_hi, sum1_hi), half_v), 2);
-                    let packed = u8x16_narrow_i16x8(avg_lo, avg_hi);
-                    let rgb = i8x16_shuffle::<
-                        0, 4, 8,  1, 5, 9,  2, 6, 10,  3, 7, 11,  0, 0, 0, 0
-                    >(packed, packed);
-
-                    let di = (ny * nw + nx) * 3;
-                    let p = out.as_mut_ptr().add(di);
-                    (p as *mut i32).write_unaligned(i32x4_extract_lane::<0>(rgb));
-                    (p.add(4) as *mut i32).write_unaligned(i32x4_extract_lane::<1>(rgb));
-                    (p.add(8) as *mut i32).write_unaligned(i32x4_extract_lane::<2>(rgb));
-                    nx += 4;
-                }
-
-                while nx < nw {
-                    let sx = nx * 2;
-                    let r0 = (ny * 2 * self.width + sx) * 3;
-                    let r1 = r0 + src_w3;
-                    let sum_r = *src.get_unchecked(r0) as u32 + *src.get_unchecked(r0+3) as u32
-                              + *src.get_unchecked(r1) as u32 + *src.get_unchecked(r1+3) as u32;
-                    let sum_g = *src.get_unchecked(r0+1) as u32 + *src.get_unchecked(r0+4) as u32
-                              + *src.get_unchecked(r1+1) as u32 + *src.get_unchecked(r1+4) as u32;
-                    let sum_b = *src.get_unchecked(r0+2) as u32 + *src.get_unchecked(r0+5) as u32
-                              + *src.get_unchecked(r1+2) as u32 + *src.get_unchecked(r1+5) as u32;
-                    let di = (ny * nw + nx) * 3;
-                    *out.get_unchecked_mut(di) = ((sum_r + 2) / 4) as u8;
-                    *out.get_unchecked_mut(di + 1) = ((sum_g + 2) / 4) as u8;
-                    *out.get_unchecked_mut(di + 2) = ((sum_b + 2) / 4) as u8;
-                    nx += 1;
-                }
-            }
-        }
-
-        let mut zbuf = vec![f32::NEG_INFINITY; nw * nh];
-        for ny in 0..nh {
-            for nx in 0..nw {
-                let mut z = f32::NEG_INFINITY;
-                let s0 = ny * 2 * self.width + nx * 2;
-                for off in [0, 1, self.width, self.width + 1] {
-                    let sz = self.zbuf[s0 + off];
-                    if sz != f32::NEG_INFINITY && sz > z { z = sz; }
-                }
-                zbuf[ny * nw + nx] = z;
-            }
-        }
-
-        Self { width: nw, height: nh, pixels: out, zbuf,
-            oit_accum: Vec::new(), oit_reveal: Vec::new(), oit_used: false, vis: Vec::new(), owned: Vec::new() }
-    }
-
-    /// Expand opaque RGB → straight RGBA8 (alpha = 255). Vectorised: each
-    /// iteration reads 16 bytes (4 RGB pixels + 4 padding bytes shuffled
-    /// out), interleaves 0xFF alphas via `i8x16_shuffle`, and writes 16
-    /// bytes of RGBA. The tail is handled scalar to avoid a 16-byte read
-    /// past `pixels.len()`.
-    pub fn to_rgba8(&self) -> (u32, u32, Vec<u8>) {
-        let n = self.width * self.height;
-        let mut rgba = vec![0u8; n * 4];
-        let src = self.pixels.as_ptr();
-        let dst = rgba.as_mut_ptr();
-        let simd_end_p = if n >= 6 { (n - 5) & !3 } else { 0 };
-        unsafe {
-            let ff = u8x16_splat(0xff);
-            let mut p = 0usize;
-            while p < simd_end_p {
-                let v = v128_load(src.add(p * 3) as *const v128);
-                let out = i8x16_shuffle::<
-                    0, 1, 2, 16,
-                    3, 4, 5, 16,
-                    6, 7, 8, 16,
-                    9, 10, 11, 16,
-                >(v, ff);
-                v128_store(dst.add(p * 4) as *mut v128, out);
-                p += 4;
-            }
-            while p < n {
-                *dst.add(p * 4)     = *src.add(p * 3);
-                *dst.add(p * 4 + 1) = *src.add(p * 3 + 1);
-                *dst.add(p * 4 + 2) = *src.add(p * 3 + 2);
-                *dst.add(p * 4 + 3) = 0xff;
-                p += 1;
-            }
-        }
-        (self.width as u32, self.height as u32, rgba)
-    }
-
-    /// RGBA8 where pixels never touched by the rasterizer (zbuf = −∞) become
-    /// fully transparent. Used when the config wants a transparent background.
-    pub fn to_rgba8_transparent(&self) -> (u32, u32, Vec<u8>) {
-        let n = self.width * self.height;
-        let mut rgba = vec![0u8; n * 4];
-        for i in 0..n {
-            if self.zbuf[i] != f32::NEG_INFINITY {
-                rgba[i * 4]     = self.pixels[i * 3];
-                rgba[i * 4 + 1] = self.pixels[i * 3 + 1];
-                rgba[i * 4 + 2] = self.pixels[i * 3 + 2];
-                rgba[i * 4 + 3] = 255;
-            }
-        }
-        (self.width as u32, self.height as u32, rgba)
-    }
 }
 
 /// Extract SIMD lanes into scalar pixel writes, gated by `wmask` (the SIMD
@@ -978,7 +490,27 @@ unsafe fn write_pixel(
     }
 }
 
+#[inline(always)]
+fn clip_edge(w: f64, dw: f64, inv_dw: f64, min_x: f64, left: &mut f64, right: &mut f64) -> bool {
+    if dw.abs() < 1e-12 {
+        return w >= -1e-9 || w.is_nan();
+    }
+    let x_cross = min_x - w * inv_dw;
+    if dw > 0.0 {
+        if x_cross > *left { *left = x_cross; }
+    } else if x_cross < *right {
+        *right = x_cross;
+    }
+    true
+}
 
+#[inline(always)]
+fn min_max3(a: f64, b: f64, c: f64) -> (f64, f64) {
+    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+    (if c < lo { c } else { lo }, if c > hi { c } else { hi })
+}
+
+/// Signed edge function: positive if P is to the left of edge A→B.
 #[inline]
 fn edge(a: (f64, f64), b: (f64, f64), p: (f64, f64)) -> f64 {
     (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0)
@@ -997,17 +529,17 @@ struct TriSetup {
 impl TriSetup {
     #[inline]
     fn new(pts: &[(f64, f64); 3], width: usize, height: usize) -> Option<Self> {
-        let w = width as f64;
-        let h = height as f64;
-
-        let min_x = pts[0].0.fmin(pts[1].0).fmin(pts[2].0).fmax(0.0) as usize;
-        let max_x = (pts[0].0.fmax(pts[1].0).fmax(pts[2].0).fmin(w - 1.0) as usize).min(width - 1);
-        let min_y = pts[0].1.fmin(pts[1].1).fmin(pts[2].1).fmax(0.0) as usize;
-        let max_y = (pts[0].1.fmax(pts[1].1).fmax(pts[2].1).fmin(h - 1.0) as usize).min(height - 1);
-
         let area = edge(pts[0], pts[1], pts[2]);
-        if area.abs() < 1e-6 { return None; }
+        if area.abs() < 1e-6 || area.is_nan() { return None; }
         let inv_area = 1.0 / area;
+
+        let (lo_x, hi_x) = min_max3(pts[0].0, pts[1].0, pts[2].0);
+        let (lo_y, hi_y) = min_max3(pts[0].1, pts[1].1, pts[2].1);
+        let (w1, h1) = ((width - 1) as f64, (height - 1) as f64);
+        let min_x = (if lo_x > 0.0 { lo_x } else { 0.0 }) as usize;
+        let max_x = ((if hi_x < w1 { hi_x } else { w1 }) as usize).min(width - 1);
+        let min_y = (if lo_y > 0.0 { lo_y } else { 0.0 }) as usize;
+        let max_y = ((if hi_y < h1 { hi_y } else { h1 }) as usize).min(height - 1);
 
         let dw0_dx = (pts[1].1 - pts[2].1) * inv_area;
         let dw0_dy = (pts[2].0 - pts[1].0) * inv_area;
@@ -1030,29 +562,21 @@ impl TriSetup {
         })
     }
 
+    /// Compute conservative scanline X range for the current row weights.
+    /// Returns None if the row has no interior pixels.
     #[inline]
     fn scanline(&self, row_w0: f64, row_w1: f64, row_w2: f64) -> Option<(usize, usize)> {
-        let mut left = self.min_x as f64;
+        let min_x = self.min_x as f64;
+        let mut left = min_x;
         let mut right = self.max_x as f64;
-
-        for &(w, dw, inv_dw) in &[
-            (row_w0, self.dw0_dx, self.inv_dw0_dx),
-            (row_w1, self.dw1_dx, self.inv_dw1_dx),
-            (row_w2, self.dw2_dx, self.inv_dw2_dx),
-        ] {
-            if dw.abs() < 1e-12 {
-                if w < -1e-9 { return None; }
-            } else {
-                let x_cross = self.min_x as f64 - w * inv_dw;
-                if dw > 0.0 {
-                    left = left.fmax(x_cross);
-                } else {
-                    right = right.fmin(x_cross);
-                }
-            }
+        if !clip_edge(row_w0, self.dw0_dx, self.inv_dw0_dx, min_x, &mut left, &mut right)
+            || !clip_edge(row_w1, self.dw1_dx, self.inv_dw1_dx, min_x, &mut left, &mut right)
+            || !clip_edge(row_w2, self.dw2_dx, self.inv_dw2_dx, min_x, &mut left, &mut right)
+        {
+            return None;
         }
 
-        let xl = ((left - 1.0).fmax(self.min_x as f64)) as usize;
+        let xl = (if left - 1.0 > min_x { left - 1.0 } else { min_x }) as usize;
         let xr = (((right + 1.0) as usize).min(self.max_x)).min(self.max_x);
         if xl > xr { return None; }
         Some((xl, xr))

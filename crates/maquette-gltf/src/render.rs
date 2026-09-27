@@ -22,7 +22,7 @@ use maquette_core::math::{Mat4, Vec3};
 use crate::pbr::{IblContext, MaterialShader, PbrContext, SplattedLight, ToneMap};
 use maquette_core::rasterizer::{BlendMode, PixelBuffer};
 use crate::scene::{AlphaMode, Material, Scene, Triangle, Vertex};
-use maquette_core::ssao::SSAOParams;
+use maquette_core::ssao::{Hashed256, SSAOParams};
 
 pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     let width = config.width.max(1);
@@ -42,7 +42,7 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     crate::prof::mark(15);
 
     if let Some(ssao) = &config.ssao {
-        buffer.apply_ssao(&SSAOParams {
+        buffer.apply_ssao::<Hashed256>(&SSAOParams {
             samples: ssao.samples,
             radius: ssao.radius,
             bias: ssao.bias,
@@ -51,7 +51,7 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     }
 
     crate::prof::mark(16);
-    let mut buffer = buffer.downsample(factor);
+    let mut buffer = if transparent { buffer.downsample_with_depth(factor) } else { buffer.downsample(factor) };
     crate::prof::mark(17);
 
     if config.fxaa {
@@ -60,7 +60,7 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     crate::prof::mark(18);
 
     let (w, h, rgba) = if transparent {
-        buffer.to_rgba8_transparent()
+        buffer.to_rgba8_transparent_by_depth()
     } else {
         buffer.to_rgba8()
     };
@@ -337,7 +337,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
             Projection::Perspective { .. } => (-1.0 / va.z, -1.0 / vb.z),
             Projection::Orthographic { .. } => (-va.z, -vb.z),
         };
-        buffer.draw_line((ax, ay), (bx, by), za as f32, zb as f32, rgba_a, rgba_b);
+        buffer.draw_line_depth((ax, ay), (bx, by), za as f32, zb as f32, rgba_a, rgba_b);
     }
 }
 

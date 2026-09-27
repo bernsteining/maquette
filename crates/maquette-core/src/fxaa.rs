@@ -223,6 +223,7 @@ fn fxaa_pixel(idx: usize, x: usize, y: usize, w: usize, h: usize,
 }
 
 /// Apply FXAA 3.11 to an RGB pixel buffer in-place.
+#[inline(never)]
 pub fn apply_fxaa(pixels: &mut [u8], width: usize, height: usize) {
     let n = width * height;
     let luma = compute_luma(pixels, n);

@@ -18,12 +18,10 @@ mod ply_parser;
 mod prepared;
 mod prof;
 mod projection;
-mod rasterizer;
 mod render;
 mod shading;
 mod shadow;
 mod smooth;
-mod ssao;
 mod svg;
 
 use maquette_core::{color, fxaa};
@@ -346,7 +344,7 @@ fn prepare_obj(obj_data: &[u8]) -> Result<Vec<u8>, String> {
 /// After one call has parsed the model into this instance, the OBJ/STL entry
 /// points accept the handle in place of the file, skipping the copy and the
 /// re-hash; on a cache miss they fail and the caller resends the file.
-#[wasm_func]
+#[cfg_attr(target_arch = "wasm32", wasm_func)]
 fn model_key(data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(prepared::header(prepared::key_of(data).unwrap_or_else(|| cache::hash(data))))
 }
