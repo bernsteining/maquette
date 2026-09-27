@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 /// Screen-Space Ambient Occlusion (SSAO) implementation.
 /// Pre-computes integer sample offsets per noise pattern for fast per-pixel sampling.
 /// Uses separable bilateral blur for noise reduction.
@@ -71,7 +72,7 @@ pub fn precompute_sample_offsets(
         let r = ((i + 1) as f64 / samples as f64).sqrt();
         let x = angle.cos() * r;
         let y = angle.sin() * r;
-        let z = (1.0 - x * x - y * y).max(0.0).sqrt();
+        let z = (1.0 - x * x - y * y).fmax(0.0).sqrt();
         let scale = (i as f64 / samples as f64).powi(2) * 0.9 + 0.1;
         kernel.push(((x * scale) as f32, (y * scale) as f32, (z * scale) as f32));
     }
@@ -135,7 +136,7 @@ pub fn bilateral_blur_separable(
             if d > zmax { zmax = d; }
         }
     }
-    let inv_depth_range = 1.0 / (zmax - zmin).max(0.001);
+    let inv_depth_range = 1.0 / (zmax - zmin).fmax(0.001);
     let depth_factor = 50.0 * inv_depth_range;
 
     let inv_r2 = 1.0 / (r * r) as f32;
@@ -190,6 +191,10 @@ pub fn bilateral_blur_separable(
         while x < hx_simd_end {
             let cd4 = unsafe { v128_load(dp.add(x) as *const v128) };
             let valid = f32x4_ne(cd4, neg_inf_v);
+            if i32x4_bitmask(valid) == 0 {
+                x += 4;
+                continue;
+            }
 
             let mut sum4 = zero_v;
             let mut wsum4 = zero_v;
@@ -267,6 +272,10 @@ pub fn bilateral_blur_separable(
             let idx = row + x;
             let cd4 = unsafe { v128_load(depth_buffer.as_ptr().add(idx) as *const v128) };
             let valid = f32x4_ne(cd4, neg_inf_v);
+            if i32x4_bitmask(valid) == 0 {
+                x += 4;
+                continue;
+            }
 
             let mut sum4 = zero_v;
             let mut wsum4 = zero_v;

@@ -28,47 +28,56 @@ static mut PLY_CACHE: Vec<PlyEntry> = Vec::new();
 static mut SMOOTH_CACHE: Vec<SmoothEntry> = Vec::new();
 static mut PREP_CACHE: Vec<PrepEntry> = Vec::new();
 
-/// FNV-1a hash over a byte slice.
-fn fnv1a(data: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &b in data {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
-}
-
-/// Public model-data hash, reused as the base key for the smooth-normal cache.
+/// Model-data hash, used as the cache key for parsed geometry and as the base
+/// of the smooth/preprocess keys. Consumes 8 bytes per step (plus the length and
+/// a final avalanche) so a multi-megabyte model costs a fraction of a
+/// byte-at-a-time hash under the interpreter.
 pub fn hash(data: &[u8]) -> u64 {
-    fnv1a(data)
+    const K: u64 = 0x9E37_79B9_7F4A_7C15;
+    let n = data.len();
+    let mut h = (n as u64).wrapping_mul(K) ^ 0xcbf2_9ce4_8422_2325;
+    let words = n / 8;
+    let ptr = data.as_ptr();
+    for i in 0..words {
+        let w = unsafe { ptr.add(i * 8).cast::<u64>().read_unaligned() };
+        h = (h ^ w).wrapping_mul(K).rotate_left(31);
+    }
+    let mut tail = 0u64;
+    for (i, &b) in data[words * 8..].iter().enumerate() {
+        tail |= (b as u64) << (i * 8);
+    }
+    h = (h ^ tail).wrapping_mul(K);
+    h ^= h >> 29;
+    h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    h ^ (h >> 32)
 }
 
 fn get<T>(cache: &[(u64, T)], key: u64) -> Option<&T> {
     cache.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
 }
 
-pub fn get_stl(data: &[u8]) -> Option<&'static Vec<Triangle>> {
-    unsafe { get(&*addr_of!(STL_CACHE), fnv1a(data)) }
+pub fn get_stl(key: u64) -> Option<&'static Vec<Triangle>> {
+    unsafe { get(&*addr_of!(STL_CACHE), key) }
 }
 
-pub fn put_stl(data: &[u8], triangles: Vec<Triangle>) {
-    unsafe { (*addr_of_mut!(STL_CACHE)).push((fnv1a(data), triangles)) }
+pub fn put_stl(key: u64, triangles: Vec<Triangle>) {
+    unsafe { (*addr_of_mut!(STL_CACHE)).push((key, triangles)) }
 }
 
-pub fn get_obj(data: &[u8]) -> Option<&'static (Vec<Triangle>, HashMap<u32, GroupAppearance>)> {
-    unsafe { get(&*addr_of!(OBJ_CACHE), fnv1a(data)) }
+pub fn get_obj(key: u64) -> Option<&'static (Vec<Triangle>, HashMap<u32, GroupAppearance>)> {
+    unsafe { get(&*addr_of!(OBJ_CACHE), key) }
 }
 
-pub fn put_obj(data: &[u8], result: (Vec<Triangle>, HashMap<u32, GroupAppearance>)) {
-    unsafe { (*addr_of_mut!(OBJ_CACHE)).push((fnv1a(data), result)) }
+pub fn put_obj(key: u64, result: (Vec<Triangle>, HashMap<u32, GroupAppearance>)) {
+    unsafe { (*addr_of_mut!(OBJ_CACHE)).push((key, result)) }
 }
 
-pub fn get_ply(data: &[u8]) -> Option<&'static PlyData> {
-    unsafe { get(&*addr_of!(PLY_CACHE), fnv1a(data)) }
+pub fn get_ply(key: u64) -> Option<&'static PlyData> {
+    unsafe { get(&*addr_of!(PLY_CACHE), key) }
 }
 
-pub fn put_ply(data: &[u8], result: PlyData) {
-    unsafe { (*addr_of_mut!(PLY_CACHE)).push((fnv1a(data), result)) }
+pub fn put_ply(key: u64, result: PlyData) {
+    unsafe { (*addr_of_mut!(PLY_CACHE)).push((key, result)) }
 }
 
 /// Smooth (per-vertex normal) cache, keyed by a geometry hash that combines the

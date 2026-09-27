@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 use crate::config::{AnnotationConfig, GroupAppearance};
 use crate::math::FxHashMap;
 use crate::svg::{push_f1, push_f2};
@@ -32,7 +33,7 @@ pub fn compute_annotations<'a>(
 
         let dx = cx - view_center.0;
         let dy = cy - view_center.1;
-        let len = (dx * dx + dy * dy).sqrt().max(1.0);
+        let len = (dx * dx + dy * dy).sqrt().fmax(1.0);
         let nx = dx / len;
         let ny = dy / len;
 

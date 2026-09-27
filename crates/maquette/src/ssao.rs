@@ -8,6 +8,7 @@
 //! which reads cleaner than the 256-hash variant on maquette's *static* output
 //! — the hash's advantage (no shimmering pattern) only pays off in motion/TAA.
 
+use crate::math::FloatExt;
 pub use maquette_core::ssao::{bilateral_blur_separable, SSAOParams, SampleOffset};
 
 /// Pre-compute all sample offsets for 16 noise rotations x N kernel samples.
@@ -29,7 +30,7 @@ pub fn precompute_sample_offsets(
         let r = ((i + 1) as f64 / samples as f64).sqrt();
         let x = angle.cos() * r;
         let y = angle.sin() * r;
-        let z = (1.0 - x * x - y * y).max(0.0).sqrt();
+        let z = (1.0 - x * x - y * y).fmax(0.0).sqrt();
         let scale = (i as f64 / samples as f64).powi(2) * 0.9 + 0.1;
         kernel.push(((x * scale) as f32, (y * scale) as f32, (z * scale) as f32));
     }

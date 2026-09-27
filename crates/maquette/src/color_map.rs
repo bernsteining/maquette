@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 use crate::expr;
 use crate::color::lerp_color;
 use crate::math::{build_adjacency, quantize, fx_hashmap_cap, FxHashMap, Vec3};
@@ -23,7 +24,7 @@ fn sample_palette(palette: &[(u8, u8, u8)], t: f64) -> (u8, u8, u8) {
         return palette[0];
     }
     let n = palette.len() - 1;
-    let segment = (t * n as f64).min(n as f64 - 1e-9);
+    let segment = (t * n as f64).fmin(n as f64 - 1e-9);
     let i = segment as usize;
     let frac = segment - i as f64;
     lerp_color(palette[i], palette[i + 1].min(palette[palette.len() - 1]), frac)
@@ -121,7 +122,7 @@ pub fn apply_overhang_map(triangles: &mut [Triangle], up: Vec3, threshold_deg: f
             let t = angle / threshold_rad;
             tri.color = Some(lerp_color((0, 200, 0), (200, 200, 0), t));
         } else {
-            let t = ((angle - threshold_rad) / (std::f64::consts::PI - threshold_rad)).min(1.0);
+            let t = ((angle - threshold_rad) / (std::f64::consts::PI - threshold_rad)).fmin(1.0);
             tri.color = Some(lerp_color((200, 200, 0), (255, 0, 0), t));
         }
     }

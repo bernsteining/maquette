@@ -193,12 +193,14 @@
 #let render-gltf(model, read: none, ..args) = {
   let input = _resolve-input(model, read)
   let a = _parse-args(args)
-  let result = if input.sidecars.len() == 0 {
-    gltf-plugin.render_gltf(input.data, a.cfg)
-  } else {
-    gltf-plugin.render_gltf_split(input.data, a.cfg, input.sidecars)
-  }
-  _raw-image(result.slice(9), _u32le(result, 1), _u32le(result, 5), a.width, a.height)
+  layout(_ => {
+    let result = if input.sidecars.len() == 0 {
+      gltf-plugin.render_gltf(input.data, a.cfg)
+    } else {
+      gltf-plugin.render_gltf_split(input.data, a.cfg, input.sidecars)
+    }
+    _raw-image(result.slice(9), _u32le(result, 1), _u32le(result, 5), a.width, a.height)
+  })
 }
 
 /// Return scene metadata (triangle count, bounding box, center, radius,

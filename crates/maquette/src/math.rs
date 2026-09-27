@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-pub use maquette_core::math::{FxBuildHasher, FxHashMap, Mat4, Vec3};
+pub use maquette_core::math::{FloatExt, FxBuildHasher, FxHashMap, Mat4, Vec3};
 
 
 #[inline]
@@ -18,9 +18,9 @@ pub fn fx_hashmap_cap<K, V>(cap: usize) -> FxHashMap<K, V> {
 #[inline]
 pub fn quantize(v: Vec3) -> (i64, i64, i64) {
     (
-        (v.x * 1e6).round() as i64,
-        (v.y * 1e6).round() as i64,
-        (v.z * 1e6).round() as i64,
+        (v.x * 1e6).fround() as i64,
+        (v.y * 1e6).fround() as i64,
+        (v.z * 1e6).fround() as i64,
     )
 }
 
@@ -62,9 +62,18 @@ pub fn parse_f64_fast(s: &str) -> Option<f64> {
 /// `&[u8]` tokens without a `&str`/UTF-8 layer.
 #[inline]
 pub fn parse_f64_bytes(b: &[u8]) -> Option<f64> {
+    parse_f64_from(b, 0).map(|(v, _)| v)
+}
+
+/// Parse a float starting at `b[start]`, returning the value and the index just
+/// past the last byte consumed. The grammar never consumes bytes `<= b' '`, so
+/// parsing a token in place inside a larger buffer gives exactly the same result
+/// as parsing the isolated token.
+#[inline]
+pub fn parse_f64_from(b: &[u8], start: usize) -> Option<(f64, usize)> {
     let len = b.len();
-    if len == 0 { return None; }
-    let mut i = 0;
+    if start >= len { return None; }
+    let mut i = start;
 
     let neg = b[i] == b'-';
     if neg || b[i] == b'+' { i += 1; }
@@ -120,7 +129,28 @@ pub fn parse_f64_bytes(b: &[u8]) -> Option<f64> {
     }
 
     if neg { result = -result; }
-    Some(result)
+    Some((result, i))
+}
+
+/// Index of the next `\n` at or after `i`, or `b.len()` if none. Scans eight
+/// bytes per step.
+#[inline]
+pub fn find_newline(b: &[u8], mut i: usize) -> usize {
+    const LO: u64 = 0x0101_0101_0101_0101;
+    const HI: u64 = 0x8080_8080_8080_8080;
+    const NL: u64 = 0x0a0a_0a0a_0a0a_0a0a;
+    let n = b.len();
+    let p = b.as_ptr();
+    while i + 8 <= n {
+        let x = unsafe { p.add(i).cast::<u64>().read_unaligned() } ^ NL;
+        let t = x.wrapping_sub(LO) & !x & HI;
+        if t != 0 {
+            return i + (t.trailing_zeros() / 8) as usize;
+        }
+        i += 8;
+    }
+    while i < n && b[i] != b'\n' { i += 1; }
+    i
 }
 
 /// Parse 3 floats from a whitespace-token iterator into a Vec3.
@@ -129,15 +159,6 @@ pub fn parse_vec3_iter<'a>(parts: &mut impl Iterator<Item = &'a str>) -> Option<
     let x = parts.next().and_then(parse_f64_fast)?;
     let y = parts.next().and_then(parse_f64_fast)?;
     let z = parts.next().and_then(parse_f64_fast)?;
-    Some(Vec3::new(x, y, z))
-}
-
-/// Parse 3 floats from a byte-token iterator into a Vec3.
-#[inline]
-pub fn parse_vec3_bytes<'a>(parts: &mut impl Iterator<Item = &'a [u8]>) -> Option<Vec3> {
-    let x = parts.next().and_then(parse_f64_bytes)?;
-    let y = parts.next().and_then(parse_f64_bytes)?;
-    let z = parts.next().and_then(parse_f64_bytes)?;
     Some(Vec3::new(x, y, z))
 }
 
@@ -160,10 +181,10 @@ impl<'a> Iterator for AsciiTokens<'a> {
     #[inline]
     fn next(&mut self) -> Option<&'a [u8]> {
         let b = self.b;
-        while self.i < b.len() && b[self.i].is_ascii_whitespace() { self.i += 1; }
+        while self.i < b.len() && b[self.i] <= b' ' { self.i += 1; }
         if self.i >= b.len() { return None; }
         let start = self.i;
-        while self.i < b.len() && !b[self.i].is_ascii_whitespace() { self.i += 1; }
+        while self.i < b.len() && b[self.i] > b' ' { self.i += 1; }
         Some(&b[start..self.i])
     }
 }

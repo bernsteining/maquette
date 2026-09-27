@@ -12,5 +12,8 @@ crate-type = ["cdylib", "rlib"]
 wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-protocol" }
 maquette-core = { path = "../maquette-core" }
 
+[features]
+prof = []
+
 [lints]
 workspace = true

@@ -1,4 +1,5 @@
 
+use crate::math::FloatExt;
 use crate::config::RenderConfig;
 use crate::math::Vec3;
 
@@ -97,11 +98,11 @@ fn axonometric_camera(center: Vec3, dist: f64, projection: &str) -> Option<Vec3>
 #[inline]
 fn ortho_scale(config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64) -> f64 {
     if config.auto_fit {
-        vh.min(vw) * 0.45 / br
+        vh.fmin(vw) * 0.45 / br
     } else {
         let dist = (view.camera - view.center).length();
         let half_extent = dist * (config.fov.to_radians() / 2.0).tan();
-        vh.min(vw) / (2.0 * half_extent)
+        vh.fmin(vw) / (2.0 * half_extent)
     }
 }
 
@@ -174,24 +175,24 @@ impl ProjectionSetup {
 /// Focal length for equidistant projections (fisheye, cylindrical).
 #[inline]
 fn focal_equidistant(config: &RenderConfig, view: &ViewParams, hw: f64, hh: f64, br: f64) -> f64 {
-    let half_size = hw.min(hh);
+    let half_size = hw.fmin(hh);
     if config.auto_fit {
         let dist = (view.camera - view.center).length();
         half_size * 0.45 / (br / dist).atan()
     } else {
-        half_size / (config.fov.to_radians().max(0.01) / 2.0)
+        half_size / (config.fov.to_radians().fmax(0.01) / 2.0)
     }
 }
 
 /// Focal length for stereographic projections (stereographic, pannini).
 #[inline]
 fn focal_stereographic(config: &RenderConfig, view: &ViewParams, hw: f64, hh: f64, br: f64) -> f64 {
-    let half_size = hw.min(hh);
+    let half_size = hw.fmin(hh);
     if config.auto_fit {
         let dist = (view.camera - view.center).length();
         half_size * 0.45 / (2.0 * ((br / dist).atan() / 2.0).tan())
     } else {
-        half_size / (2.0 * (config.fov.to_radians().max(0.01) / 4.0).tan())
+        half_size / (2.0 * (config.fov.to_radians().fmax(0.01) / 4.0).tan())
     }
 }
 
@@ -199,7 +200,7 @@ pub(crate) fn setup_projection(proj: Projection, config: &RenderConfig, view: &V
     let hw = vw / 2.0;
     let hh = vh / 2.0;
     let setup = setup_projection_inner(proj, config, view, vw, vh, br, hw, hh)
-        .magnified(config.zoom.max(1e-6));
+        .magnified(config.zoom.fmax(1e-6));
     setup.panned(config.pan[0] * vw, -config.pan[1] * vh)
 }
 
@@ -233,7 +234,7 @@ fn setup_projection_inner(proj: Projection, config: &RenderConfig, view: &ViewPa
                 let dist = (view.camera - view.center).length();
                 let required = (br / dist).atan();
                 let current = fov_rad / 2.0;
-                1.0 / required.max(current).tan() / (1.0 + k)
+                1.0 / required.fmax(current).tan() / (1.0 + k)
             } else {
                 1.0 / (fov_rad / 2.0).tan()
             };
@@ -246,11 +247,11 @@ fn setup_projection_inner(proj: Projection, config: &RenderConfig, view: &ViewPa
             ProjectionSetup::Pannini { f: focal_stereographic(config, view, hw, hh, br), hw, hh }
         }
         Projection::TinyPlanet => {
-            let half_size = hw.min(hh);
+            let half_size = hw.fmin(hh);
             let f = if config.auto_fit {
                 half_size * 0.45 / std::f64::consts::PI
             } else {
-                half_size / config.fov.to_radians().max(0.01)
+                half_size / config.fov.to_radians().fmax(0.01)
             };
             ProjectionSetup::TinyPlanet { f, hw, hh }
         }
@@ -260,7 +261,7 @@ fn setup_projection_inner(proj: Projection, config: &RenderConfig, view: &ViewPa
                 let dist = (view.camera - view.center).length();
                 let required = (br / dist).atan();
                 let current = fov_rad / 2.0;
-                1.0 / required.max(current).tan()
+                1.0 / required.fmax(current).tan()
             } else {
                 1.0 / (fov_rad / 2.0).tan()
             };
@@ -281,7 +282,7 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
         ProjectionSetup::Perspective { sx, sy, hw, hh } => {
             let mut pts = [(0.0, 0.0); 3];
             for (i, v) in cam.iter().enumerate() {
-                let z = (-v.z).max(0.001);
+                let z = (-v.z).fmax(0.001);
                 pts[i] = (hw + v.x * sx / z, hh - v.y * sy / z);
             }
             pts
@@ -299,7 +300,7 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
             for (i, v) in cam.iter().enumerate() {
                 let xy = (v.x * v.x + v.y * v.y).sqrt();
                 if xy < 1e-10 { pts[i] = (hw, hh); continue; }
-                let r = xy.atan2((-v.z).max(1e-6)) * f;
+                let r = xy.atan2((-v.z).fmax(1e-6)) * f;
                 pts[i] = (hw + r * (v.x / xy), hh - r * (v.y / xy));
             }
             pts
@@ -309,7 +310,7 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
             for (i, v) in cam.iter().enumerate() {
                 let xy = (v.x * v.x + v.y * v.y).sqrt();
                 if xy < 1e-10 { pts[i] = (hw, hh); continue; }
-                let r = 2.0 * f * (xy.atan2((-v.z).max(1e-6)) / 2.0).tan();
+                let r = 2.0 * f * (xy.atan2((-v.z).fmax(1e-6)) / 2.0).tan();
                 pts[i] = (hw + r * (v.x / xy), hh - r * (v.y / xy));
             }
             pts
@@ -317,7 +318,7 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
         ProjectionSetup::Curvilinear { d, k, aspect, hw, hh } => {
             let mut pts = [(0.0, 0.0); 3];
             for (i, v) in cam.iter().enumerate() {
-                let z = (-v.z).max(0.001);
+                let z = (-v.z).fmax(0.001);
                 let px = (v.x * d) / (z * aspect);
                 let py = (v.y * d) / z;
                 let f = 1.0 + k * (px * px + py * py);
@@ -330,14 +331,14 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
             for (i, v) in cam.iter().enumerate() {
                 let horiz = (v.x * v.x + v.z * v.z).sqrt();
                 if horiz < 1e-10 { pts[i] = (hw, hh); continue; }
-                pts[i] = (hw + v.x.atan2((-v.z).max(1e-6)) * f, hh - (v.y / horiz) * f);
+                pts[i] = (hw + v.x.atan2((-v.z).fmax(1e-6)) * f, hh - (v.y / horiz) * f);
             }
             pts
         }
         ProjectionSetup::Pannini { f, hw, hh } => {
             let mut pts = [(0.0, 0.0); 3];
             for (i, v) in cam.iter().enumerate() {
-                let z = (-v.z).max(1e-6);
+                let z = (-v.z).fmax(1e-6);
                 let horiz = (v.x * v.x + z * z).sqrt();
                 if horiz < 1e-10 { pts[i] = (hw, hh); continue; }
                 let theta = v.x.atan2(z);

@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 /// Software triangle rasterizer with z-buffer.
 ///
 /// Lean port of maquette's rasterizer keeping the SIMD scanline fill and
@@ -134,7 +135,7 @@ impl PixelBuffer {
                     *self.oit_accum.get_unchecked(ao + 3),
                 )
             };
-            let inv_a = 1.0 / aa.max(1e-5);
+            let inv_a = 1.0 / aa.fmax(1e-5);
             let avg_r = ar * inv_a;
             let avg_g = ag * inv_a;
             let avg_b = ab * inv_a;
@@ -193,7 +194,7 @@ impl PixelBuffer {
         let (x1, y1) = (b.0, b.1);
         let dx = (x1 - x0).abs();
         let dy = (y1 - y0).abs();
-        let steps = dx.max(dy).ceil() as i32;
+        let steps = dx.fmax(dy).ceil() as i32;
         if steps == 0 {
             self.write_point((x0 as usize, y0 as usize), za, rgba_a);
             return;
@@ -657,7 +658,7 @@ impl PixelBuffer {
                 if d > zmax { zmax = d; }
             }
         }
-        let depth_range = (zmax - zmin).max(0.001);
+        let depth_range = (zmax - zmin).fmax(0.001);
 
         let radius_px = (params.radius * w.min(h) as f64) as f32;
         let bias_scaled = params.bias as f32 * depth_range;
@@ -711,7 +712,7 @@ impl PixelBuffer {
                     }
                     if valid > 0 {
                         unsafe { *ao_buffer.get_unchecked_mut($idx) =
-                            (1.0 - (occlusion as f32 / valid as f32 * strength).min(1.0)).max(0.0) };
+                            (1.0 - (occlusion as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
                     }
                 }
             };
@@ -769,7 +770,7 @@ impl PixelBuffer {
                     }
                     if valid > 0 {
                         unsafe { *ao_buffer.get_unchecked_mut(idx) =
-                            (1.0 - (occluded as f32 / valid as f32 * strength).min(1.0)).max(0.0) };
+                            (1.0 - (occluded as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
                     }
                 }
                 for x in interior_x_end..w_i32 {
@@ -1117,10 +1118,10 @@ impl TriSetup {
         let w = width as f64;
         let h = height as f64;
 
-        let min_x = pts[0].0.min(pts[1].0).min(pts[2].0).max(0.0) as usize;
-        let max_x = (pts[0].0.max(pts[1].0).max(pts[2].0).min(w - 1.0) as usize).min(width - 1);
-        let min_y = pts[0].1.min(pts[1].1).min(pts[2].1).max(0.0) as usize;
-        let max_y = (pts[0].1.max(pts[1].1).max(pts[2].1).min(h - 1.0) as usize).min(height - 1);
+        let min_x = pts[0].0.fmin(pts[1].0).fmin(pts[2].0).fmax(0.0) as usize;
+        let max_x = (pts[0].0.fmax(pts[1].0).fmax(pts[2].0).fmin(w - 1.0) as usize).min(width - 1);
+        let min_y = pts[0].1.fmin(pts[1].1).fmin(pts[2].1).fmax(0.0) as usize;
+        let max_y = (pts[0].1.fmax(pts[1].1).fmax(pts[2].1).fmin(h - 1.0) as usize).min(height - 1);
 
         let area = edge(pts[0], pts[1], pts[2]);
         if area.abs() < 1e-6 { return None; }
@@ -1162,14 +1163,14 @@ impl TriSetup {
             } else {
                 let x_cross = self.min_x as f64 - w * inv_dw;
                 if dw > 0.0 {
-                    left = left.max(x_cross);
+                    left = left.fmax(x_cross);
                 } else {
-                    right = right.min(x_cross);
+                    right = right.fmin(x_cross);
                 }
             }
         }
 
-        let xl = ((left - 1.0).max(self.min_x as f64)) as usize;
+        let xl = ((left - 1.0).fmax(self.min_x as f64)) as usize;
         let xr = (((right + 1.0) as usize).min(self.max_x)).min(self.max_x);
         if xl > xr { return None; }
         Some((xl, xr))

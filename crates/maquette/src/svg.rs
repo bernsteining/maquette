@@ -1,4 +1,5 @@
 
+use crate::math::FloatExt;
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 #[inline]
@@ -24,7 +25,7 @@ pub(crate) fn push_i32(s: &mut String, v: i32) {
 fn push_fn(s: &mut String, v: f64, decimals: u32) {
     if v.is_sign_negative() && v != 0.0 { s.push('-'); push_fn(s, -v, decimals); return; }
     let mul = 10u64.pow(decimals) as f64;
-    let scaled = (v * mul).round() as u64;
+    let scaled = (v * mul).fround() as u64;
     let int_part = scaled / mul as u64;
     let frac_part = scaled % mul as u64;
     push_u64(s, int_part);
@@ -71,7 +72,7 @@ fn write_f2(buf: &mut [u8], v: f64) -> usize {
         buf[p] = b'-'; p += 1;
         return p + write_f2(&mut buf[p..], -v);
     }
-    let scaled = (v * 100.0).round() as u64;
+    let scaled = (v * 100.0).fround() as u64;
     let int_part = scaled / 100;
     let frac_part = scaled % 100;
     p += write_u64(&mut buf[p..], int_part);

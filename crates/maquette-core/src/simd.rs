@@ -173,6 +173,22 @@ pub fn u16x8_narrow_i32x4(a: v128, b: v128) -> v128 {
     vu16(o)
 }
 #[inline]
+pub fn u16x8_extmul_low_u8x16(a: v128, b: v128) -> v128 {
+    let mut o = [0u16; 8];
+    for i in 0..8 {
+        o[i] = a.0[i] as u16 * b.0[i] as u16;
+    }
+    vu16(o)
+}
+#[inline]
+pub fn u16x8_extmul_high_u8x16(a: v128, b: v128) -> v128 {
+    let mut o = [0u16; 8];
+    for i in 0..8 {
+        o[i] = a.0[i + 8] as u16 * b.0[i + 8] as u16;
+    }
+    vu16(o)
+}
+#[inline]
 pub fn u16x8_shr(a: v128, amt: u32) -> v128 {
     let s = amt & 15;
     vu16(au16(a).map(|x| x >> s))

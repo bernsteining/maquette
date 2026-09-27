@@ -23,6 +23,7 @@
 
 pub mod bundle;
 pub mod color;
+mod color_lut;
 pub mod fxaa;
 pub mod ibl;
 pub mod light;

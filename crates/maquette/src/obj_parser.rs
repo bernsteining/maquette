@@ -1,5 +1,6 @@
+use crate::math::FloatExt;
 use crate::color::parse_hex_color;
-use crate::math::{parse_vec3_bytes, parse_i64_bytes, AsciiTokens, Vec3};
+use crate::math::{find_newline, parse_f64_from, parse_i64_bytes, AsciiTokens, Vec3};
 use crate::parser::Triangle;
 use crate::config::{GroupAppearance, GroupStyle};
 use std::collections::HashMap;
@@ -44,18 +45,18 @@ pub fn parse_mtl(data: &str) -> HashMap<String, String> {
             "Kd" => {
                 let vals: Vec<f64> = parts.filter_map(|s| s.parse().ok()).collect();
                 if vals.len() >= 3 {
-                    let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+                    let byte = |v: f64| (v.clamp(0.0, 1.0) * 255.0).fround() as u8;
                     kd = Some((byte(vals[0]), byte(vals[1]), byte(vals[2])));
                 }
             }
             "d" => {
                 if let Some(v) = parts.next().and_then(|s| s.parse::<f64>().ok()) {
-                    alpha = Some((v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                    alpha = Some((v.clamp(0.0, 1.0) * 255.0).fround() as u8);
                 }
             }
             "Tr" => {
                 if let Some(v) = parts.next().and_then(|s| s.parse::<f64>().ok()) {
-                    alpha = Some(((1.0 - v.clamp(0.0, 1.0)) * 255.0).round() as u8);
+                    alpha = Some(((1.0 - v.clamp(0.0, 1.0)) * 255.0).fround() as u8);
                 }
             }
             _ => {}
@@ -127,67 +128,43 @@ pub fn parse_obj(
     let n = data.len();
     let mut pos = 0;
     while pos < n {
-        let mut eol = pos;
-        while eol < n && data[eol] != b'\n' { eol += 1; }
-        let mut line = &data[pos..eol];
-        pos = eol + 1;
-        if line.last() == Some(&b'\r') { line = &line[..line.len() - 1]; }
-
-        let mut parts = AsciiTokens::new(line);
-        let keyword = match parts.next() {
-            Some(k) => k,
-            None => continue,
-        };
+        let mut i = pos;
+        while i < n && data[i] <= b' ' && data[i] != b'\n' { i += 1; }
+        if i >= n { break; }
+        if data[i] == b'\n' {
+            pos = i + 1;
+            continue;
+        }
+        let ks = i;
+        while i < n && data[i] > b' ' { i += 1; }
+        let keyword = &data[ks..i];
 
         match keyword {
             b"v" => {
-                vertices.push(parse_vec3_bytes(&mut parts)
-                    .ok_or("vertex needs 3 valid coordinates")?);
+                let v = parse_vec3_at(data, &mut i).ok_or("vertex needs 3 valid coordinates")?;
+                vertices.push(v);
+                pos = find_newline(data, i) + 1;
             }
             b"vn" => {
-                normals.push(parse_vec3_bytes(&mut parts)
-                    .ok_or("normal needs 3 valid coordinates")?);
-            }
-            b"vt" => {
-                let u = parts.next().and_then(crate::math::parse_f64_bytes).unwrap_or(0.0) as f32;
-                let v = parts.next().and_then(crate::math::parse_f64_bytes).unwrap_or(0.0) as f32;
-                texcoords.push([u, 1.0 - v]);
-            }
-            b"s" => {
-                let tok = parts.next().unwrap_or(b"off");
-                current_smooth = if tok == b"off" || tok == b"0" {
-                    None
-                } else {
-                    std::str::from_utf8(tok).ok()
-                        .and_then(|s| s.parse::<u32>().ok())
-                        .filter(|&n| n != 0)
-                };
-            }
-            b"usemtl" => {
-                let name = match parts.next() {
-                    Some(n) => n,
-                    None => continue,
-                };
-                let name_str = std::str::from_utf8(name).ok();
-                current_color = if name.first() == Some(&b'#') && name.len() >= 7 {
-                    name_str.map(parse_hex_color)
-                } else if let Some(s) = name_str {
-                    materials.get(s).map(|hex| parse_hex_color(hex))
-                } else {
-                    None
-                };
-                current_tex = name_str.and_then(|s| tex_index.get(s).copied());
+                let v = parse_vec3_at(data, &mut i).ok_or("normal needs 3 valid coordinates")?;
+                normals.push(v);
+                pos = find_newline(data, i) + 1;
             }
             b"f" => {
                 face_buf.clear();
                 let nv = vertices.len();
                 let nt = texcoords.len();
                 let nn = normals.len();
-                for p in parts {
-                    if let Some(idx) = parse_face_index(p, nv, nt, nn) {
+                loop {
+                    while i < n && data[i] <= b' ' && data[i] != b'\n' { i += 1; }
+                    if i >= n || data[i] == b'\n' { break; }
+                    let ts = i;
+                    while i < n && data[i] > b' ' { i += 1; }
+                    if let Some(idx) = parse_face_index(&data[ts..i], nv, nt, nn) {
                         face_buf.push(idx);
                     }
                 }
+                pos = i + 1;
 
                 if face_buf.len() < 3 {
                     continue;
@@ -224,40 +201,98 @@ pub fn parse_obj(
                     });
                 }
             }
-            b"g" | b"o" => {
-                let mut name = String::new();
-                for p in parts {
-                    if !name.is_empty() { name.push(' '); }
-                    if let Ok(s) = std::str::from_utf8(p) { name.push_str(s); }
+            _ => {
+                let eol = find_newline(data, i);
+                pos = eol + 1;
+                let mut parts = AsciiTokens::new(&data[i..eol]);
+                match keyword {
+                b"vt" => {
+                    let u = parts.next().and_then(crate::math::parse_f64_bytes).unwrap_or(0.0) as f32;
+                    let v = parts.next().and_then(crate::math::parse_f64_bytes).unwrap_or(0.0) as f32;
+                    texcoords.push([u, 1.0 - v]);
                 }
-                let gid = group_counter;
-                current_group = Some(gid);
-                group_counter += 1;
-
-                if let Some(style) = highlight.get(&name) {
-                    if let Some(hex) = style.color_hex() {
-                        current_highlight = Some(parse_hex_color(hex));
+                b"s" => {
+                    let tok = parts.next().unwrap_or(b"off");
+                    current_smooth = if tok == b"off" || tok == b"0" {
+                        None
                     } else {
-                        current_highlight = None;
+                        std::str::from_utf8(tok).ok()
+                            .and_then(|s| s.parse::<u32>().ok())
+                            .filter(|&n| n != 0)
+                    };
+                }
+                b"usemtl" => {
+                    let name = match parts.next() {
+                        Some(n) => n,
+                        None => continue,
+                    };
+                    let name_str = std::str::from_utf8(name).ok();
+                    current_color = if name.first() == Some(&b'#') && name.len() >= 7 {
+                        name_str.map(parse_hex_color)
+                    } else if let Some(s) = name_str {
+                        materials.get(s).map(|hex| parse_hex_color(hex))
+                    } else {
+                        None
+                    };
+                    current_tex = name_str.and_then(|s| tex_index.get(s).copied());
+                }
+                b"g" | b"o" => {
+                    let mut name = String::new();
+                    for p in parts {
+                        if !name.is_empty() { name.push(' '); }
+                        if let Ok(s) = std::str::from_utf8(p) { name.push_str(s); }
                     }
-                    let mut ga = style.appearance().cloned().unwrap_or_default();
-                    ga.name = Some(name);
-                    group_styles.insert(gid, ga);
-                } else {
-                    group_styles.insert(gid, GroupAppearance {
-                        name: Some(name),
-                        ..Default::default()
-                    });
-                    if keyword == b"o" {
-                        current_highlight = None;
+                    let gid = group_counter;
+                    current_group = Some(gid);
+                    group_counter += 1;
+
+                    if let Some(style) = highlight.get(&name) {
+                        if let Some(hex) = style.color_hex() {
+                            current_highlight = Some(parse_hex_color(hex));
+                        } else {
+                            current_highlight = None;
+                        }
+                        let mut ga = style.appearance().cloned().unwrap_or_default();
+                        ga.name = Some(name);
+                        group_styles.insert(gid, ga);
+                    } else {
+                        group_styles.insert(gid, GroupAppearance {
+                            name: Some(name),
+                            ..Default::default()
+                        });
+                        if keyword == b"o" {
+                            current_highlight = None;
+                        }
                     }
+                }
+                    _ => {}
                 }
             }
-            _ => {}
         }
     }
 
     Ok((triangles, group_styles))
+}
+
+/// Parse three floats from the current line starting at `data[*i]`, leaving
+/// `*i` just past the third token. Same result as splitting the line into
+/// tokens and parsing each with `parse_f64_bytes`, without the separate
+/// tokenizing pass.
+#[inline]
+fn parse_vec3_at(data: &[u8], i: &mut usize) -> Option<Vec3> {
+    let mut c = [0.0f64; 3];
+    for v in &mut c {
+        let n = data.len();
+        let mut j = *i;
+        while j < n && data[j] <= b' ' && data[j] != b'\n' { j += 1; }
+        if j >= n || data[j] == b'\n' { return None; }
+        let (x, e) = parse_f64_from(data, j)?;
+        j = e;
+        while j < n && data[j] > b' ' { j += 1; }
+        *i = j;
+        *v = x;
+    }
+    Some(Vec3::new(c[0], c[1], c[2]))
 }
 
 /// Parse a face vertex index like "1", "1/2", "1/2/3", or "1//3".

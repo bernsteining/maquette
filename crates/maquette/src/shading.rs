@@ -1,4 +1,5 @@
 
+use crate::math::FloatExt;
 use crate::config::{LightKind, RenderConfig};
 use crate::color::linear_to_srgb;
 use crate::math::Vec3;
@@ -99,7 +100,7 @@ pub(crate) fn specular_contrib(
     let ndoth_unnorm = onx * hx + ony * hy + onz * hz;
     if ndoth_unnorm > 0.0 {
         let h_inv = 1.0f32 / (hx * hx + hy * hy + hz * hz).sqrt();
-        let ndoth = (ndoth_unnorm * h_inv).min(1.0);
+        let ndoth = (ndoth_unnorm * h_inv).fmin(1.0);
         spec_lut[(ndoth * 255.0) as usize] * specular
     } else {
         0.0
@@ -127,9 +128,9 @@ pub(crate) fn finalize_color(
         (linear_to_srgb(hr), linear_to_srgb(hg), linear_to_srgb(hb))
     } else {
         (
-            (hr * 255.0).min(255.0).round() as u8,
-            (hg * 255.0).min(255.0).round() as u8,
-            (hb * 255.0).min(255.0).round() as u8,
+            (hr * 255.0).fmin(255.0).fround() as u8,
+            (hg * 255.0).fmin(255.0).fround() as u8,
+            (hb * 255.0).fmin(255.0).fround() as u8,
         )
     }
 }
@@ -403,7 +404,7 @@ pub(crate) fn tone_map(r: f32, g: f32, b: f32, method: ToneMapMethod, exposure: 
             fn aces(x: f32) -> f32 {
                 let a = x * (2.51 * x + 0.03);
                 let b = x * (2.43 * x + 0.59) + 0.14;
-                (a / b).max(0.0).min(1.0)
+                (a / b).fmax(0.0).fmin(1.0)
             }
             (aces(r), aces(g), aces(b))
         }
@@ -526,7 +527,7 @@ pub(crate) fn shade_point(
             let lx = -ldx + onx * sss_distortion;
             let ly = -ldy + ony * sss_distortion;
             let lz = -ldz + onz * sss_distortion;
-            let vdotl = (vdx * lx + vdy * ly + vdz * lz).max(0.0).min(1.0);
+            let vdotl = (vdx * lx + vdy * ly + vdz * lz).fmax(0.0).fmin(1.0);
             let sss = sss_lut[(vdotl * 255.0) as usize] * sss_intensity;
             diff_r += light.cr * sss;
             diff_g += light.cg * sss;
@@ -536,7 +537,7 @@ pub(crate) fn shade_point(
 
     let rim = if fresnel > 0.0 {
         let base = 1.0 - (onx * vdx + ony * vdy + onz * vdz).abs();
-        let r = fresnel_lut[(base.max(0.0) * 255.0).min(255.0) as usize] * fresnel;
+        let r = fresnel_lut[(base.fmax(0.0) * 255.0).fmin(255.0) as usize] * fresnel;
         if shading == ShadingMode::Cel { if r > 0.5 { 1.0f32 } else { 0.0f32 } } else { r }
     } else { 0.0f32 };
 

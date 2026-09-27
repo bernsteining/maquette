@@ -20,6 +20,7 @@
 //! Diffuse: sample at N with high mip (heavily blurred → hemispheric average).
 //! Specular: sample at R = reflect(-V, N) with mip = roughness · max_lod.
 
+use crate::math::FloatExt;
 use crate::math::Vec3;
 
 const SIDE: u32 = 512;
@@ -66,9 +67,9 @@ impl IblEnvironment {
                 let ex = ex.min(eq_w as usize - 1);
                 let ey = ey.min(eq_h as usize - 1);
                 let off = (ey * eq_w as usize + ex) * 3;
-                base_rgb.push((equirect[off]     * intensity).max(0.0));
-                base_rgb.push((equirect[off + 1] * intensity).max(0.0));
-                base_rgb.push((equirect[off + 2] * intensity).max(0.0));
+                base_rgb.push((equirect[off]     * intensity).fmax(0.0));
+                base_rgb.push((equirect[off + 1] * intensity).fmax(0.0));
+                base_rgb.push((equirect[off + 2] * intensity).fmax(0.0));
             }
         }
         Self::finish(base_rgb)
@@ -110,9 +111,9 @@ impl IblEnvironment {
                     g += sun_boost;
                     b += sun_boost;
                 }
-                base_rgb.push(r.max(0.0));
-                base_rgb.push(g.max(0.0));
-                base_rgb.push(b.max(0.0));
+                base_rgb.push(r.fmax(0.0));
+                base_rgb.push(g.fmax(0.0));
+                base_rgb.push(b.fmax(0.0));
             }
         }
         Self::finish(base_rgb)
@@ -230,7 +231,7 @@ fn octahedral_decode(u: f32, v: f32) -> (f32, f32, f32) {
         let (nx, nz) = ((1.0 - z.abs()) * sx, (1.0 - x.abs()) * sz);
         x = nx; z = nz;
     }
-    let len = (x * x + y * y + z * z).sqrt().max(1e-14);
+    let len = (x * x + y * y + z * z).sqrt().fmax(1e-14);
     (x / len, y / len, z / len)
 }
 
@@ -267,7 +268,7 @@ fn sample_seam_aware(mip: &MipF32, dx: f32, dy: f32, dz: f32) -> [f32; 3] {
     let y0 = y0i.clamp(0, hi - 1);
     let y1 = (y0i + 1).clamp(0, hi - 1);
 
-    let inv_len = 1.0 / (dx * dx + dy * dy + dz * dz).sqrt().max(1e-14);
+    let inv_len = 1.0 / (dx * dx + dy * dy + dz * dz).sqrt().fmax(1e-14);
     let qx = dx * inv_len;
     let qy = dy * inv_len;
     let qz = dz * inv_len;
@@ -281,22 +282,22 @@ fn sample_seam_aware(mip: &MipF32, dx: f32, dy: f32, dz: f32) -> [f32; 3] {
 
     let (tu, tv) = ((x0 as f32 + 0.5) * inv_mw, (y0 as f32 + 0.5) * inv_mh);
     let (tdx, tdy, tdz) = octahedral_decode(tu, tv);
-    let w00 = (qx * tdx + qy * tdy + qz * tdz).max(0.0) * ix * iy;
+    let w00 = (qx * tdx + qy * tdy + qz * tdz).fmax(0.0) * ix * iy;
     let off00 = (y0 as usize * sw + x0 as usize) * 3;
 
     let (tu, tv) = ((x1 as f32 + 0.5) * inv_mw, (y0 as f32 + 0.5) * inv_mh);
     let (tdx, tdy, tdz) = octahedral_decode(tu, tv);
-    let w10 = (qx * tdx + qy * tdy + qz * tdz).max(0.0) * fx * iy;
+    let w10 = (qx * tdx + qy * tdy + qz * tdz).fmax(0.0) * fx * iy;
     let off10 = (y0 as usize * sw + x1 as usize) * 3;
 
     let (tu, tv) = ((x0 as f32 + 0.5) * inv_mw, (y1 as f32 + 0.5) * inv_mh);
     let (tdx, tdy, tdz) = octahedral_decode(tu, tv);
-    let w01 = (qx * tdx + qy * tdy + qz * tdz).max(0.0) * ix * fy;
+    let w01 = (qx * tdx + qy * tdy + qz * tdz).fmax(0.0) * ix * fy;
     let off01 = (y1 as usize * sw + x0 as usize) * 3;
 
     let (tu, tv) = ((x1 as f32 + 0.5) * inv_mw, (y1 as f32 + 0.5) * inv_mh);
     let (tdx, tdy, tdz) = octahedral_decode(tu, tv);
-    let w11 = (qx * tdx + qy * tdy + qz * tdz).max(0.0) * fx * fy;
+    let w11 = (qx * tdx + qy * tdy + qz * tdz).fmax(0.0) * fx * fy;
     let off11 = (y1 as usize * sw + x1 as usize) * 3;
 
     let sum_w = w00 + w10 + w01 + w11;

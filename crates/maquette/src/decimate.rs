@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 use crate::math::Vec3;
 use crate::parser::Triangle;
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
@@ -27,13 +28,13 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
     if strength <= 0.0 || triangles.len() < 2 {
         return triangles.to_vec();
     }
-    let s = strength.min(1.0);
+    let s = strength.fmin(1.0);
 
     const N_FINE: f64 = 256.0;
     const N_COARSE: f64 = 6.0;
-    let res = (N_FINE * (N_COARSE / N_FINE).powf(s)).round().clamp(2.0, 256.0) as i32;
+    let res = (N_FINE * (N_COARSE / N_FINE).powf(s)).fround().clamp(2.0, 256.0) as i32;
 
-    let longest = (bmax.x - bmin.x).max(bmax.y - bmin.y).max(bmax.z - bmin.z);
+    let longest = (bmax.x - bmin.x).fmax(bmax.y - bmin.y).fmax(bmax.z - bmin.z);
     if longest < 1e-12 {
         return triangles.to_vec();
     }
@@ -99,7 +100,7 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
         unsafe { v128_store(keys.as_mut_ptr().add(b) as *mut v128, key) };
         b += 4;
     }
-    let clamp_axis = |c: f32| (((c).max(0.0)).min(max_idx)).floor() as i32;
+    let clamp_axis = |c: f32| (((c).fmax(0.0)).fmin(max_idx)).floor() as i32;
     for v in b..nv {
         let kx = clamp_axis((xs[v] - bx) * inv);
         let ky = clamp_axis((ys[v] - by) * inv);

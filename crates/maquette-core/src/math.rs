@@ -40,6 +40,50 @@ impl Hasher for FxHasher {
 pub type FxBuildHasher = BuildHasherDefault<FxHasher>;
 pub type FxHashMap<K, V> = HashMap<K, V, FxBuildHasher>;
 
+/// Float `min`/`max`/`round` that stay inline on wasm32.
+///
+/// `f64::min`/`max`/`round` have no single wasm instruction with Rust's exact
+/// semantics, so rustc lowers them to calls into compiler-builtins' `fmin` /
+/// `fmax` / `round`, which LTO can't inline — a real function call per use under
+/// an interpreter. These reproduce those builtins bit for bit (NaN handling
+/// included) using comparisons, `trunc` and `copysign`, which are native
+/// instructions.
+pub trait FloatExt: Copy {
+    fn fmin(self, other: Self) -> Self;
+    fn fmax(self, other: Self) -> Self;
+    fn fround(self) -> Self;
+}
+
+impl FloatExt for f64 {
+    #[inline(always)]
+    fn fmin(self, other: f64) -> f64 {
+        if other.is_nan() || self < other { self } else { other }
+    }
+    #[inline(always)]
+    fn fmax(self, other: f64) -> f64 {
+        if self.is_nan() || self < other { other } else { self }
+    }
+    #[inline(always)]
+    fn fround(self) -> f64 {
+        (self + 0.499_999_999_999_999_94_f64.copysign(self)).trunc()
+    }
+}
+
+impl FloatExt for f32 {
+    #[inline(always)]
+    fn fmin(self, other: f32) -> f32 {
+        if other.is_nan() || self < other { self } else { other }
+    }
+    #[inline(always)]
+    fn fmax(self, other: f32) -> f32 {
+        if self.is_nan() || self < other { other } else { self }
+    }
+    #[inline(always)]
+    fn fround(self) -> f32 {
+        (self + 0.499_999_97_f32.copysign(self)).trunc()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Vec3 {
     pub x: f64,

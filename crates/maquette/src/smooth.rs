@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 use crate::math::{quantize, fx_hashmap, fx_hashmap_cap, FxHashMap, Vec3};
 use crate::parser::Triangle;
 
@@ -40,7 +41,7 @@ pub fn build_vertex_normal_map(triangles: &[Triangle]) -> FxHashMap<VertexKey, V
 #[inline]
 fn quantize_normal(n: Vec3) -> (i32, i32, i32) {
     let s = 1000.0;
-    ((n.x * s).round() as i32, (n.y * s).round() as i32, (n.z * s).round() as i32)
+    ((n.x * s).fround() as i32, (n.y * s).fround() as i32, (n.z * s).fround() as i32)
 }
 
 /// Compute per-vertex normals for smooth shading, deciding per face.
@@ -82,6 +83,24 @@ pub fn compute_vertex_normals(triangles: &[Triangle]) -> SmoothData {
             }
         };
         let mut indices = [0usize; 3];
+        if recompute && tri.smoothing_group.is_none() {
+            let q = [quantize(tri.vertices[0]), quantize(tri.vertices[1]), quantize(tri.vertices[2])];
+            for i in 0..3 {
+                let shared = if i > 0 && q[0] == q[i] { Some(0) } else if i > 1 && q[1] == q[2] { Some(1) } else { None };
+                let idx = match shared {
+                    Some(j) => indices[j],
+                    None => {
+                        normals.push(Vec3::new(0.0, 0.0, 0.0));
+                        positions.push(tri.vertices[i]);
+                        normals.len() - 1
+                    }
+                };
+                normals[idx] = normals[idx] + tri.normal;
+                indices[i] = idx;
+            }
+            tri_indices.push(indices);
+            continue;
+        }
         for i in 0..3 {
             let v = tri.vertices[i];
             let (key, add) = if recompute {

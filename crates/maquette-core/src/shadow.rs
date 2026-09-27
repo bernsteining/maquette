@@ -10,6 +10,7 @@
 //! the light's direction. Point lights get a 6-face cube of 90°-fov perspective
 //! frustums to cover the omnidirectional case.
 
+use crate::math::FloatExt;
 use crate::light::{LightKind, PunctualLight};
 use crate::math::{Mat4, Vec3};
 
@@ -92,7 +93,7 @@ impl ShadowMap {
         if self.ortho {
             2.0 * self.half_extent / self.res as f64
         } else {
-            let fwd = (p - self.eye).dot(self.forward).max(self.near);
+            let fwd = (p - self.eye).dot(self.forward).fmax(self.near);
             2.0 * self.tan_half_fov * fwd / self.res as f64
         }
     }
@@ -114,9 +115,9 @@ impl ShadowMap {
         } else {
             p
         };
-        let ndotl = normal.dot(self.light_dir(p)).abs().max(0.15);
-        let tan_theta = ((1.0 - ndotl * ndotl).max(0.0)).sqrt() / ndotl;
-        let bias = b.bias * (1.0 + b.slope_bias * tan_theta.min(6.0));
+        let ndotl = normal.dot(self.light_dir(p)).abs().fmax(0.15);
+        let tan_theta = ((1.0 - ndotl * ndotl).fmax(0.0)).sqrt() / ndotl;
+        let bias = b.bias * (1.0 + b.slope_bias * tan_theta.fmin(6.0));
 
         let (sx, sy, depth) = match self.project(sample) {
             Some(v) => v,
@@ -125,6 +126,15 @@ impl ShadowMap {
         let cx = sx.floor() as i64;
         let cy = sy.floor() as i64;
         let r = softness as i64;
+        if self.window_inside(cx, cy, r) {
+            let (res, n) = (self.res, (2 * r + 1) as usize);
+            let cutoff = lit_cutoff(depth, bias);
+            let mut lit = 0u32;
+            for y in cy - r..=cy + r {
+                lit += count_lit(&self.depth[y as usize * res..][..res], (cx - r) as usize, n, 1, cutoff, depth, bias);
+            }
+            return lit as f32 / (n * n) as f32;
+        }
         let mut lit = 0u32;
         let mut total = 0u32;
         for dy in -r..=r {
@@ -156,60 +166,100 @@ impl ShadowMap {
         } else {
             p
         };
-        let ndotl = normal.dot(self.light_dir(p)).abs().max(0.15);
-        let tan_theta = ((1.0 - ndotl * ndotl).max(0.0)).sqrt() / ndotl;
-        let bias = b.bias * (1.0 + b.slope_bias * tan_theta.min(6.0));
+        let ndotl = normal.dot(self.light_dir(p)).abs().fmax(0.15);
+        let tan_theta = ((1.0 - ndotl * ndotl).fmax(0.0)).sqrt() / ndotl;
+        let bias = b.bias * (1.0 + b.slope_bias * tan_theta.fmin(6.0));
         let (sx, sy, depth) = match self.project(sample) {
             Some(v) => v,
             None => return 1.0,
         };
         let cx = sx.floor() as i64;
         let cy = sy.floor() as i64;
-        let tw = self.texel_world(p).max(1e-9);
+        let tw = self.texel_world(p).fmax(1e-9);
         let light_texels = (light_size / tw).clamp(1.0, 24.0);
 
         let search = light_texels.ceil() as i64;
         let sstep = (search / 4).max(1);
         let mut bsum = 0.0f64;
         let mut bn = 0u32;
-        let mut dy = -search;
-        while dy <= search {
-            let mut dx = -search;
-            while dx <= search {
-                let s = self.stored(cx + dx, cy + dy);
-                if s != EMPTY && (s as f64) < depth - bias {
-                    bsum += s as f64;
-                    bn += 1;
+        let threshold = depth - bias;
+        let blocker_cutoff = below_cutoff(threshold);
+        if self.window_inside(cx, cy, search) {
+            let res = self.res;
+            let mut dy = -search;
+            while dy <= search {
+                let row = &self.depth[(cy + dy) as usize * res..][..res];
+                let mut x = (cx - search) as usize;
+                let x_end = (cx + search) as usize;
+                while x <= x_end {
+                    let s = row[x];
+                    if s < blocker_cutoff {
+                        bsum += s as f64;
+                        bn += 1;
+                    }
+                    x += sstep as usize;
                 }
-                dx += sstep;
+                dy += sstep;
             }
-            dy += sstep;
+        } else {
+            let mut dy = -search;
+            while dy <= search {
+                let mut dx = -search;
+                while dx <= search {
+                    let s = self.stored(cx + dx, cy + dy);
+                    if s != EMPTY && (s as f64) < threshold {
+                        bsum += s as f64;
+                        bn += 1;
+                    }
+                    dx += sstep;
+                }
+                dy += sstep;
+            }
         }
         if bn == 0 {
             return 1.0;
         }
         let avg_blocker = bsum / bn as f64;
 
-        let penumbra = ((depth - avg_blocker) / avg_blocker).max(0.0);
-        let radius = ((penumbra * light_texels * 8.0).max(base_softness as f64)).clamp(1.0, 12.0) as i64;
+        let penumbra = ((depth - avg_blocker) / avg_blocker).fmax(0.0);
+        let radius = ((penumbra * light_texels * 8.0).fmax(base_softness as f64)).clamp(1.0, 12.0) as i64;
 
         let pstep = (radius / 6).max(1);
         let mut lit = 0u32;
         let mut total = 0u32;
-        let mut dy = -radius;
-        while dy <= radius {
-            let mut dx = -radius;
-            while dx <= radius {
-                let s = self.stored(cx + dx, cy + dy);
-                if s == EMPTY || depth <= s as f64 + bias {
-                    lit += 1;
-                }
-                total += 1;
-                dx += pstep;
+        if self.window_inside(cx, cy, radius) {
+            let res = self.res;
+            let n = (2 * radius / pstep + 1) as usize;
+            let cutoff = lit_cutoff(depth, bias);
+            let mut dy = -radius;
+            while dy <= radius {
+                let row = &self.depth[(cy + dy) as usize * res..][..res];
+                lit += count_lit(row, (cx - radius) as usize, n, pstep as usize, cutoff, depth, bias);
+                total += n as u32;
+                dy += pstep;
             }
-            dy += pstep;
+        } else {
+            let mut dy = -radius;
+            while dy <= radius {
+                let mut dx = -radius;
+                while dx <= radius {
+                    let s = self.stored(cx + dx, cy + dy);
+                    if s == EMPTY || depth <= s as f64 + bias {
+                        lit += 1;
+                    }
+                    total += 1;
+                    dx += pstep;
+                }
+                dy += pstep;
+            }
         }
         lit as f32 / total as f32
+    }
+
+    #[inline(always)]
+    fn window_inside(&self, cx: i64, cy: i64, r: i64) -> bool {
+        let res = self.res as i64;
+        cx - r >= 0 && cy - r >= 0 && cx + r < res && cy + r < res
     }
 
     #[inline]
@@ -303,7 +353,7 @@ fn cube_face_map(eye: Vec3, forward: Vec3, up: Vec3, near: f64, far: f64, res: u
 }
 
 pub fn build_cube(eye: Vec3, br: f64, res: usize) -> Box<[ShadowMap; 6]> {
-    let near = (br * 0.02).max(1e-4);
+    let near = (br * 0.02).fmax(1e-4);
     let far = br * 3.5;
     let z = Vec3::new(0.0, 0.0, 1.0);
     let y = Vec3::new(0.0, 1.0, 0.0);
@@ -355,7 +405,7 @@ fn build_single(light: &PunctualLight, bc: Vec3, br: f64, up: Vec3, res: usize) 
                 ortho: true,
                 half_extent: br * 1.05,
                 tan_half_fov: 0.0,
-                near: (eye_dist - br * 1.2).max(1e-4),
+                near: (eye_dist - br * 1.2).fmax(1e-4),
                 far: eye_dist + br * 1.2,
                 res,
                 depth: vec![EMPTY; res * res],
@@ -365,10 +415,10 @@ fn build_single(light: &PunctualLight, bc: Vec3, br: f64, up: Vec3, res: usize) 
         }
         _ => {
             let eye = light.position;
-            let dist = (bc - eye).length().max(br * 0.1);
+            let dist = (bc - eye).length().fmax(br * 0.1);
             let tan_half_fov: f64 = if light.kind == LightKind::Spot {
                 let outer = light.outer_cone_cos.acos();
-                ((outer * 1.05).tan() as f64).max(0.05)
+                ((outer * 1.05).tan() as f64).fmax(0.05)
             } else {
                 (br * 1.1 / dist).clamp(0.05, 10.0)
             };
@@ -377,7 +427,7 @@ fn build_single(light: &PunctualLight, bc: Vec3, br: f64, up: Vec3, res: usize) 
                 ortho: false,
                 half_extent: 0.0,
                 tan_half_fov,
-                near: (dist - br * 1.2).max(dist * 0.01),
+                near: (dist - br * 1.2).fmax(dist * 0.01),
                 far: dist + br * 1.2,
                 res,
                 depth: vec![EMPTY; res * res],
@@ -396,13 +446,15 @@ fn rasterize_depth(depth: &mut [f32], res: usize, p: &[(f64, f64, f64); 3]) {
     let area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
     if area.abs() < 1e-12 { return; }
     let inv_area = 1.0 / area;
-    let min_x = x0.min(x1).min(x2).floor().max(0.0) as usize;
-    let max_x = (x0.max(x1).max(x2).ceil() as i64).clamp(0, res as i64) as usize;
-    let min_y = y0.min(y1).min(y2).floor().max(0.0) as usize;
-    let max_y = (y0.max(y1).max(y2).ceil() as i64).clamp(0, res as i64) as usize;
+    let min_x = x0.fmin(x1).fmin(x2).floor().fmax(0.0) as usize;
+    let max_x = (x0.fmax(x1).fmax(x2).ceil() as i64).clamp(0, res as i64) as usize;
+    let min_y = y0.fmin(y1).fmin(y2).floor().fmax(0.0) as usize;
+    let max_y = (y0.fmax(y1).fmax(y2).ceil() as i64).clamp(0, res as i64) as usize;
+    let edges = edge_crossings(p, inv_area);
     for y in min_y..max_y {
         let py = y as f64 + 0.5;
-        for x in min_x..max_x {
+        let (xa, xb) = row_span(&edges, py, min_x, max_x);
+        for x in xa..xb {
             let px = x as f64 + 0.5;
             let w0 = ((x1 - px) * (y2 - py) - (x2 - px) * (y1 - py)) * inv_area;
             let w1 = ((x2 - px) * (y0 - py) - (x0 - px) * (y2 - py)) * inv_area;
@@ -413,4 +465,80 @@ fn rasterize_depth(depth: &mut [f32], res: usize, p: &[(f64, f64, f64); 3]) {
             if d < depth[idx] { depth[idx] = d; }
         }
     }
+}
+
+fn edge_crossings(p: &[(f64, f64, f64); 3], inv_area: f64) -> [(i8, f64, f64); 3] {
+    let mut out = [(0i8, 0.0, 0.0); 3];
+    for (i, e) in out.iter_mut().enumerate() {
+        let (xa, ya, _) = p[(i + 1) % 3];
+        let (xb, yb, _) = p[(i + 2) % 3];
+        let slope = (ya - yb) * inv_area;
+        if slope.abs() > 1e-6 {
+            let inv_dy = 1.0 / (yb - ya);
+            *e = (if slope > 0.0 { 1 } else { -1 }, (xa * yb - xb * ya) * inv_dy - 0.5, (xb - xa) * inv_dy);
+        }
+    }
+    out
+}
+
+fn row_span(edges: &[(i8, f64, f64); 3], py: f64, min_x: usize, max_x: usize) -> (usize, usize) {
+    let (mut lo, mut hi) = (min_x as f64, max_x as f64);
+    for &(dir, c0, c1) in edges {
+        let cross = c0 + c1 * py;
+        if dir > 0 {
+            let c = (cross - 1.0).floor();
+            if c > lo { lo = c; }
+        } else if dir < 0 {
+            let c = (cross + 2.0).ceil();
+            if c < hi { hi = c; }
+        }
+    }
+    if lo >= hi { return (0, 0); }
+    (lo as usize, hi as usize)
+}
+
+fn count_lit(row: &[f32], x0: usize, n: usize, step: usize, cutoff: Option<f32>, depth: f64, bias: f64) -> u32 {
+    let mut lit = 0u32;
+    let mut x = x0;
+    match cutoff {
+        Some(c) => for _ in 0..n {
+            lit += (row[x] >= c) as u32;
+            x += step;
+        },
+        None => for _ in 0..n {
+            let s = row[x];
+            lit += (s == EMPTY || depth <= s as f64 + bias) as u32;
+            x += step;
+        },
+    }
+    lit
+}
+
+/// Smallest finite `f32` `s` with `depth <= s as f64 + bias`. The sum is
+/// monotonic in `s`, so the PCF lit test reduces to `s >= cutoff` (and the
+/// `EMPTY` sentinel, being `f32::MAX`, always passes). `None` if not found in
+/// a few ulps, in which case callers fall back to the exact test.
+fn lit_cutoff(depth: f64, bias: f64) -> Option<f32> {
+    let lit = |s: f32| depth <= s as f64 + bias;
+    let mut t = (depth - bias) as f32;
+    if !t.is_finite() { return None; }
+    for _ in 0..8 {
+        if lit(t) {
+            let d = t.next_down();
+            if !lit(d) { return Some(t); }
+            t = d;
+        } else {
+            t = t.next_up();
+            if !t.is_finite() { return None; }
+        }
+    }
+    None
+}
+
+/// Smallest `f32` `c` (capped at `EMPTY`) with `c as f64 >= threshold`, so
+/// `s != EMPTY && (s as f64) < threshold` reduces to `s < c`.
+fn below_cutoff(threshold: f64) -> f32 {
+    let mut c = threshold as f32;
+    if (c as f64) < threshold { c = c.next_up(); }
+    if c > EMPTY { EMPTY } else { c }
 }

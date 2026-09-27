@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 use crate::annotations;
 use crate::cache;
 use crate::clip;
@@ -47,18 +48,30 @@ fn bbox_of(iter: impl Iterator<Item = Vec3>) -> (Vec3, Vec3) {
     let mut min = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
     let mut max = Vec3::new(f64::MIN, f64::MIN, f64::MIN);
     for v in iter {
-        min.x = min.x.min(v.x);
-        min.y = min.y.min(v.y);
-        min.z = min.z.min(v.z);
-        max.x = max.x.max(v.x);
-        max.y = max.y.max(v.y);
-        max.z = max.z.max(v.z);
+        if v.x < min.x { min.x = v.x }
+        if v.y < min.y { min.y = v.y }
+        if v.z < min.z { min.z = v.z }
+        if v.x > max.x { max.x = v.x }
+        if v.y > max.y { max.y = v.y }
+        if v.z > max.z { max.z = v.z }
     }
     (min, max)
 }
 
 fn compute_bbox(triangles: &[Triangle]) -> (Vec3, Vec3) {
-    bbox_of(triangles.iter().flat_map(|t| t.vertices.iter().copied()))
+    let mut min = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
+    let mut max = Vec3::new(f64::MIN, f64::MIN, f64::MIN);
+    for t in triangles {
+        for v in &t.vertices {
+            if v.x < min.x { min.x = v.x }
+            if v.y < min.y { min.y = v.y }
+            if v.z < min.z { min.z = v.z }
+            if v.x > max.x { max.x = v.x }
+            if v.y > max.y { max.y = v.y }
+            if v.z > max.z { max.z = v.z }
+        }
+    }
+    (min, max)
 }
 
 pub(crate) fn bbox_center(min: Vec3, max: Vec3) -> Vec3 {
@@ -159,7 +172,7 @@ pub(crate) fn pointcloud_to_triangles(
                 sampled = true;
             }
         }
-        if sampled { ((worst_kth as f64) * 1.2).min(volume_radius).max(1e-9) } else { volume_radius }
+        if sampled { ((worst_kth as f64) * 1.2).fmin(volume_radius).fmax(1e-9) } else { volume_radius }
     };
     let rsq_f32 = (radius * radius) as f32;
 
@@ -213,7 +226,6 @@ pub(crate) fn pointcloud_to_triangles(
     } else {
         Vec::new()
     };
-
     let mut tri_set: HashSet<(u32, u32, u32), FxBuildHasher> =
         HashSet::with_hasher(FxBuildHasher::default());
 
@@ -346,7 +358,6 @@ pub(crate) fn pointcloud_to_triangles(
             }
         }
     }
-
     let mut triangles = Vec::with_capacity(tri_set.len());
     for &(a, b, c) in &tri_set {
         let (ia, ib, ic) = (a as usize, b as usize, c as usize);
@@ -432,7 +443,7 @@ fn smallest_eigvec_sym3(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> Vec3 
     let e1 = q + two_pp * phi.cos();
     let e2 = q + two_pp * (phi + 2.0 * std::f64::consts::FRAC_PI_3).cos();
     let e3 = 3.0 * q - e1 - e2;
-    let lambda = e1.min(e2).min(e3);
+    let lambda = e1.fmin(e2).fmin(e3);
     let r0 = Vec3::new(a - lambda, d, e);
     let r1 = Vec3::new(d, b - lambda, f);
     let r2 = Vec3::new(e, f, c - lambda);
@@ -484,7 +495,7 @@ pub(crate) fn pointcloud_to_splats(
     let (radii, est_normals): (Vec<f64>, Option<Vec<Vec3>>) = if !need_grid {
         (vec![config.point_size; n], None)
     } else {
-        let base = (diag / (n as f64).sqrt() * 0.5).max(diag * 1e-3);
+        let base = (diag / (n as f64).sqrt() * 0.5).fmax(diag * 1e-3);
         let inv = 1.0 / base;
         let key = |p: Vec3| ((p.x * inv).floor() as i32, (p.y * inv).floor() as i32, (p.z * inv).floor() as i32);
         let mut grid: HashMap<(i32, i32, i32), Vec<u32>, FxBuildHasher> =
@@ -510,7 +521,7 @@ pub(crate) fn pointcloud_to_splats(
             } else {
                 let mut ds: Vec<f64> = nbr.iter().map(|&j| positions[j as usize].sub(p).length()).collect();
                 ds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                (ds[3.min(ds.len() - 1)] * 0.95).max(diag * 1e-4)
+                (ds[3.min(ds.len() - 1)] * 0.95).fmax(diag * 1e-4)
             };
             radii.push(r);
             if let Some(nv) = normals.as_mut() {
@@ -519,7 +530,6 @@ pub(crate) fn pointcloud_to_splats(
         }
         (radii, normals)
     };
-
     let rim_dir: Vec<(f64, f64)> = (0..SPLAT_SIDES)
         .map(|k| {
             let a = std::f64::consts::TAU * (k as f64) / (SPLAT_SIDES as f64);
@@ -663,7 +673,7 @@ impl ShadowData {
         let chan = |cc: u8, tint: f32| {
             let m = keep * tint;
             let mul = m + t * (1.0 - m);
-            (cc as f32 * mul).round().clamp(0.0, 255.0) as u8
+            (cc as f32 * mul).fround().clamp(0.0, 255.0) as u8
         };
         (chan(c.0, tr), chan(c.1, tg), chan(c.2, tb))
     }
@@ -726,6 +736,22 @@ fn build_shadow_data(
     Some(ShadowData { maps, bias, strength, softness: cfg.softness, factors, per_pixel, tint, light_sizes, ambient_keep_base })
 }
 
+/// `[(i / 255)^p for i in 0..256]`, memoized per exponent across calls: each
+/// table costs 256 software `powf`, and a document re-renders with the same
+/// shininess / fresnel / SSS exponents over and over.
+fn pow_lut(p: f32) -> [f32; 256] {
+    static mut CACHE: Vec<(u32, [f32; 256])> = Vec::new();
+    let cache = unsafe { &mut *std::ptr::addr_of_mut!(CACHE) };
+    if let Some((_, lut)) = cache.iter().find(|(k, _)| *k == p.to_bits()) {
+        return *lut;
+    }
+    let mut lut = [0.0f32; 256];
+    for i in 0..256 { lut[i] = (i as f32 / 255.0).powf(p); }
+    if cache.len() >= 32 { cache.clear(); }
+    cache.push((p.to_bits(), lut));
+    lut
+}
+
 fn project_triangles(
     triangles: &[Triangle],
     smooth: Option<&smooth::SmoothData>,
@@ -780,18 +806,12 @@ fn project_triangles(
     };
 
     let fresnel_lut = if !is_wireframe && config.fresnel.intensity > 0.0 {
-        let mut lut = [0.0f32; 256];
-        let fp = config.fresnel.power as f32;
-        for i in 0..256 { lut[i] = (i as f32 / 255.0).powf(fp); }
-        lut
+        pow_lut(config.fresnel.power as f32)
     } else {
         [0.0f32; 256]
     };
     let (sss_lut, sss_intensity, sss_dist) = if let Some(ref sc) = config.sss {
-        let mut lut = [0.0f32; 256];
-        let p = sc.power as f32;
-        for i in 0..256 { lut[i] = (i as f32 / 255.0).powf(p); }
-        (lut, sc.intensity as f32, sc.distortion as f32)
+        (pow_lut(sc.power as f32), sc.intensity as f32, sc.distortion as f32)
     } else {
         ([0.0f32; 256], 0.0f32, 0.0f32)
     };
@@ -827,9 +847,7 @@ fn project_triangles(
         if cfg_specular > 0.0 || group_styles.values().any(|a| a.specular.map_or(false, |s| s > 0.0)) {
             let mut add = |sh: f32| {
                 if !v.iter().any(|(s, _)| *s == sh) {
-                    let mut lut = [0.0f32; 256];
-                    for i in 0..256 { lut[i] = (i as f32 / 255.0).powf(sh); }
-                    v.push((sh, lut));
+                    v.push((sh, pow_lut(sh)));
                 }
             };
             add(cfg_shininess);
@@ -841,7 +859,7 @@ fn project_triangles(
     };
     let lights_f32: Vec<LightF32> = lights.iter().map(|l| {
         let spec_scale = if l.kind == LightKind::Area && l.size > 0.0 {
-            let d = l.vector.sub(view.center).length().max(1e-3);
+            let d = l.vector.sub(view.center).length().fmax(1e-3);
             (1.0 / (1.0 + 4.0 * (l.size / d))) as f32
         } else { 1.0 };
         LightF32 {
@@ -984,6 +1002,15 @@ fn project_triangles(
 
     let mut projected: Vec<ProjectedTri> = Vec::with_capacity(triangles.len());
 
+    let memo_corners = shade_cache.is_none()
+        && !is_wireframe
+        && !is_xray
+        && group_styles.values().all(|a| a.specular.is_none() && a.shininess.is_none() && a.ambient.is_none());
+    let mut corner_memo: Vec<(u32, [u64; 3], (u8, u8, u8))> = match smooth {
+        Some(sd) if memo_corners && sd.positions.len() < 3 * triangles.len() => vec![(0, [0; 3], (0, 0, 0)); sd.positions.len()],
+        _ => Vec::new(),
+    };
+
     let sh_n_lights = lights_f32.len();
     let sh_stride = smooth.map(|s| s.positions.len()).unwrap_or(0);
     let mut slow_sh_scratch: Vec<v128> = vec![f32x4_splat(1.0); sh_n_lights];
@@ -1012,7 +1039,7 @@ fn project_triangles(
         } else {
             let ga = tri.group_id.and_then(|gid| group_styles.get(&gid));
             let grp_intensity = ga.and_then(|a| a.ambient).map(|v| v as f32).unwrap_or(cfg_ambient_intensity);
-            let intensity_scale = if grp_intensity == cfg_ambient_intensity { 1.0 } else { grp_intensity / cfg_ambient_intensity.max(1e-6) };
+            let intensity_scale = if grp_intensity == cfg_ambient_intensity { 1.0 } else { grp_intensity / cfg_ambient_intensity.fmax(1e-6) };
             let grp_sky = (amb_sky.0 * intensity_scale, amb_sky.1 * intensity_scale, amb_sky.2 * intensity_scale);
             let grp_gnd = (amb_gnd.0 * intensity_scale, amb_gnd.1 * intensity_scale, amb_gnd.2 * intensity_scale);
             let one_minus_ambient = 1.0 - grp_intensity;
@@ -1086,13 +1113,22 @@ fn project_triangles(
                     let mut vcols = [(0u8, 0u8, 0u8); 3];
                     for i in 0..3 {
                         let (vr, vg, vb) = if let Some(vc) = tri.vertex_colors { vc[i] } else { (fr, fg, fb) };
+                        let uidx = [i0, i1, i2][i];
+                        let key = 0x0100_0000 | (vr as u32) << 16 | (vg as u32) << 8 | vb as u32;
+                        let p = tri.vertices[i];
+                        let pbits = [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+                        if let Some(m) = corner_memo.get(uidx) {
+                            if m.0 == key && m.1 == pbits {
+                                vcols[i] = m.2;
+                                continue;
+                            }
+                        }
                         let base_lin = if gamma_or_gooch {
                             (srgb_to_linear(vr), srgb_to_linear(vg), srgb_to_linear(vb))
                         } else {
                             (vr as f32 / 255.0, vg as f32 / 255.0, vb as f32 / 255.0)
                         };
                         let amb = hemi_ambient(vn[i], grp_sky, grp_gnd, up_f32);
-                        let uidx = [i0, i1, i2][i];
                         vcols[i] = shade_point(
                             vn[i], tri.vertices[i], base_lin,
                             &lights_f32, view_camera, amb, one_minus_ambient, specular,
@@ -1102,6 +1138,9 @@ fn project_triangles(
                             sss_intensity, sss_dist, &sss_lut,
                             shadow_factors.map(|f| (f, sh_stride, uidx)),
                         );
+                        if let Some(m) = corner_memo.get_mut(uidx) {
+                            *m = (key, pbits, vcols[i]);
+                        }
                     }
                     vcols
                 };
@@ -1443,7 +1482,7 @@ fn turntable_labels(n: usize) -> Vec<String> {
     let step = 360.0 / n as f64;
     (0..n).map(|i| {
         let mut s = String::with_capacity(6);
-        push_i32(&mut s, (i as f64 * step).round() as i32);
+        push_i32(&mut s, (i as f64 * step).fround() as i32);
         s.push('°');
         s
     }).collect()
@@ -1475,7 +1514,7 @@ fn resolve_clip(clip: &crate::config::ClipConfig, bmin: Vec3, bmax: Vec3, config
         Vec3::new(bmin.x, bmax.y, bmax.z), Vec3::new(bmax.x, bmax.y, bmax.z),
     ];
     let (mut tmin, mut tmax) = (f64::INFINITY, f64::NEG_INFINITY);
-    for c in corners { let t = n.dot(c); tmin = tmin.min(t); tmax = tmax.max(t); }
+    for c in corners { let t = n.dot(c); tmin = tmin.fmin(t); tmax = tmax.fmax(t); }
     let t = match clip.distance {
         Some(d) => tmin + d,
         None => tmin + clip.depth.clamp(0.0, 1.0) * (tmax - tmin),
@@ -1549,7 +1588,6 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
             bmax = new_max;
         }
     }
-
     for tri in &mut tris {
         tri.normal = tri.normal.normalized();
     }
@@ -1928,9 +1966,9 @@ fn make_debug_light_tris(
             LightKind::Positional | LightKind::Area => light.vector,
         };
 
-        let r = linear_to_srgb(light.color.0.min(1.0f32));
-        let g = linear_to_srgb(light.color.1.min(1.0f32));
-        let b = linear_to_srgb(light.color.2.min(1.0f32));
+        let r = linear_to_srgb(light.color.0.fmin(1.0f32));
+        let g = linear_to_srgb(light.color.1.fmin(1.0f32));
+        let b = linear_to_srgb(light.color.2.fmin(1.0f32));
 
         if light.kind == LightKind::Area && light.size > 0.0 {
             let n = {
@@ -2026,9 +2064,9 @@ fn render_debug_light_lines(
         if light.kind != LightKind::Directional { continue; }
         let pos = bc + light.vector.scale(br * 2.0);
         let line_end = bc + light.vector.scale(br * 1.5);
-        let r = linear_to_srgb(light.color.0.min(1.0f32));
-        let g = linear_to_srgb(light.color.1.min(1.0f32));
-        let b = linear_to_srgb(light.color.2.min(1.0f32));
+        let r = linear_to_srgb(light.color.0.fmin(1.0f32));
+        let g = linear_to_srgb(light.color.1.fmin(1.0f32));
+        let b = linear_to_srgb(light.color.2.fmin(1.0f32));
         let pp = projector(pos);
         let pe = projector(line_end);
         svg.push_str("<line x1=\""); push_f1(svg, pp.0);
@@ -2412,8 +2450,10 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         return finish_raster(&buf, 1, transparent);
     }
 
+    crate::prof::mark(10);
     let mut prep_owned: Option<(Vec<Triangle>, Vec3, Vec3)> = None;
     let (tris, bmin, bmax) = cached_preprocess(triangles, config, prep_key, &mut prep_owned);
+    crate::prof::mark(11);
     if tris.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
         return finish_raster(&buf, 1, transparent);
@@ -2468,19 +2508,24 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         None
     };
 
+    crate::prof::mark(12);
     let view = resolve_config_view(config, bc, br);
     let is_wireframe = config.mode == "wireframe";
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
     let lights = resolve_lights(config);
     let shadow_data = build_shadow_data(&tris, &lights, smooth_data, config, group_styles, bc, br, true);
+    crate::prof::mark(13);
     let mut projected = project_triangles(&tris, smooth_data, config, &view, vw, vh, br, false, group_styles, &lights, shadow_data.as_ref());
+    crate::prof::mark(14);
     if config.debug {
         projected.append(&mut make_debug_light_tris(config, &view, bmin, bmax, vw, vh));
     }
     radix_sort_by_depth(&mut projected, true);
+    crate::prof::mark(15);
 
     let mut buf = PixelBuffer::new(w, h, bg);
+    crate::prof::mark(16);
 
     if let Some(shadow_cfg) = &config.shadow {
         if !is_wireframe {
@@ -2492,14 +2537,13 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     if !is_wireframe {
         for tri in &projected {
             if tri.opacity >= 1.0 {
-                let max_d = tri.depths[0].max(tri.depths[1]).max(tri.depths[2]) as f32;
+                let max_d = tri.depths[0].fmax(tri.depths[1]).fmax(tri.depths[2]) as f32;
                 if buf.hiz_can_skip(&tri.pts, max_d) { continue; }
                 if let (Some(ti), Some(uvs)) = (tri.tex, tri.uvs) {
                     if let Some(tex) = textures.get(ti as usize) {
                         let light = tri.vertex_colors.unwrap_or([(tri.r, tri.g, tri.b); 3]);
                         let lod = triangle_texture_lod(&tri.pts, &uvs, tex);
                         buf.rasterize_triangle_textured(&tri.pts, &tri.depths, &uvs, &light, tex, lod);
-                        buf.hiz_update(&tri.pts);
                         continue;
                     }
                 }
@@ -2519,7 +2563,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
                         }
                     }
                 }
-                buf.hiz_update(&tri.pts);
             }
         }
         for tri in projected.iter().rev() {
@@ -2533,12 +2576,13 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
+    crate::prof::mark(17);
     if !is_wireframe {
         if let Some(hc) = config.clip.as_ref().and_then(|c| c.hatch.as_ref()) {
             let color = parse_hex_color(&hc.color);
             let ang = hc.angle.to_radians();
             let (cos_a, sin_a) = (ang.cos(), ang.sin());
-            let spacing = (hc.spacing * aa as f64).max(0.5);
+            let spacing = (hc.spacing * aa as f64).fmax(0.5);
             let half_w = hc.width * aa as f64 * 0.5;
             let style = hatch_style_code(hc.style);
             let arm = spacing * HATCH_CROSS_ARM;
@@ -2634,9 +2678,11 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         buf.apply_sharpen(sharpen.strength as f32);
     }
 
+    crate::prof::mark(18);
     if config.antialias == 1 && !transparent {
         crate::fxaa::apply_fxaa(&mut buf.pixels, buf.width, buf.height);
     }
+    crate::prof::mark(19);
 
     if let Some(ref ann_cfg) = config.annotations {
         let scale = 1.0 / aa as f64;
@@ -2668,7 +2714,7 @@ fn render_grid_png_buf(
     let (cols, rows) = grid_layout(views.len());
     let cell_w = w / cols;
     let cell_h = h / rows;
-    let label_h = if config.grid_labels { (cell_h as f64 * 0.048).round() as usize } else { 0 };
+    let label_h = if config.grid_labels { (cell_h as f64 * 0.048).fround() as usize } else { 0 };
     let render_h = cell_h - label_h;
     let is_wireframe = config.mode == "wireframe";
 
@@ -2709,17 +2755,16 @@ fn render_grid_png_buf(
                     (tri.pts[1].0 + ox, tri.pts[1].1 + oy),
                     (tri.pts[2].0 + ox, tri.pts[2].1 + oy),
                 ];
-                let max_d = tri.depths[0].max(tri.depths[1]).max(tri.depths[2]) as f32;
+                let max_d = tri.depths[0].fmax(tri.depths[1]).fmax(tri.depths[2]) as f32;
                 if buf.hiz_can_skip(&pts_off, max_d) { continue; }
                 buf.rasterize_triangle_offset(&tri.pts, &tri.depths, tri.r, tri.g, tri.b, ox, oy);
-                buf.hiz_update(&pts_off);
             }
             if let Some(hc) = config.clip.as_ref().and_then(|c| c.hatch.as_ref()) {
                 let color = parse_hex_color(&hc.color);
                 let ang = hc.angle.to_radians();
                 let (cos_a, sin_a) = (ang.cos(), ang.sin());
                 let aa = (w / (config.width as usize).max(1)).max(1) as f64;
-                let spacing = (hc.spacing * aa).max(0.5);
+                let spacing = (hc.spacing * aa).fmax(0.5);
                 let half_w = hc.width * aa * 0.5;
                 let style = hatch_style_code(hc.style);
                 let arm = spacing * HATCH_CROSS_ARM;

@@ -15,6 +15,8 @@ mod obj_parser;
 mod outline;
 mod parser;
 mod ply_parser;
+mod prepared;
+mod prof;
 mod projection;
 mod rasterizer;
 mod render;
@@ -30,23 +32,48 @@ use config::RenderConfig;
 use std::collections::HashMap;
 
 fn parse_config(config_json: &[u8]) -> Result<RenderConfig, String> {
-    color::init_color_luts();
     let s = std::str::from_utf8(config_json)
         .map_err(|_| "config: invalid UTF-8")?;
     config::parse_config_json(s)
 }
 
-fn cached_stl(data: &[u8]) -> Result<&'static Vec<parser::Triangle>, String> {
-    if let Some(t) = cache::get_stl(data) {
+fn cached_stl(data: &[u8], key: u64) -> Result<&'static Vec<parser::Triangle>, String> {
+    if let Some(t) = cache::get_stl(key) {
         return Ok(t);
     }
     let t = parser::parse_stl(data)?;
-    cache::put_stl(data, t);
-    Ok(cache::get_stl(data).unwrap())
+    cache::put_stl(key, t);
+    Ok(cache::get_stl(key).unwrap())
+}
+
+fn load_stl(data: &[u8]) -> Result<(u64, &'static Vec<parser::Triangle>), String> {
+    if let Some(key) = prepared::key_of(data) {
+        if cache::get_stl(key).is_none() {
+            cache::put_stl(key, prepared::decode(data)?.0);
+        }
+        return Ok((key, cache::get_stl(key).unwrap()));
+    }
+    let key = cache::hash(data);
+    Ok((key, cached_stl(data, key)?))
+}
+
+fn load_obj(data: &[u8], config: &RenderConfig) -> Result<(u64, CachedObj), String> {
+    if let Some(key) = prepared::key_of(data) {
+        if obj_prep_key(key, config).is_none() {
+            return Err("prepared OBJ can't take materials, highlight or mtl; pass the raw file".into());
+        }
+        if cache::get_obj(key).is_none() {
+            cache::put_obj(key, prepared::decode(data)?);
+        }
+        return Ok((key, CachedObj::Ref(cache::get_obj(key).unwrap())));
+    }
+    let key = cache::hash(data);
+    Ok((key, cached_obj(data, key, config)?))
 }
 
 fn cached_obj(
     data: &[u8],
+    key: u64,
     config: &RenderConfig,
 ) -> Result<CachedObj, String> {
     let materials_ref: &HashMap<String, String>;
@@ -64,14 +91,14 @@ fn cached_obj(
             obj_parser::parse_obj(data, materials_ref, &config.highlight, &empty_tex)?;
         return Ok(CachedObj::Owned(triangles, group_styles));
     }
-    if let Some(r) = cache::get_obj(data) {
+    if let Some(r) = cache::get_obj(key) {
         return Ok(CachedObj::Ref(r));
     }
     let empty_mat = HashMap::new();
     let empty_hl = HashMap::new();
     let result = obj_parser::parse_obj(data, &empty_mat, &empty_hl, &empty_tex)?;
-    cache::put_obj(data, result);
-    Ok(CachedObj::Ref(cache::get_obj(data).unwrap()))
+    cache::put_obj(key, result);
+    Ok(CachedObj::Ref(cache::get_obj(key).unwrap()))
 }
 
 enum CachedObj {
@@ -146,7 +173,7 @@ fn build_obj_textures(
     Ok((textures, tex_index))
 }
 
-fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<Vec<parser::Triangle>, String> {
+fn cached_ply(data: &[u8], key: u64, config: &RenderConfig) -> Result<Vec<parser::Triangle>, String> {
     let want = config.color_map_property.as_str();
     if !want.is_empty() {
         return match ply_parser::parse_ply_with(data, Some(want))? {
@@ -154,15 +181,15 @@ fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<Vec<parser::Triangle
             ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(&cloud, config)),
         };
     }
-    if let Some(ply) = cache::get_ply(data) {
+    if let Some(ply) = cache::get_ply(key) {
         return match ply {
             ply_parser::PlyData::Mesh(t) => Ok(t.clone()),
             ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(cloud, config)),
         };
     }
     let ply = ply_parser::parse_ply(data)?;
-    cache::put_ply(data, ply);
-    let cached = cache::get_ply(data).unwrap();
+    cache::put_ply(key, ply);
+    let cached = cache::get_ply(key).unwrap();
     match cached {
         ply_parser::PlyData::Mesh(t) => Ok(t.clone()),
         ply_parser::PlyData::Points(cloud) => Ok(cloud_to_triangles(cloud, config)),
@@ -182,12 +209,12 @@ fn cloud_to_triangles(cloud: &ply_parser::PointCloud, config: &RenderConfig) -> 
 /// hasn't chosen a shading style, render them matte. Call after `cached_ply` has
 /// populated the geometry cache so the peek hits; `specular` is a shading-only
 /// parameter, so adjusting it after geometry is fine.
-fn apply_pointcloud_matte(data: &[u8], config: &mut RenderConfig) {
+fn apply_pointcloud_matte(key: u64, config: &mut RenderConfig) {
     if !config.shading.is_empty() {
         return;
     }
     let colored = matches!(
-        cache::get_ply(data),
+        cache::get_ply(key),
         Some(ply_parser::PlyData::Points(c)) if c.colors.len() == c.positions.len() && !c.positions.is_empty()
     );
     if colored {
@@ -195,13 +222,16 @@ fn apply_pointcloud_matte(data: &[u8], config: &mut RenderConfig) {
     }
 }
 
+fn obj_prep_key(key: u64, config: &RenderConfig) -> Option<u64> {
+    if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None }
+}
+
 /// Entry point: receives STL bytes + JSON config, returns SVG string.
 #[wasm_func]
 fn render_stl(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
-    let triangles = cached_stl(stl_data)?;
+    let (key, triangles) = load_stl(stl_data)?;
     let empty = HashMap::new();
-    let key = cache::hash(stl_data);
     let svg = render::render(triangles, &config, &empty, Some(key), Some(key));
     Ok(svg.into_bytes())
 }
@@ -210,10 +240,8 @@ fn render_stl(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
 #[wasm_func]
 fn render_obj(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
-    let obj = cached_obj(obj_data, &config)?;
-    let key = cache::hash(obj_data);
-    let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
-    let svg = render::render(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key);
+    let (key, obj) = load_obj(obj_data, &config)?;
+    let svg = render::render(obj.triangles(), &config, obj.group_styles(), Some(key), obj_prep_key(key, &config));
     Ok(svg.into_bytes())
 }
 
@@ -221,9 +249,8 @@ fn render_obj(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
 #[wasm_func]
 fn render_stl_png(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
-    let triangles = cached_stl(stl_data)?;
+    let (key, triangles) = load_stl(stl_data)?;
     let empty = HashMap::new();
-    let key = cache::hash(stl_data);
     render::render_raster(triangles, &config, &empty, Some(key), Some(key), &[])
 }
 
@@ -231,10 +258,8 @@ fn render_stl_png(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
 #[wasm_func]
 fn render_obj_png(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
-    let obj = cached_obj(obj_data, &config)?;
-    let key = cache::hash(obj_data);
-    let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
-    render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[])
+    let (key, obj) = load_obj(obj_data, &config)?;
+    render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), obj_prep_key(key, &config), &[])
 }
 
 /// Textured OBJ → PNG. Third arg is a packed sidecar bundle (see
@@ -250,24 +275,50 @@ fn render_obj_png_tex(obj_data: &[u8], config_json: &[u8], tex_bundle: &[u8]) ->
     let config = parse_config(config_json)?;
     let (textures, tex_index) = build_obj_textures(&config, tex_bundle)?;
     if textures.is_empty() {
-        let obj = cached_obj(obj_data, &config)?;
-        let key = cache::hash(obj_data);
-        let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
-        return render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[]);
+        let (key, obj) = load_obj(obj_data, &config)?;
+        return render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), obj_prep_key(key, &config), &[]);
     }
+    if prepared::key_of(obj_data).is_some() {
+        return Err("prepared OBJ can't be textured; pass the raw file".into());
+    }
+    let key = cache::hash(obj_data);
     let mut merged = obj_parser::parse_mtl(&config.mtl);
     for (k, v) in &config.materials { merged.insert(k.clone(), v.clone()); }
     let (triangles, group_styles) =
         obj_parser::parse_obj(obj_data, &merged, &config.highlight, &tex_index)?;
-    let key = cache::hash(obj_data);
     render::render_raster(&triangles, &config, &group_styles, Some(key), None, &textures)
+}
+
+/// Parse STL bytes once into a prepared blob that every other STL entry point
+/// accepts in place of the file (see `prepared`). Idempotent on a blob.
+#[wasm_func]
+fn prepare_stl(stl_data: &[u8]) -> Result<Vec<u8>, String> {
+    if prepared::key_of(stl_data).is_some() {
+        return Ok(stl_data.to_vec());
+    }
+    let triangles = parser::parse_stl(stl_data)?;
+    Ok(prepared::encode(cache::hash(stl_data), &triangles, &HashMap::new()))
+}
+
+/// Parse OBJ text once into a prepared blob that every other OBJ entry point
+/// accepts in place of the file, as long as the render config sets no
+/// `materials`, `highlight` or `mtl` (those need the raw text). Idempotent on
+/// a blob.
+#[wasm_func]
+fn prepare_obj(obj_data: &[u8]) -> Result<Vec<u8>, String> {
+    if prepared::key_of(obj_data).is_some() {
+        return Ok(obj_data.to_vec());
+    }
+    let empty_tex = HashMap::new();
+    let (triangles, groups) = obj_parser::parse_obj(obj_data, &HashMap::new(), &HashMap::new(), &empty_tex)?;
+    Ok(prepared::encode(cache::hash(obj_data), &triangles, &groups))
 }
 
 /// Returns JSON with model info (triangle count, bbox, etc.) for STL.
 #[wasm_func]
 fn get_stl_info(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
-    let triangles = cached_stl(stl_data)?;
+    let (_, triangles) = load_stl(stl_data)?;
     Ok(render::get_info(triangles, &config).into_bytes())
 }
 
@@ -275,16 +326,17 @@ fn get_stl_info(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> 
 #[wasm_func]
 fn get_obj_info(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
-    let obj = cached_obj(obj_data, &config)?;
+    let (_, obj) = load_obj(obj_data, &config)?;
     Ok(render::get_info(obj.triangles(), &config).into_bytes())
 }
 
 /// Entry point: receives PLY bytes + JSON config, returns SVG string.
 #[wasm_func]
 fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+    let key = cache::hash(ply_data);
     let mut config = parse_config(config_json)?;
-    let triangles = cached_ply(ply_data, &config)?;
-    apply_pointcloud_matte(ply_data, &mut config);
+    let triangles = cached_ply(ply_data, key, &config)?;
+    apply_pointcloud_matte(key, &mut config);
     let empty = HashMap::new();
     Ok(render::render(&triangles, &config, &empty, None, None).into_bytes())
 }
@@ -292,9 +344,10 @@ fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
 /// Entry point: receives PLY bytes + JSON config, returns PNG bytes.
 #[wasm_func]
 fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+    let key = cache::hash(ply_data);
     let mut config = parse_config(config_json)?;
-    let triangles = cached_ply(ply_data, &config)?;
-    apply_pointcloud_matte(ply_data, &mut config);
+    let triangles = cached_ply(ply_data, key, &config)?;
+    apply_pointcloud_matte(key, &mut config);
     let empty = HashMap::new();
     render::render_raster(&triangles, &config, &empty, None, None, &[])
 }
@@ -302,8 +355,9 @@ fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
 /// Returns JSON with model info (triangle count, bbox, etc.) for PLY.
 #[wasm_func]
 fn get_ply_info(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
+    let key = cache::hash(ply_data);
     let config = parse_config(config_json)?;
-    let triangles = cached_ply(ply_data, &config)?;
+    let triangles = cached_ply(ply_data, key, &config)?;
     Ok(render::get_info(&triangles, &config).into_bytes())
 }
 
@@ -346,88 +400,16 @@ impl<T: ::core::convert::AsRef<[u8]>, E: ::core::fmt::Display> __ToResult
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native {
-    use super::*;
-
-    pub fn render_stl(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let triangles = cached_stl(stl_data)?;
-        let empty = HashMap::new();
-        let key = cache::hash(stl_data);
-        let svg = render::render(triangles, &config, &empty, Some(key), Some(key));
-        Ok(svg.into_bytes())
-    }
-
-    pub fn render_obj(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let obj = cached_obj(obj_data, &config)?;
-        let key = cache::hash(obj_data);
-        let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
-        let svg = render::render(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key);
-        Ok(svg.into_bytes())
-    }
-
-    pub fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let triangles = cached_ply(ply_data, &config)?;
-        let empty = HashMap::new();
-        Ok(render::render(&triangles, &config, &empty, None, None).into_bytes())
-    }
-
-    pub fn render_stl_png(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let triangles = cached_stl(stl_data)?;
-        let empty = HashMap::new();
-        let key = cache::hash(stl_data);
-        render::render_raster(triangles, &config, &empty, Some(key), Some(key), &[])
-    }
-
-    pub fn render_obj_png(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let obj = cached_obj(obj_data, &config)?;
-        let key = cache::hash(obj_data);
-        let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
-        render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[])
-    }
-
-    pub fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let triangles = cached_ply(ply_data, &config)?;
-        let empty = HashMap::new();
-        render::render_raster(&triangles, &config, &empty, None, None, &[])
-    }
-
-    pub fn render_obj_png_tex(obj_data: &[u8], config_json: &[u8], tex_bundle: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let (textures, tex_index) = build_obj_textures(&config, tex_bundle)?;
-        if textures.is_empty() {
-            let obj = cached_obj(obj_data, &config)?;
-            let key = cache::hash(obj_data);
-            let prep_key = if config.materials.is_empty() && config.highlight.is_empty() && config.mtl.is_empty() { Some(key) } else { None };
-            return render::render_raster(obj.triangles(), &config, obj.group_styles(), Some(key), prep_key, &[]);
-        }
-        let mut merged = obj_parser::parse_mtl(&config.mtl);
-        for (k, v) in &config.materials { merged.insert(k.clone(), v.clone()); }
-        let (triangles, group_styles) =
-            obj_parser::parse_obj(obj_data, &merged, &config.highlight, &tex_index)?;
-        let key = cache::hash(obj_data);
-        render::render_raster(&triangles, &config, &group_styles, Some(key), None, &textures)
-    }
-
-    pub fn get_stl_info(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let triangles = cached_stl(stl_data)?;
-        Ok(render::get_info(triangles, &config).into_bytes())
-    }
-
-    pub fn get_obj_info(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let obj = cached_obj(obj_data, &config)?;
-        Ok(render::get_info(obj.triangles(), &config).into_bytes())
-    }
-
-    pub fn get_ply_info(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
-        let config = parse_config(config_json)?;
-        let triangles = cached_ply(ply_data, &config)?;
-        Ok(render::get_info(&triangles, &config).into_bytes())
-    }
+    pub fn render_stl(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::render_stl(d, c) }
+    pub fn render_obj(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::render_obj(d, c) }
+    pub fn render_ply(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::render_ply(d, c) }
+    pub fn render_stl_png(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::render_stl_png(d, c) }
+    pub fn render_obj_png(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::render_obj_png(d, c) }
+    pub fn render_ply_png(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::render_ply_png(d, c) }
+    pub fn render_obj_png_tex(d: &[u8], c: &[u8], t: &[u8]) -> Result<Vec<u8>, String> { super::render_obj_png_tex(d, c, t) }
+    pub fn get_stl_info(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::get_stl_info(d, c) }
+    pub fn get_obj_info(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::get_obj_info(d, c) }
+    pub fn get_ply_info(d: &[u8], c: &[u8]) -> Result<Vec<u8>, String> { super::get_ply_info(d, c) }
+    pub fn prepare_stl(d: &[u8]) -> Result<Vec<u8>, String> { super::prepare_stl(d) }
+    pub fn prepare_obj(d: &[u8]) -> Result<Vec<u8>, String> { super::prepare_obj(d) }
 }

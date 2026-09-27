@@ -29,6 +29,7 @@
   }
   (
     cfg: bytes(json.encode(config)),
+    config: config,
     width: width,
     height: height,
     format: format,
@@ -97,12 +98,17 @@
     }
 }
 
-#let _render(data, png-fn, svg-fn, args) = {
+#let _shared(data, prepare, config) = {
+  if prepare == none or "materials" in config or "highlight" in config or "mtl" in config { data }
+  else { prepare(data) }
+}
+
+#let _render(data, png-fn, svg-fn, args, prepare: none) = {
   let a = _parse-args(args)
   if a.format != "png" {
-    image(svg-fn(data, a.cfg), format: "svg", width: a.width, height: a.height)
+    image(svg-fn(_shared(data, prepare, a.config), a.cfg), format: "svg", width: a.width, height: a.height)
   } else {
-    _present(png-fn(data, a.cfg), a)
+    layout(_ => _present(png-fn(_shared(data, prepare, a.config), a.cfg), a))
   }
 }
 
@@ -198,7 +204,7 @@
 ///   (camera, lights, material, shading, post-processing, …).
 /// -> content
 #let render-stl(stl-data, ..args) = {
-  _render(stl-data, maquette-plugin.render_stl_png, maquette-plugin.render_stl, args)
+  _render(stl-data, maquette-plugin.render_stl_png, maquette-plugin.render_stl, args, prepare: maquette-plugin.prepare_stl)
 }
 
 /// Render a Wavefront OBJ model to an image (PNG raster by default, `format: "svg"` for vector).
@@ -221,7 +227,7 @@
   if read == none {
     // Classic path: bytes in, colours via `mtl:`/`materials:` config if any.
     let data = bytes(obj-data)
-    return _render(data, maquette-plugin.render_obj_png, maquette-plugin.render_obj, args)
+    return _render(data, maquette-plugin.render_obj_png, maquette-plugin.render_obj, args, prepare: maquette-plugin.prepare_obj)
   }
   // Path + reader: discover material libraries and diffuse textures.
   let obj-bytes = bytes(read(obj-data))
@@ -238,7 +244,7 @@
     // SVG output can't carry raster textures; still applies `.mtl` Kd colours.
     image(maquette-plugin.render_obj(obj-bytes, a.cfg), format: "svg", width: a.width, height: a.height)
   } else {
-    _present(maquette-plugin.render_obj_png_tex(obj-bytes, a.cfg, _pack-bundle(tex-files)), a)
+    layout(_ => _present(maquette-plugin.render_obj_png_tex(obj-bytes, a.cfg, _pack-bundle(tex-files)), a))
   }
 }
 
@@ -264,7 +270,7 @@
 /// -> dictionary
 #let get-stl-info(stl-data, ..args) = {
   let a = _parse-args(args)
-  json(maquette-plugin.get_stl_info(stl-data, a.cfg))
+  json(maquette-plugin.get_stl_info(_shared(stl-data, maquette-plugin.prepare_stl, a.config), a.cfg))
 }
 
 /// OBJ model metadata (triangles, vertices, bounding box, groups, resolved camera) as a dictionary.
@@ -276,7 +282,7 @@
 /// -> dictionary
 #let get-obj-info(obj-data, ..args) = {
   let a = _parse-args(args)
-  json(maquette-plugin.get_obj_info(bytes(obj-data), a.cfg))
+  json(maquette-plugin.get_obj_info(_shared(bytes(obj-data), maquette-plugin.prepare_obj, a.config), a.cfg))
 }
 
 /// PLY model metadata (triangles, vertices, bounding box, resolved camera) as a dictionary.

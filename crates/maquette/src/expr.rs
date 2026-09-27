@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 /// Simple expression parser and evaluator for scalar functions: f(x,y,z) -> scalar
 /// Supports arithmetic, standard math functions, and constants.
 
@@ -80,8 +81,8 @@ fn eval(expr: &Expr, x: f64, y: f64, z: f64) -> f64 {
             match func {
                 Func::Abs => vals[0].abs(),
                 Func::Sqrt => vals[0].sqrt(),
-                Func::Min => vals[0].min(vals[1]),
-                Func::Max => vals[0].max(vals[1]),
+                Func::Min => vals[0].fmin(vals[1]),
+                Func::Max => vals[0].fmax(vals[1]),
                 Func::Clamp => vals[0].clamp(vals[1], vals[2]),
                 Func::Sin => vals[0].sin(),
                 Func::Cos => vals[0].cos(),
@@ -92,7 +93,7 @@ fn eval(expr: &Expr, x: f64, y: f64, z: f64) -> f64 {
                 Func::Atan2 => vals[0].atan2(vals[1]),
                 Func::Floor => vals[0].floor(),
                 Func::Ceil => vals[0].ceil(),
-                Func::Round => vals[0].round(),
+                Func::Round => vals[0].fround(),
                 Func::Exp => vals[0].exp(),
                 Func::Ln => vals[0].ln(),
                 Func::Log10 => vals[0].log10(),

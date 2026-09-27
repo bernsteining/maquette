@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 use crate::math::{parse_f64_bytes, parse_i64_bytes, AsciiTokens, Vec3};
 use crate::parser::Triangle;
 
@@ -407,7 +408,7 @@ fn triangulate(
 #[inline]
 fn color_byte(v: f64, pt: PT) -> u8 {
     match pt {
-        PT::F32 | PT::F64 => (v.clamp(0.0, 1.0) * 255.0).round() as u8,
+        PT::F32 | PT::F64 => (v.clamp(0.0, 1.0) * 255.0).fround() as u8,
         _ => v.clamp(0.0, 255.0) as u8,
     }
 }

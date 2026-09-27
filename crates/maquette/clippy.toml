@@ -1,0 +1,8 @@
+disallowed-methods = [
+    { path = "f64::min", reason = "lowers to an fmin libcall on wasm32; use FloatExt::fmin" },
+    { path = "f64::max", reason = "lowers to an fmax libcall on wasm32; use FloatExt::fmax" },
+    { path = "f64::round", reason = "lowers to a round libcall on wasm32; use FloatExt::fround" },
+    { path = "f32::min", reason = "lowers to an fminf libcall on wasm32; use FloatExt::fmin" },
+    { path = "f32::max", reason = "lowers to an fmaxf libcall on wasm32; use FloatExt::fmax" },
+    { path = "f32::round", reason = "lowers to a roundf libcall on wasm32; use FloatExt::fround" },
+]

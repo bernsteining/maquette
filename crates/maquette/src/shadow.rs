@@ -1,4 +1,5 @@
 
+use crate::math::FloatExt;
 use crate::config::{LightKind, ShadowMapConfig};
 use crate::math::{Mat4, Vec3};
 use crate::parser::Triangle;
@@ -71,7 +72,7 @@ fn build_one(light: &ResolvedLight, bc: Vec3, br: f64, up: Vec3, res: usize) -> 
             true,
             br * 1.05,
             0.0,
-            (eye_dist - br * 1.2).max(1e-4),
+            (eye_dist - br * 1.2).fmax(1e-4),
             eye_dist + br * 1.2,
             res,
             forward,
@@ -79,14 +80,14 @@ fn build_one(light: &ResolvedLight, bc: Vec3, br: f64, up: Vec3, res: usize) -> 
         )
     } else {
         let eye = light.vector;
-        let dist = (bc - eye).length().max(br * 0.1);
+        let dist = (bc - eye).length().fmax(br * 0.1);
         let view = Mat4::look_at(eye, bc, up_aux);
         ShadowMap::new(
             view,
             false,
             0.0,
             (br * 1.1 / dist).clamp(0.05, 10.0),
-            (dist - br * 1.2).max(dist * 0.01),
+            (dist - br * 1.2).fmax(dist * 0.01),
             dist + br * 1.2,
             res,
             forward,

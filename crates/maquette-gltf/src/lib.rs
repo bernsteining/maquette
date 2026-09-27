@@ -81,7 +81,6 @@ fn render_gltf_split(gltf_data: &[u8], config_json: &[u8], sidecars_bundle: &[u8
 
 fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_bundle: &[u8]) -> Result<Vec<u8>, String> {
     install_panic_hook();
-    maquette_core::color::init_color_luts();
     let mut config = config::parse(config_json)?;
     if !hdr_data.is_empty() {
         if let Some(ref mut ibl) = config.ibl {

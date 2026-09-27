@@ -34,7 +34,27 @@ fn compute_luma(pixels: &[u8], n: usize) -> Vec<u8> {
         let coeff_g = i16x8_splat(150);
         let coeff_b = i16x8_splat(29);
 
+        let k_r = u8x16_splat(77);
+        let k_g = u8x16_splat(150);
+        let k_b = u8x16_splat(29);
         let mut i = 0usize;
+        while i * 3 + 48 <= pixels.len() {
+            let p = pixels.as_ptr().add(i * 3);
+            let v0 = v128_load(p as *const v128);
+            let v1 = v128_load(p.add(16) as *const v128);
+            let v2 = v128_load(p.add(32) as *const v128);
+            let r = i8x16_shuffle::<0, 3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 0, 0, 0, 0, 0>(v0, v1);
+            let r = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 20, 23, 26, 29>(r, v2);
+            let g = i8x16_shuffle::<1, 4, 7, 10, 13, 16, 19, 22, 25, 28, 31, 0, 0, 0, 0, 0>(v0, v1);
+            let g = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 18, 21, 24, 27, 30>(g, v2);
+            let b = i8x16_shuffle::<2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 0, 0, 0, 0, 0, 0>(v0, v1);
+            let b = i8x16_shuffle::<0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 16, 19, 22, 25, 28, 31>(b, v2);
+            let lo = i16x8_add(i16x8_add(u16x8_extmul_low_u8x16(r, k_r), u16x8_extmul_low_u8x16(g, k_g)), u16x8_extmul_low_u8x16(b, k_b));
+            let hi = i16x8_add(i16x8_add(u16x8_extmul_high_u8x16(r, k_r), u16x8_extmul_high_u8x16(g, k_g)), u16x8_extmul_high_u8x16(b, k_b));
+            let l = u8x16_narrow_i16x8(u16x8_shr(lo, 8), u16x8_shr(hi, 8));
+            v128_store(luma.as_mut_ptr().add(i) as *mut v128, l);
+            i += 16;
+        }
         while i * 3 + 16 <= pixels.len() {
             let si = i * 3;
             let v = v128_load(pixels.as_ptr().add(si) as *const v128);
@@ -302,6 +322,24 @@ pub fn apply_fxaa(pixels: &mut [u8], width: usize, height: usize) {
             std::mem::swap(&mut prev_row, &mut curr_row);
         } else {
             prev_row.copy_from_slice(&pixels[row_start..row_start + row_bytes]);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_luma;
+
+    #[test]
+    fn luma_matches_scalar_formula() {
+        let mut x: u32 = 0x2545_f491;
+        for n in [0usize, 1, 3, 5, 15, 16, 17, 21, 31, 32, 33, 64, 100, 257, 1000] {
+            let px: Vec<u8> = (0..n * 3).map(|_| { x ^= x << 13; x ^= x >> 17; x ^= x << 5; x as u8 }).collect();
+            let l = compute_luma(&px, n);
+            for i in 0..n {
+                let e = ((px[i * 3] as u16 * 77 + px[i * 3 + 1] as u16 * 150 + px[i * 3 + 2] as u16 * 29) >> 8) as u8;
+                assert_eq!(l[i], e, "n={n} i={i}");
+            }
         }
     }
 }

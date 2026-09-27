@@ -1,3 +1,4 @@
+use crate::math::FloatExt;
 /// Software triangle rasterizer with z-buffer and PNG encoding.
 
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
@@ -17,6 +18,14 @@ pub struct PixelBuffer {
     /// Hi-Z: conservative lower bound on min zbuf per 16×16 tile.
     hiz: Vec<f32>,
     hiz_tiles_x: usize,
+    /// Per tile still at −∞: how many pixels (row-major within the tile) are
+    /// already known covered, and the minimum depth seen over them, so
+    /// `hiz_resume` continues where the last scan stopped.
+    hiz_scan: Vec<(u16, f32)>,
+    /// Per incomplete tile: zbuf index of the empty pixel that stopped the last
+    /// scan. While it stays empty the tile can't be complete, which the skip
+    /// test checks inline without resuming the scan.
+    hiz_block: Vec<u32>,
 }
 
 impl PixelBuffer {
@@ -35,24 +44,46 @@ impl PixelBuffer {
             bg: [bg.0 as f32, bg.1 as f32, bg.2 as f32],
             hiz: vec![f32::NEG_INFINITY; hiz_tiles_x * hiz_tiles_y],
             hiz_tiles_x,
+            hiz_scan: vec![(0, f32::INFINITY); hiz_tiles_x * hiz_tiles_y],
+            hiz_block: (0..hiz_tiles_x * hiz_tiles_y)
+                .map(|t| (((t / hiz_tiles_x) << HIZ_SHIFT) * width + ((t % hiz_tiles_x) << HIZ_SHIFT)) as u32)
+                .collect(),
         }
     }
 
-    /// Check if a triangle can be skipped entirely via Hi-Z.
-    /// Returns true if the triangle's closest point is behind all overlapping tiles.
+    /// Check if a triangle can be skipped entirely via Hi-Z: true when its
+    /// closest point is behind every overlapped tile's depth lower bound.
+    ///
+    /// Hi-Z is maintained lazily. A tile holds −∞ until all its pixels are
+    /// covered; when a test consults such a tile it resumes the tile's scan
+    /// (`hiz_scan`) instead of every triangle rescanning after it rasterizes.
+    /// Depths only ever increase, so a stored minimum stays a valid lower
+    /// bound — the schedule of updates only affects how much gets culled, never
+    /// the image.
     #[inline]
-    pub fn hiz_can_skip(&self, pts: &[(f64, f64); 3], tri_max_depth: f32) -> bool {
-        let w = (self.width - 1) as f64;
-        let h = (self.height - 1) as f64;
-        let min_tx = (pts[0].0.min(pts[1].0).min(pts[2].0).max(0.0) as usize) >> HIZ_SHIFT;
-        let max_tx = (pts[0].0.max(pts[1].0).max(pts[2].0).min(w) as usize) >> HIZ_SHIFT;
-        let min_ty = (pts[0].1.min(pts[1].1).min(pts[2].1).max(0.0) as usize) >> HIZ_SHIFT;
-        let max_ty = (pts[0].1.max(pts[1].1).max(pts[2].1).min(h) as usize) >> HIZ_SHIFT;
-
-        for ty in min_ty..=max_ty {
+    pub fn hiz_can_skip(&mut self, pts: &[(f64, f64); 3], tri_max_depth: f32) -> bool {
+        #[inline(always)]
+        fn span(a: f64, b: f64, c: f64, hi: f64) -> (usize, usize) {
+            let (lo, top) = min_max3(a, b, c);
+            let lo = if lo > 0.0 { lo } else { 0.0 };
+            let top = if top < hi { top } else { hi };
+            ((lo as usize) >> HIZ_SHIFT, (top as usize) >> HIZ_SHIFT)
+        }
+        let (tx0, tx1) = span(pts[0].0, pts[1].0, pts[2].0, (self.width - 1) as f64);
+        let (ty0, ty1) = span(pts[0].1, pts[1].1, pts[2].1, (self.height - 1) as f64);
+        for ty in ty0..=ty1 {
             let row = ty * self.hiz_tiles_x;
-            for tx in min_tx..=max_tx {
-                if tri_max_depth > unsafe { *self.hiz.get_unchecked(row + tx) } {
+            for tx in tx0..=tx1 {
+                let idx = row + tx;
+                let mut hz = unsafe { *self.hiz.get_unchecked(idx) };
+                if hz == f32::NEG_INFINITY {
+                    let block = unsafe { *self.hiz_block.get_unchecked(idx) } as usize;
+                    if unsafe { *self.zbuf.get_unchecked(block) } == f32::NEG_INFINITY {
+                        return false;
+                    }
+                    hz = self.hiz_resume(idx, tx, ty);
+                }
+                if tri_max_depth > hz {
                     return false;
                 }
             }
@@ -60,43 +91,38 @@ impl PixelBuffer {
         true
     }
 
-    /// Update Hi-Z after rasterizing a triangle.
-    /// Scans actual zbuf values for each overlapping tile. Only sets hiz once
-    /// every pixel in the tile has been written (no -inf left). Front-to-back
-    /// rendering ensures hiz never needs re-scanning after being set.
-    #[inline]
-    pub fn hiz_update(&mut self, pts: &[(f64, f64); 3]) {
-        let w = (self.width - 1) as f64;
-        let h = (self.height - 1) as f64;
-        let min_tx = (pts[0].0.min(pts[1].0).min(pts[2].0).max(0.0) as usize) >> HIZ_SHIFT;
-        let max_tx = (pts[0].0.max(pts[1].0).max(pts[2].0).min(w) as usize) >> HIZ_SHIFT;
-        let min_ty = (pts[0].1.min(pts[1].1).min(pts[2].1).max(0.0) as usize) >> HIZ_SHIFT;
-        let max_ty = (pts[0].1.max(pts[1].1).max(pts[2].1).min(h) as usize) >> HIZ_SHIFT;
-
-        for ty in min_ty..=max_ty {
-            let row = ty * self.hiz_tiles_x;
-            for tx in min_tx..=max_tx {
-                let idx = row + tx;
-                if unsafe { *self.hiz.get_unchecked(idx) } != f32::NEG_INFINITY { continue; }
-                let px_start = tx << HIZ_SHIFT;
-                let py_start = ty << HIZ_SHIFT;
-                let px_end = (px_start + HIZ_SIZE).min(self.width);
-                let py_end = (py_start + HIZ_SIZE).min(self.height);
-                let mut tile_min = f32::INFINITY;
-                let mut all_covered = true;
-                'scan: for py in py_start..py_end {
-                    let row_base = py * self.width;
-                    for px in px_start..px_end {
-                        let z = unsafe { *self.zbuf.get_unchecked(row_base + px) };
-                        if z == f32::NEG_INFINITY { all_covered = false; break 'scan; }
-                        if z < tile_min { tile_min = z; }
+    /// Continue scanning an incomplete tile from where the last scan stopped;
+    /// returns the tile's depth lower bound once every pixel is covered, −∞
+    /// otherwise.
+    fn hiz_resume(&mut self, idx: usize, tx: usize, ty: usize) -> f32 {
+        let px_start = tx << HIZ_SHIFT;
+        let py_start = ty << HIZ_SHIFT;
+        let px_end = (px_start + HIZ_SIZE).min(self.width);
+        let py_end = (py_start + HIZ_SIZE).min(self.height);
+        let tw = px_end - px_start;
+        let (mut pos, mut tile_min) = unsafe { *self.hiz_scan.get_unchecked(idx) };
+        let mut py = py_start + pos as usize / tw;
+        let mut px = px_start + pos as usize % tw;
+        while py < py_end {
+            let row_base = py * self.width;
+            while px < px_end {
+                let z = unsafe { *self.zbuf.get_unchecked(row_base + px) };
+                if z == f32::NEG_INFINITY {
+                    unsafe {
+                        *self.hiz_scan.get_unchecked_mut(idx) = (pos, tile_min);
+                        *self.hiz_block.get_unchecked_mut(idx) = (row_base + px) as u32;
                     }
+                    return f32::NEG_INFINITY;
                 }
-                if all_covered {
-                    unsafe { *self.hiz.get_unchecked_mut(idx) = tile_min; }
-                }
+                if z < tile_min { tile_min = z; }
+                px += 1;
+                pos += 1;
             }
+            px = px_start;
+            py += 1;
         }
+        unsafe { *self.hiz.get_unchecked_mut(idx) = tile_min; }
+        tile_min
     }
 
     /// Rasterize a filled triangle with z-buffer depth testing.
@@ -126,6 +152,7 @@ impl PixelBuffer {
             let d1v = f32x4_splat(d1);
             let d2v = f32x4_splat(d2);
             let zero = f32x4_splat(0.0);
+            let rgb4 = v128_load([r, g, b, r, g, b, r, g, b, r, g, b, 0, 0, 0, 0].as_ptr() as *const v128);
 
             let mut row_w0 = setup.row_w0;
             let mut row_w1 = setup.row_w1;
@@ -164,25 +191,9 @@ impl PixelBuffer {
                             let pass = v128_and(inside, f32x4_gt(depth_v, zbuf_v));
                             let wmask = i32x4_bitmask(pass);
 
-                            if wmask & 1 != 0 {
-                                *zbuf.get_unchecked_mut(idx0) = f32x4_extract_lane::<0>(depth_v);
-                                let p = pixels.as_mut_ptr().add(idx0 * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
-                            }
-                            if wmask & 2 != 0 {
-                                *zbuf.get_unchecked_mut(idx0 + 1) = f32x4_extract_lane::<1>(depth_v);
-                                let p = pixels.as_mut_ptr().add((idx0 + 1) * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
-                            }
-                            if wmask & 4 != 0 {
-                                *zbuf.get_unchecked_mut(idx0 + 2) = f32x4_extract_lane::<2>(depth_v);
-                                let p = pixels.as_mut_ptr().add((idx0 + 2) * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
-                            }
-                            if wmask & 8 != 0 {
-                                *zbuf.get_unchecked_mut(idx0 + 3) = f32x4_extract_lane::<3>(depth_v);
-                                let p = pixels.as_mut_ptr().add((idx0 + 3) * 3);
-                                *p = r; *p.add(1) = g; *p.add(2) = b;
+                            if wmask != 0 {
+                                v128_store(zbuf.as_mut_ptr().add(idx0) as *mut v128, v128_bitselect(depth_v, zbuf_v, pass));
+                                store_rgb4(pixels, idx0, rgb4, pass, wmask);
                             }
                         }
 
@@ -254,8 +265,8 @@ impl PixelBuffer {
         let d1 = depths[1] as f32;
         let d2 = depths[2] as f32;
 
-        let dist_line = |x: f64| { let r = x * inv_spacing; (r - r.round()).abs() * spacing };
-        let dist_center = |x: f64| { let r = x * inv_spacing - 0.5; (r - r.round()).abs() * spacing };
+        let dist_line = |x: f64| { let r = x * inv_spacing; (r - r.fround()).abs() * spacing };
+        let dist_center = |x: f64| { let r = x * inv_spacing - 0.5; (r - r.fround()).abs() * spacing };
         let feather = |d: f64| (half_width + 0.5 - d).clamp(0.0, 1.0);
 
         let mut row_w0 = setup.row_w0;
@@ -283,12 +294,12 @@ impl PixelBuffer {
                             let zb = *zbuf.get_unchecked(idx);
                             if depth >= zb - (zb.abs() * 1e-3 + 1e-2) {
                                 let cov = match style {
-                                    1 => feather(dist_line(u)).max(feather(dist_line(v))),
+                                    1 => feather(dist_line(u)).fmax(feather(dist_line(v))),
                                     2 => {
                                         let (du, dv) = (dist_center(u), dist_center(v));
                                         let cv = if dv <= arm { feather(du) } else { 0.0 };
                                         let ch = if du <= arm { feather(dv) } else { 0.0 };
-                                        cv.max(ch)
+                                        cv.fmax(ch)
                                     }
                                     _ => feather(dist_line(u)),
                                 };
@@ -466,6 +477,10 @@ impl PixelBuffer {
             let c0 = f32x4(colors[0].0 as f32, colors[0].1 as f32, colors[0].2 as f32, 0.0);
             let c1 = f32x4(colors[1].0 as f32, colors[1].1 as f32, colors[1].2 as f32, 0.0);
             let c2 = f32x4(colors[2].0 as f32, colors[2].1 as f32, colors[2].2 as f32, 0.0);
+            let planes = |i: usize| (f32x4_splat(colors[i].0 as f32), f32x4_splat(colors[i].1 as f32), f32x4_splat(colors[i].2 as f32));
+            let (r0, g0, b0) = planes(0);
+            let (r1, g1, b1) = planes(1);
+            let (r2, g2, b2) = planes(2);
 
             let mut row_w0 = setup.row_w0;
             let mut row_w1 = setup.row_w1;
@@ -504,30 +519,16 @@ impl PixelBuffer {
                             let pass = v128_and(inside, f32x4_gt(depth_v, zbuf_v));
                             let wmask = i32x4_bitmask(pass);
 
-                            macro_rules! write_smooth {
-                                ($lane:literal, $off:expr) => {
-                                    if wmask & (1 << $lane) != 0 {
-                                        let idx = idx0 + $off;
-                                        *zbuf.get_unchecked_mut(idx) = f32x4_extract_lane::<$lane>(depth_v);
-                                        let ws0 = f32x4_extract_lane::<$lane>(w0v);
-                                        let ws1 = f32x4_extract_lane::<$lane>(w1v);
-                                        let ws2 = f32x4_extract_lane::<$lane>(w2v);
-                                        let rgb = f32x4_add(f32x4_add(
-                                            f32x4_mul(f32x4_splat(ws0), c0),
-                                            f32x4_mul(f32x4_splat(ws1), c1)),
-                                            f32x4_mul(f32x4_splat(ws2), c2));
-                                        let rgb = i32x4_trunc_sat_f32x4(f32x4_nearest(rgb));
-                                        let p = pixels.as_mut_ptr().add(idx * 3);
-                                        *p     = i32x4_extract_lane::<0>(rgb) as u8;
-                                        *p.add(1) = i32x4_extract_lane::<1>(rgb) as u8;
-                                        *p.add(2) = i32x4_extract_lane::<2>(rgb) as u8;
-                                    }
-                                }
+                            if wmask != 0 {
+                                v128_store(zbuf.as_mut_ptr().add(idx0) as *mut v128, v128_bitselect(depth_v, zbuf_v, pass));
+                                let lerp = |a: v128, b: v128, c: v128| i32x4_trunc_sat_f32x4(f32x4_nearest(f32x4_add(f32x4_add(
+                                    f32x4_mul(w0v, a), f32x4_mul(w1v, b)), f32x4_mul(w2v, c))));
+                                let bytes = u8x16_narrow_i16x8(
+                                    u16x8_narrow_i32x4(lerp(r0, r1, r2), lerp(g0, g1, g2)),
+                                    u16x8_narrow_i32x4(lerp(b0, b1, b2), zero));
+                                let rgb4 = i8x16_shuffle::<0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11, 12, 13, 14, 15>(bytes, bytes);
+                                store_rgb4(pixels, idx0, rgb4, pass, wmask);
                             }
-                            write_smooth!(0, 0);
-                            write_smooth!(1, 1);
-                            write_smooth!(2, 2);
-                            write_smooth!(3, 3);
                         }
 
                         w0v = f32x4_add(w0v, dw0_dx4);
@@ -623,9 +624,9 @@ impl PixelBuffer {
                                 let lg = w0 * light[0].1 as f32 + w1 * light[1].1 as f32 + w2 * light[2].1 as f32;
                                 let lb = w0 * light[0].2 as f32 + w1 * light[1].2 as f32 + w2 * light[2].2 as f32;
                                 let p = pixels.as_mut_ptr().add(idx * 3);
-                                *p        = (lr * t[0]).round().clamp(0.0, 255.0) as u8;
-                                *p.add(1) = (lg * t[1]).round().clamp(0.0, 255.0) as u8;
-                                *p.add(2) = (lb * t[2]).round().clamp(0.0, 255.0) as u8;
+                                *p        = (lr * t[0]).fround().clamp(0.0, 255.0) as u8;
+                                *p.add(1) = (lg * t[1]).fround().clamp(0.0, 255.0) as u8;
+                                *p.add(2) = (lb * t[2]).fround().clamp(0.0, 255.0) as u8;
                             }
                         }
                         w0 += dw0; w1 += dw1; w2 += dw2;
@@ -679,9 +680,9 @@ impl PixelBuffer {
                         unsafe {
                             if depth > *zbuf.get_unchecked(idx) {
                                 *zbuf.get_unchecked_mut(idx) = depth;
-                                let r = (w0 * c0r + w1 * c1r + w2 * c2r).round().clamp(0.0, 255.0) as u8;
-                                let g = (w0 * c0g + w1 * c1g + w2 * c2g).round().clamp(0.0, 255.0) as u8;
-                                let b = (w0 * c0b + w1 * c1b + w2 * c2b).round().clamp(0.0, 255.0) as u8;
+                                let r = (w0 * c0r + w1 * c1r + w2 * c2r).fround().clamp(0.0, 255.0) as u8;
+                                let g = (w0 * c0g + w1 * c1g + w2 * c2g).fround().clamp(0.0, 255.0) as u8;
+                                let b = (w0 * c0b + w1 * c1b + w2 * c2b).fround().clamp(0.0, 255.0) as u8;
                                 let wx = w0 * world[0][0] + w1 * world[1][0] + w2 * world[2][0];
                                 let wy = w0 * world[0][1] + w1 * world[1][1] + w2 * world[2][1];
                                 let wz = w0 * world[0][2] + w1 * world[1][2] + w2 * world[2][2];
@@ -984,10 +985,10 @@ impl PixelBuffer {
     pub fn draw_line(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, r: u8, g: u8, b: u8) {
         let w = self.width as i64;
         let h = self.height as i64;
-        let mut ix0 = x0.round() as i64;
-        let mut iy0 = y0.round() as i64;
-        let ix1 = x1.round() as i64;
-        let iy1 = y1.round() as i64;
+        let mut ix0 = x0.fround() as i64;
+        let mut iy0 = y0.fround() as i64;
+        let ix1 = x1.fround() as i64;
+        let iy1 = y1.fround() as i64;
 
         let dx = (ix1 - ix0).abs();
         let dy = -(iy1 - iy0).abs();
@@ -1029,10 +1030,10 @@ impl PixelBuffer {
     fn draw_line_z(&mut self, x0: f64, y0: f64, z0: f32, x1: f64, y1: f64, z1: f32, r: u8, g: u8, b: u8) {
         let w = self.width as i64;
         let h = self.height as i64;
-        let mut ix = x0.round() as i64;
-        let mut iy = y0.round() as i64;
-        let ix1 = x1.round() as i64;
-        let iy1 = y1.round() as i64;
+        let mut ix = x0.fround() as i64;
+        let mut iy = y0.fround() as i64;
+        let ix1 = x1.fround() as i64;
+        let iy1 = y1.fround() as i64;
 
         let dx = (ix1 - ix).abs();
         let dy = -(iy1 - iy).abs();
@@ -1068,7 +1069,7 @@ impl PixelBuffer {
     pub fn apply_outline(&mut self, color: (u8, u8, u8), width: f64) {
         let w = self.width as i32;
         let h = self.height as i32;
-        let step = (width * 0.5).max(1.0) as i32;
+        let step = (width * 0.5).fmax(1.0) as i32;
         let wu = w as usize;
 
         #[inline(always)]
@@ -1110,7 +1111,7 @@ impl PixelBuffer {
                     continue;
                 }
 
-                let threshold = 0.015 * center.abs().max(0.001);
+                let threshold = 0.015 * center.abs().fmax(0.001);
                 let center_v = f32x4_splat(center);
                 let abs_diff = f32x4_abs(f32x4_sub(depths, center_v));
                 let within = f32x4_le(abs_diff, f32x4_splat(threshold));
@@ -1190,7 +1191,7 @@ impl PixelBuffer {
                 }
             }
         }
-        Self { width: nw, height: nh, pixels, zbuf: Vec::new(), tcov: Vec::new(), bg: [0.0; 3], hiz: Vec::new(), hiz_tiles_x: 0 }
+        Self { width: nw, height: nh, pixels, zbuf: Vec::new(), tcov: Vec::new(), bg: [0.0; 3], hiz: Vec::new(), hiz_tiles_x: 0, hiz_scan: Vec::new(), hiz_block: Vec::new() }
     }
 
     /// SIMD 2× downsample: processes 4 output pixels per iteration using
@@ -1283,7 +1284,7 @@ impl PixelBuffer {
             }
         }
 
-        Self { width: nw, height: nh, pixels: out, zbuf: Vec::new(), tcov: Vec::new(), bg: [0.0; 3], hiz: Vec::new(), hiz_tiles_x: 0 }
+        Self { width: nw, height: nh, pixels: out, zbuf: Vec::new(), tcov: Vec::new(), bg: [0.0; 3], hiz: Vec::new(), hiz_tiles_x: 0, hiz_scan: Vec::new(), hiz_block: Vec::new() }
     }
 
     /// Apply Screen-Space Ambient Occlusion (SSAO) to the rendered image.
@@ -1302,7 +1303,7 @@ impl PixelBuffer {
                 if d > zmax { zmax = d; }
             }
         }
-        let depth_range = (zmax - zmin).max(0.001);
+        let depth_range = (zmax - zmin).fmax(0.001);
 
         let radius_px = (params.radius * w.min(h) as f64) as f32;
         let bias_scaled = params.bias as f32 * depth_range;
@@ -1351,7 +1352,7 @@ impl PixelBuffer {
                     }
                     if valid > 0 {
                         unsafe { *ao_buffer.get_unchecked_mut($idx) =
-                            (1.0 - (occlusion as f32 / valid as f32 * strength).min(1.0)).max(0.0) };
+                            (1.0 - (occlusion as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
                     }
                 }
             };
@@ -1415,7 +1416,7 @@ impl PixelBuffer {
 
                     if valid > 0 {
                         unsafe { *ao_buffer.get_unchecked_mut(idx) =
-                            (1.0 - (occluded as f32 / valid as f32 * strength).min(1.0)).max(0.0) };
+                            (1.0 - (occluded as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
                     }
                 }
 
@@ -1431,6 +1432,7 @@ impl PixelBuffer {
         unsafe {
         for i in 0..w * h {
             let ao = *ao_buffer.get_unchecked(i);
+            if ao == 1.0 { continue; }
             let p = self.pixels.as_mut_ptr().add(i * 3);
             *p = (*p as f32 * ao + 0.5) as u8;
             *p.add(1) = (*p.add(1) as f32 * ao + 0.5) as u8;
@@ -1660,7 +1662,7 @@ impl PixelBuffer {
             let bf = *p.add(2) as f32;
             let lum = 0.2126 * rf + 0.7152 * gf + 0.0722 * bf;
             if lum > threshold * 255.0 {
-                let factor = (lum / 255.0 - threshold).min(1.0);
+                let factor = (lum / 255.0 - threshold).fmin(1.0);
                 *buf.get_unchecked_mut(pi) = rf * factor;
                 *buf.get_unchecked_mut(pi + 1) = gf * factor;
                 *buf.get_unchecked_mut(pi + 2) = bf * factor;
@@ -1743,7 +1745,7 @@ impl PixelBuffer {
                         + ring[rn + xo + c] as f32
                         + ring[rn + xo + 3 + c] as f32;
                     let v = center * ring[rc + xo + c] as f32 + neg * sum_neighbors;
-                    self.pixels[dst + xo + c] = v.max(0.0).min(255.0) as u8;
+                    self.pixels[dst + xo + c] = v.fmax(0.0).fmin(255.0) as u8;
                 }
             }
         }
@@ -1754,12 +1756,24 @@ impl PixelBuffer {
     /// Returns `(width, height, rgba)`. Backs the raw output path.
     pub fn to_rgba8(&self) -> (u32, u32, Vec<u8>) {
         let n = self.width * self.height;
+        let src = &self.pixels[..n * 3];
         let mut rgba = vec![0u8; n * 4];
-        for i in 0..n {
-            rgba[i * 4] = self.pixels[i * 3];
-            rgba[i * 4 + 1] = self.pixels[i * 3 + 1];
-            rgba[i * 4 + 2] = self.pixels[i * 3 + 2];
+        let opaque = u8x16_splat(255);
+        let mut i = 0;
+        while i * 3 + 16 <= src.len() {
+            unsafe {
+                let px = v128_load(src.as_ptr().add(i * 3) as *const v128);
+                let out = i8x16_shuffle::<0, 1, 2, 16, 3, 4, 5, 16, 6, 7, 8, 16, 9, 10, 11, 16>(px, opaque);
+                v128_store(rgba.as_mut_ptr().add(i * 4) as *mut v128, out);
+            }
+            i += 4;
+        }
+        while i < n {
+            rgba[i * 4] = src[i * 3];
+            rgba[i * 4 + 1] = src[i * 3 + 1];
+            rgba[i * 4 + 2] = src[i * 3 + 2];
             rgba[i * 4 + 3] = 255;
+            i += 1;
         }
         (self.width as u32, self.height as u32, rgba)
     }
@@ -1797,10 +1811,10 @@ impl PixelBuffer {
                 }
                 let di = (ny * nw + nx) * 4;
                 if asum > 0.0 {
-                    rgba[di] = (pr / asum).round().clamp(0.0, 255.0) as u8;
-                    rgba[di + 1] = (pg / asum).round().clamp(0.0, 255.0) as u8;
-                    rgba[di + 2] = (pb / asum).round().clamp(0.0, 255.0) as u8;
-                    rgba[di + 3] = (asum / count * 255.0).round().clamp(0.0, 255.0) as u8;
+                    rgba[di] = (pr / asum).fround().clamp(0.0, 255.0) as u8;
+                    rgba[di + 1] = (pg / asum).fround().clamp(0.0, 255.0) as u8;
+                    rgba[di + 2] = (pb / asum).fround().clamp(0.0, 255.0) as u8;
+                    rgba[di + 3] = (asum / count * 255.0).fround().clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -1817,6 +1831,48 @@ fn offset(pts: &[(f64, f64); 3], ox: f64, oy: f64) -> [(f64, f64); 3] {
         (pts[1].0 + ox, pts[1].1 + oy),
         (pts[2].0 + ox, pts[2].1 + oy),
     ]
+}
+
+#[inline(always)]
+fn clip_edge(w: f64, dw: f64, inv_dw: f64, min_x: f64, left: &mut f64, right: &mut f64) -> bool {
+    if dw.abs() < 1e-12 {
+        return w >= -1e-9 || w.is_nan();
+    }
+    let x_cross = min_x - w * inv_dw;
+    if dw > 0.0 {
+        if x_cross > *left { *left = x_cross; }
+    } else if x_cross < *right {
+        *right = x_cross;
+    }
+    true
+}
+
+/// Write the first 12 bytes of `rgb4` (4 interleaved RGB pixels starting at
+/// pixel `idx0`) for the lanes set in `pass`, leaving the other pixels intact.
+///
+/// # Safety
+/// Pixels `idx0..idx0 + 4` must lie inside `pixels`.
+#[inline(always)]
+unsafe fn store_rgb4(pixels: &mut [u8], idx0: usize, rgb4: v128, pass: v128, wmask: u8) {
+    let p = pixels.as_mut_ptr().add(idx0 * 3);
+    if idx0 * 3 + 16 <= pixels.len() {
+        let m = i8x16_shuffle::<0, 0, 0, 4, 4, 4, 8, 8, 8, 12, 12, 12, 16, 16, 16, 16>(pass, u8x16_splat(0));
+        v128_store(p as *mut v128, v128_bitselect(rgb4, v128_load(p as *const v128), m));
+    } else {
+        let mut b = [0u8; 16];
+        v128_store(b.as_mut_ptr() as *mut v128, rgb4);
+        for l in 0..4 {
+            if wmask & (1 << l) != 0 {
+                std::ptr::copy_nonoverlapping(b.as_ptr().add(l * 3), p.add(l * 3), 3);
+            }
+        }
+    }
+}
+
+#[inline(always)]
+fn min_max3(a: f64, b: f64, c: f64) -> (f64, f64) {
+    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+    (if c < lo { c } else { lo }, if c > hi { c } else { hi })
 }
 
 /// Signed edge function: positive if P is to the left of edge A→B.
@@ -1839,17 +1895,17 @@ struct TriSetup {
 impl TriSetup {
     #[inline]
     fn new(pts: &[(f64, f64); 3], width: usize, height: usize) -> Option<Self> {
-        let w = width as f64;
-        let h = height as f64;
-
-        let min_x = pts[0].0.min(pts[1].0).min(pts[2].0).max(0.0) as usize;
-        let max_x = (pts[0].0.max(pts[1].0).max(pts[2].0).min(w - 1.0) as usize).min(width - 1);
-        let min_y = pts[0].1.min(pts[1].1).min(pts[2].1).max(0.0) as usize;
-        let max_y = (pts[0].1.max(pts[1].1).max(pts[2].1).min(h - 1.0) as usize).min(height - 1);
-
         let area = edge(pts[0], pts[1], pts[2]);
-        if area.abs() < 1e-6 { return None; }
+        if area.abs() < 1e-6 || area.is_nan() { return None; }
         let inv_area = 1.0 / area;
+
+        let (lo_x, hi_x) = min_max3(pts[0].0, pts[1].0, pts[2].0);
+        let (lo_y, hi_y) = min_max3(pts[0].1, pts[1].1, pts[2].1);
+        let (w1, h1) = ((width - 1) as f64, (height - 1) as f64);
+        let min_x = (if lo_x > 0.0 { lo_x } else { 0.0 }) as usize;
+        let max_x = ((if hi_x < w1 { hi_x } else { w1 }) as usize).min(width - 1);
+        let min_y = (if lo_y > 0.0 { lo_y } else { 0.0 }) as usize;
+        let max_y = ((if hi_y < h1 { hi_y } else { h1 }) as usize).min(height - 1);
 
         let dw0_dx = (pts[1].1 - pts[2].1) * inv_area;
         let dw0_dy = (pts[2].0 - pts[1].0) * inv_area;
@@ -1876,27 +1932,17 @@ impl TriSetup {
     /// Returns None if the row has no interior pixels.
     #[inline]
     fn scanline(&self, row_w0: f64, row_w1: f64, row_w2: f64) -> Option<(usize, usize)> {
-        let mut left = self.min_x as f64;
+        let min_x = self.min_x as f64;
+        let mut left = min_x;
         let mut right = self.max_x as f64;
-
-        for &(w, dw, inv_dw) in &[
-            (row_w0, self.dw0_dx, self.inv_dw0_dx),
-            (row_w1, self.dw1_dx, self.inv_dw1_dx),
-            (row_w2, self.dw2_dx, self.inv_dw2_dx),
-        ] {
-            if dw.abs() < 1e-12 {
-                if w < -1e-9 { return None; }
-            } else {
-                let x_cross = self.min_x as f64 - w * inv_dw;
-                if dw > 0.0 {
-                    left = left.max(x_cross);
-                } else {
-                    right = right.min(x_cross);
-                }
-            }
+        if !clip_edge(row_w0, self.dw0_dx, self.inv_dw0_dx, min_x, &mut left, &mut right)
+            || !clip_edge(row_w1, self.dw1_dx, self.inv_dw1_dx, min_x, &mut left, &mut right)
+            || !clip_edge(row_w2, self.dw2_dx, self.inv_dw2_dx, min_x, &mut left, &mut right)
+        {
+            return None;
         }
 
-        let xl = ((left - 1.0).max(self.min_x as f64)) as usize;
+        let xl = (if left - 1.0 > min_x { left - 1.0 } else { min_x }) as usize;
         let xr = (((right + 1.0) as usize).min(self.max_x)).min(self.max_x);
         if xl > xr { return None; }
         Some((xl, xr))

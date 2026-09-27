@@ -12,6 +12,7 @@
 //!
 //! Returned samples are `[f32; 4]` in `[0, 1]`. Caller applies sRGB→linear.
 
+use crate::math::FloatExt;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Wrap { Repeat, ClampToEdge, MirroredRepeat }
 
@@ -52,7 +53,7 @@ impl Texture {
         let v = wrap_coord(uv[1], self.wrap_t);
         let filter = if lod <= 0.5 { self.mag_filter } else { self.min_filter };
         match filter {
-            Filter::Nearest => sample_nearest(&self.mips[lod.round() as usize], u, v),
+            Filter::Nearest => sample_nearest(&self.mips[lod.fround() as usize], u, v),
             Filter::Linear => {
                 let lo = lod.floor() as usize;
                 let hi = (lo + 1).min(max_level as usize);

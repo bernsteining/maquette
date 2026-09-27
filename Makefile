@@ -156,6 +156,7 @@ gltf-wasm:
 gltf-build: gltf-wasm
 	mkdir -p $(dir $(GLTF_WASM_PKG))
 	cp $(GLTF_WASM_OUT) $(GLTF_WASM_PKG)
+	cp crates/maquette-gltf/maquette-gltf/maquette-gltf.typ crates/maquette-gltf/maquette-gltf/typst.toml $(dir $(GLTF_WASM_PKG))
 
 # Install SCAD plugin into the local Typst package dir.
 SCAD_WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette-scad/0.1.0/maquette-scad.wasm
