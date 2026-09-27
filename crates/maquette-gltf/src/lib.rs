@@ -48,7 +48,7 @@ fn get_last_panic() -> Vec<u8> {
 /// 16-byte handle for a GLB/glTF file. Once a render has cached its scene,
 /// `render_gltf` accepts the handle in place of the file, skipping the copy and
 /// the re-hash; on a scene-cache miss it fails and the caller resends the file.
-#[wasm_func]
+#[cfg_attr(target_arch = "wasm32", wasm_func)]
 fn model_key(gltf_data: &[u8]) -> Result<Vec<u8>, String> {
     Ok(cache::SceneInput::new(gltf_data, &[]).handle())
 }
