@@ -91,14 +91,15 @@ fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_b
             config.ibl = Some(c);
         }
     }
-    let loaded = if sidecars_bundle.is_empty() {
-        gltf_loader::parse(gltf_data)?
-    } else {
-        gltf_loader::parse_split(gltf_data, sidecars_bundle)?
-    };
     let opts = scene::SceneOpts::from_config(&config);
-    let scene = cache::scene_for(gltf_data, &loaded, opts);
-    Ok(render::render(scene, &config))
+    let (scene_key, scene) = cache::scene_for(gltf_data, opts, || {
+        if sidecars_bundle.is_empty() {
+            gltf_loader::parse(gltf_data)
+        } else {
+            gltf_loader::parse_split(gltf_data, sidecars_bundle)
+        }
+    })?;
+    Ok(render::render(scene, scene_key, &config))
 }
 
 /// Return scene metadata (triangle count, bounding box, animation length) as

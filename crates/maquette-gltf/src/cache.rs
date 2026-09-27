@@ -18,11 +18,13 @@
 
 use crate::gltf_loader::LoadedGltf;
 use maquette_core::ibl::IblEnvironment;
+use maquette_core::shadow::LightShadow;
 use maquette_core::math::Vec3;
 use crate::scene::{Scene, SceneOpts, TextureLoadOpts};
 use maquette_core::texture::Texture;
 
 static mut SCENE_CACHE: Option<(u64, Scene)> = None;
+static mut SHADOW_CACHE: Vec<(u64, Vec<Option<LightShadow>>)> = Vec::new();
 /// Leaky Vec of texture-bundle cache entries. Each entry lives forever, so
 /// references into it are safely `'static`.
 static mut TEXTURE_CACHE: Vec<(u64, Vec<Texture>)> = Vec::new();
@@ -106,19 +108,40 @@ pub fn textures_for(
     }
 }
 
-/// Get-or-compute the flattened scene. The compute path uses the texture
-/// cache above so animation frames don't redo the ~150 ms decode+mip cost
-/// per frame.
-pub fn scene_for(bytes: &[u8], loaded: &LoadedGltf, opts: SceneOpts) -> &'static Scene {
+/// Get-or-compute the flattened scene and its cache key. `load` (the glTF
+/// parse) only runs on a miss, so re-rendering the same asset skips the parse
+/// entirely. The compute path uses the texture cache above so animation frames
+/// don't redo the ~150 ms decode+mip cost per frame.
+pub fn scene_for(
+    bytes: &[u8],
+    opts: SceneOpts,
+    load: impl FnOnce() -> Result<LoadedGltf, String>,
+) -> Result<(u64, &'static Scene), String> {
     let key = hash(bytes, opts);
     unsafe {
         if let Some((k, ref s)) = SCENE_CACHE {
-            if k == key { return std::mem::transmute::<&Scene, &'static Scene>(s); }
+            if k == key { return Ok((key, std::mem::transmute::<&Scene, &'static Scene>(s))); }
         }
-        let scene = crate::scene::flatten_with_cached_textures(loaded, opts, bytes);
+        let scene = crate::scene::flatten_with_cached_textures(&load()?, opts, bytes);
         SCENE_CACHE = Some((key, scene));
         let (_, ref s) = SCENE_CACHE.as_ref().unwrap();
-        std::mem::transmute::<&Scene, &'static Scene>(s)
+        Ok((key, std::mem::transmute::<&Scene, &'static Scene>(s)))
+    }
+}
+
+/// Get-or-build the shadow maps for `key`, which the caller derives from the
+/// scene key plus every other shadow input (lights, up, frustum radius,
+/// resolution). Shadows don't depend on the camera, so orbiting reuses them.
+/// Keeps the two most recent entries, as the maps are large.
+pub fn shadows_for(key: u64, build: impl FnOnce() -> Vec<Option<LightShadow>>) -> &'static [Option<LightShadow>] {
+    unsafe {
+        let cache = &mut *std::ptr::addr_of_mut!(SHADOW_CACHE);
+        if let Some((_, maps)) = cache.iter().find(|(k, _)| *k == key) {
+            return std::mem::transmute::<&[Option<LightShadow>], &'static [Option<LightShadow>]>(maps.as_slice());
+        }
+        if cache.len() >= 2 { cache.remove(0); }
+        cache.push((key, build()));
+        std::mem::transmute::<&[Option<LightShadow>], &'static [Option<LightShadow>]>(cache.last().unwrap().1.as_slice())
     }
 }
 
@@ -130,6 +153,8 @@ fn hash(bytes: &[u8], opts: SceneOpts) -> u64 {
     h.write_u32(opts.textures.max_size.unwrap_or(u32::MAX));
     h.write_u32(opts.time.to_bits());
     h.write_u32(opts.variant);
+    h.write_u64(opts.scene_index.map_or(u64::MAX, |i| i as u64));
+    h.write_u64(opts.animation_index.map_or(u64::MAX, |i| i as u64));
     h.finish()
 }
 

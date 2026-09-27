@@ -23,7 +23,7 @@ use maquette_core::rasterizer::{BlendMode, PixelBuffer};
 use crate::scene::{AlphaMode, Material, Scene, Triangle, Vertex};
 use maquette_core::ssao::SSAOParams;
 
-pub fn render(scene: &Scene, config: &RenderConfig) -> Vec<u8> {
+pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     let width = config.width.max(1);
     let height = config.height.max(1);
     let factor = config.antialias.clamp(1, 4);
@@ -32,7 +32,7 @@ pub fn render(scene: &Scene, config: &RenderConfig) -> Vec<u8> {
     let mut buffer = PixelBuffer::new(width * factor, height * factor, bg);
 
     if !scene.triangles.is_empty() || !scene.lines.is_empty() || !scene.points.is_empty() {
-        rasterize_scene(&mut buffer, scene, config);
+        rasterize_scene(&mut buffer, scene, scene_key, config);
     }
 
     buffer.composite_oit();
@@ -60,7 +60,23 @@ pub fn render(scene: &Scene, config: &RenderConfig) -> Vec<u8> {
     encode_raw_rgba(w, h, rgba)
 }
 
-fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfig) {
+fn shadow_key(scene_key: u64, lights: &[crate::scene::PunctualLight], up: Vec3, radius: f64, resolution: usize) -> u64 {
+    use std::hash::Hasher;
+    use crate::scene::LightKind;
+    let mut h = maquette_core::math::FxHasher::default();
+    h.write_u64(scene_key);
+    for l in lights {
+        h.write_u8(match l.kind { LightKind::Directional => 0, LightKind::Point => 1, LightKind::Spot => 2 });
+        for v in [l.position.x, l.position.y, l.position.z, l.direction.x, l.direction.y, l.direction.z] { h.write_u64(v.to_bits()); }
+        for v in [l.color[0], l.color[1], l.color[2], l.range, l.inner_cone_cos, l.outer_cone_cos] { h.write_u32(v.to_bits()); }
+        h.write_u8(l.cast_shadow as u8);
+    }
+    for v in [up.x, up.y, up.z, radius] { h.write_u64(v.to_bits()); }
+    h.write_u64(resolution as u64);
+    h.finish()
+}
+
+fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, config: &RenderConfig) {
     let (center, radius) = scene.bounds();
 
     let (camera_pos, view, projection, znear, zfar) = if let Some(sc) = pick_glb_camera(scene, config) {
@@ -118,18 +134,18 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, config: &RenderConfi
         let effective_br = if let Some(g) = &config.ground {
             br * g.size_scale as f64
         } else { br };
-        let caster_tris: Vec<[Vec3; 3]> = scene.triangles.iter().map(|t| {
-            [t.vertices[0].position, t.vertices[1].position, t.vertices[2].position]
-        }).collect();
-        let maps = maquette_core::shadow::build_shadow_maps(
-            &caster_tris, &raw_lights, bc, effective_br, up, sh_cfg.resolution,
-        );
+        let maps = crate::cache::shadows_for(shadow_key(scene_key, &raw_lights, up, effective_br, sh_cfg.resolution), || {
+            let caster_tris: Vec<[Vec3; 3]> = scene.triangles.iter().map(|t| {
+                [t.vertices[0].position, t.vertices[1].position, t.vertices[2].position]
+            }).collect();
+            maquette_core::shadow::build_shadow_maps(&caster_tris, &raw_lights, bc, effective_br, up, sh_cfg.resolution)
+        });
         let bias = maquette_core::shadow::BiasParams {
             bias: sh_cfg.bias as f64, normal_bias: sh_cfg.normal_bias as f64, slope_bias: sh_cfg.slope_bias as f64,
         };
         (maps, bias, sh_cfg.softness, sh_cfg.pcss_light_size)
     } else {
-        (Vec::new(), maquette_core::shadow::BiasParams { bias: 0.0, normal_bias: 0.0, slope_bias: 0.0 }, 0, 0.0)
+        (&[][..], maquette_core::shadow::BiasParams { bias: 0.0, normal_bias: 0.0, slope_bias: 0.0 }, 0, 0.0)
     };
 
     let pbr = PbrContext {

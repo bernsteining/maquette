@@ -126,7 +126,7 @@ pub struct PbrContext {
     /// Parallel to `lights`. Empty means no shadow pass. Non-empty: an
     /// `Option<LightShadow>` per light — `None` means that specific light
     /// doesn't cast shadows (fully lit as if no map was built).
-    pub shadows: Vec<Option<maquette_core::shadow::LightShadow>>,
+    pub shadows: &'static [Option<maquette_core::shadow::LightShadow>],
     /// PCF bias/softness parameters, meaningful only when `shadows` is non-empty.
     pub shadow_bias: maquette_core::shadow::BiasParams,
     pub shadow_softness: usize,
@@ -527,7 +527,7 @@ impl<'a> MaterialShader<'a> {
             ambient_b: f32x4_splat(ctx.ambient[2]),
             lights: &ctx.lights,
             ibl_env: ctx.ibl_env.map(|e| e as &_),
-            shadows: &ctx.shadows,
+            shadows: ctx.shadows,
             shadow_bias: ctx.shadow_bias,
             shadow_softness: ctx.shadow_softness,
             shadow_pcss_light_size: ctx.shadow_pcss_light_size,
