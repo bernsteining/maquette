@@ -7,6 +7,20 @@ use crate::shading::ResolvedLight;
 
 pub use maquette_core::shadow::{build_cube, BiasParams, LightShadow, ShadowMap};
 
+fn caster_tris(tri: &Triangle) -> impl Iterator<Item = [Vec3; 3]> {
+    let [c, a, b] = tri.vertices;
+    let quad = if tri.splat {
+        const HALF: f64 = 0.886_226_925_452_758;
+        let (ra, rb) = (a.sub(c).scale(HALF), b.sub(c).scale(HALF));
+        let q = [c.add(ra).add(rb), c.sub(ra).add(rb), c.sub(ra).sub(rb), c.add(ra).sub(rb)];
+        Some([[q[0], q[1], q[2]], [q[0], q[2], q[3]]])
+    } else {
+        None
+    };
+    let single = if tri.splat { None } else { Some(tri.vertices) };
+    quad.into_iter().flatten().chain(single)
+}
+
 /// Build one shadow (single frustum or cube) per light — None for lights that
 /// don't cast. `bc`/`br` frame each view; `is_occluder` filters caster tris.
 pub fn build_shadow_maps(
@@ -34,14 +48,14 @@ pub fn build_shadow_maps(
                 LightShadow::Single(m) => {
                     for tri in triangles {
                         if is_occluder(tri) {
-                            m.splat_tri(tri.vertices);
+                            for v in caster_tris(tri) { m.splat_tri(v); }
                         }
                     }
                 }
                 LightShadow::Cube(faces) => faces.iter_mut().for_each(|m| {
                     for tri in triangles {
                         if is_occluder(tri) {
-                            m.splat_tri(tri.vertices);
+                            for v in caster_tris(tri) { m.splat_tri(v); }
                         }
                     }
                 }),

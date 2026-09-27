@@ -98,6 +98,51 @@ impl PixelBuffer {
         unsafe { for_each_fragment(&setup, self.width, &mut sink) };
     }
 
+    /// Fill the ellipse `pts[0] + s·(pts[1] − pts[0]) + t·(pts[2] − pts[0])`,
+    /// `s² + t² ≤ 1` — a disc splat after projection of its centre and two
+    /// radius vectors — with depth interpolated over that plane.
+    pub fn rasterize_splat(&mut self, pts: &[(f64, f64); 3], depths: &[f64; 3], r: u8, g: u8, b: u8) {
+        let (cx, cy) = pts[0];
+        let (ax, ay) = (pts[1].0 - cx, pts[1].1 - cy);
+        let (bx, by) = (pts[2].0 - cx, pts[2].1 - cy);
+        let det = ax * by - bx * ay;
+        if det.abs() < 1e-12 || !det.is_finite() { return; }
+        let inv = 1.0 / det;
+        let (sx, tx) = (by * inv, -ay * inv);
+        let aa = sx * sx + tx * tx;
+        let (z0, dz1, dz2) = (depths[0], depths[1] - depths[0], depths[2] - depths[0]);
+        let hy = (ay * ay + by * by).sqrt();
+        let y0 = ((cy - hy - 0.5).ceil()).fmax(0.0) as usize;
+        let y1 = (cy + hy - 0.5).floor();
+        if y1 < 0.0 { return; }
+        let y1 = (y1 as usize).min(self.height - 1);
+        for py in y0..=y1 {
+            let dy = py as f64 + 0.5 - cy;
+            let (s0, t0) = (-bx * dy * inv, ax * dy * inv);
+            let bb = s0 * sx + t0 * tx;
+            let disc = bb * bb - aa * (s0 * s0 + t0 * t0 - 1.0);
+            if disc < 0.0 { continue; }
+            let root = disc.sqrt();
+            let xa = (cx + (-bb - root) / aa - 0.5).ceil().fmax(0.0);
+            let xb = (cx + (-bb + root) / aa - 0.5).floor();
+            if xb < xa { continue; }
+            let (xa, xb) = (xa as usize, (xb as usize).min(self.width - 1));
+            let row = py * self.width;
+            for px in xa..=xb {
+                let dx = px as f64 + 0.5 - cx;
+                let depth = (z0 + (s0 + sx * dx) * dz1 + (t0 + tx * dx) * dz2) as f32;
+                let idx = row + px;
+                unsafe {
+                    if depth > *self.zbuf.get_unchecked(idx) {
+                        *self.zbuf.get_unchecked_mut(idx) = depth;
+                        let p = self.pixels.as_mut_ptr().add(idx * 3);
+                        *p = r; *p.add(1) = g; *p.add(2) = b;
+                    }
+                }
+            }
+        }
+    }
+
     /// Overlay engineering-style section hatching onto a triangle (clip caps in
     /// PNG output — the SVG path uses a `<pattern>` fill instead). Draws parallel
     /// lines in screen space so they stay continuous across the triangulated cap,

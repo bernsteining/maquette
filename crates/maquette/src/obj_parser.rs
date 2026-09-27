@@ -186,7 +186,7 @@ pub fn parse_obj(
                         _ => None,
                     };
                     let tex = if uvs.is_some() { current_tex } else { None };
-                    triangles.push(Triangle {
+                    triangles.push(Triangle { splat: false,
                         vertices: [v0, v1, v2],
                         normal,
                         color: face_color,

@@ -144,7 +144,7 @@ pub fn decode(data: &[u8]) -> Result<(Vec<Triangle>, HashMap<u32, GroupAppearanc
             None
         };
         let tex = if has(TEX) { Some(r.u16()?) } else { None };
-        triangles.push(Triangle {
+        triangles.push(Triangle { splat: false,
             vertices, normal, color, vertex_colors, group_id, alpha,
             vertex_normals, smoothing_group, vertex_scalars, uvs, tex,
         });

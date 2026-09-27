@@ -90,7 +90,7 @@ fn clip_triangle(
         let c1 = lerp_color(vertex_color(tri, i0, base), vertex_color(tri, i1, base), t1);
         let c2 = lerp_color(vertex_color(tri, i0, base), vertex_color(tri, i2, base), t2);
 
-        out.push(Triangle {
+        out.push(Triangle { splat: false,
             vertices: [v0, v1, v2],
             normal: tri.normal,
             color: tri.color,
@@ -121,7 +121,7 @@ fn clip_triangle(
         let c1 = vertex_color(tri, i1, base);
         let c2 = vertex_color(tri, i2, base);
 
-        out.push(Triangle {
+        out.push(Triangle { splat: false,
             vertices: [tri.vertices[i1], tri.vertices[i2], a],
             normal: tri.normal,
             color: tri.color,
@@ -134,7 +134,7 @@ fn clip_triangle(
             uvs: None,
             tex: None,
         });
-        out.push(Triangle {
+        out.push(Triangle { splat: false,
             vertices: [tri.vertices[i2], b, a],
             normal: tri.normal,
             color: tri.color,
@@ -160,7 +160,7 @@ fn generate_cap(edges: &[CapEdge], cap_normal: Vec3, out: &mut Vec<Triangle>) {
 
 #[inline]
 fn push_cap_tri(out: &mut Vec<Triangle>, chain: &[(Vec3, Color3)], a: usize, b: usize, c: usize, cap_normal: Vec3) {
-    out.push(Triangle {
+    out.push(Triangle { splat: false,
         vertices: [chain[a].0, chain[b].0, chain[c].0],
         normal: cap_normal,
         color: None,

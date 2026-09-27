@@ -27,6 +27,7 @@ static mut OBJ_CACHE: Vec<ObjEntry> = Vec::new();
 static mut PLY_CACHE: Vec<PlyEntry> = Vec::new();
 static mut SMOOTH_CACHE: Vec<SmoothEntry> = Vec::new();
 static mut PREP_CACHE: Vec<PrepEntry> = Vec::new();
+static mut CLOUD_CACHE: Vec<StlEntry> = Vec::new();
 
 /// Model-data hash, used as the cache key for parsed geometry and as the base
 /// of the smooth/preprocess keys. Consumes 8 bytes per step (plus the length and
@@ -104,6 +105,17 @@ pub fn put_prep(key: u64, data: (Vec<Triangle>, Vec3, Vec3)) {
     unsafe { push_bounded(&mut *addr_of_mut!(PREP_CACHE), key, data) }
 }
 
+pub fn get_cloud(key: u64) -> Option<&'static Vec<Triangle>> {
+    unsafe { get(&*addr_of!(CLOUD_CACHE), key) }
+}
+
+pub fn put_cloud(key: u64, triangles: Vec<Triangle>) {
+    let cache = unsafe { &mut *addr_of_mut!(CLOUD_CACHE) };
+    if cache.len() >= CLOUD_CAP { cache.remove(0); }
+    cache.push((key, triangles));
+}
+
+const CLOUD_CAP: usize = 4;
 const DERIVED_CAP: usize = 16;
 
 fn push_bounded<T>(cache: &mut Vec<(u64, T)>, key: u64, data: T) {

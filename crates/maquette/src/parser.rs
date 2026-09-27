@@ -37,6 +37,7 @@ pub struct Triangle {
     /// Index into the render's texture table (from OBJ `usemtl` → `map_Kd`).
     /// `None` = untextured; falls back to color / vertex_colors as before.
     pub tex: Option<u16>,
+    pub splat: bool,
 }
 
 /// Parse STL data — auto-detects ASCII vs binary format.
@@ -76,7 +77,7 @@ fn parse_ascii(data: &[u8]) -> Result<Vec<Triangle>, String> {
             let v2 = parse_vertex(&mut lines)?;
             lines.next();
             lines.next();
-            triangles.push(Triangle {
+            triangles.push(Triangle { splat: false,
                 vertices: [v0, v1, v2],
                 normal,
                 color: None,
@@ -138,7 +139,7 @@ fn parse_binary(data: &[u8]) -> Result<Vec<Triangle>, String> {
             None
         };
 
-        triangles.push(Triangle {
+        triangles.push(Triangle { splat: false,
             vertices: [v0, v1, v2],
             normal,
             color,

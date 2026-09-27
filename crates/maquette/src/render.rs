@@ -41,10 +41,11 @@ struct ProjectedTri {
     uvs: Option<[[f32; 2]; 3]>,
     /// Index into the render's texture table. `None` = untextured.
     tex: Option<u16>,
+    splat: bool,
 }
 
 
-fn bbox_of(iter: impl Iterator<Item = Vec3>) -> (Vec3, Vec3) {
+pub(crate) fn bbox_of(iter: impl Iterator<Item = Vec3>) -> (Vec3, Vec3) {
     let mut min = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
     let mut max = Vec3::new(f64::MIN, f64::MIN, f64::MIN);
     for v in iter {
@@ -85,528 +86,6 @@ pub(crate) fn bbox_center(min: Vec3, max: Vec3) -> Vec3 {
 pub(crate) fn bbox_radius(min: Vec3, max: Vec3) -> f64 {
     Vec3::new(max.x - min.x, max.y - min.y, max.z - min.z).length() / 2.0
 }
-
-/// Returns 0-3 for the quadrant of a 2D vector (used for atan2-free angle sorting)
-#[inline(always)]
-fn angle_quadrant(u: f64, v: f64) -> u8 {
-    if u >= 0.0 { if v >= 0.0 { 0 } else { 3 } }
-    else { if v >= 0.0 { 1 } else { 2 } }
-}
-
-/// Sort 3 u32 values in-place (branchless-friendly, avoids sort_unstable overhead)
-#[inline(always)]
-fn sort3(a: &mut u32, b: &mut u32, c: &mut u32) {
-    if *a > *b { core::mem::swap(a, b); }
-    if *b > *c { core::mem::swap(b, c); }
-    if *a > *b { core::mem::swap(a, b); }
-}
-
-pub(crate) fn pointcloud_to_triangles(
-    cloud: &crate::ply_parser::PointCloud,
-    config: &RenderConfig,
-) -> Vec<Triangle> {
-    let n = cloud.positions.len();
-    if n < 3 { return Vec::new(); }
-
-    let positions = &cloud.positions;
-    let (bmin, bmax) = bbox_of(positions.iter().copied());
-    let diag = bmax.sub(bmin).length();
-    if diag < 1e-12 { return Vec::new(); }
-
-    let has_normals = cloud.normals.len() == n;
-    let has_colors = cloud.colors.len() == n;
-    let has_scalars = cloud.scalars.len() == n;
-
-    let max_neighbors: usize = config.point_neighbors.max(3);
-    let boundary_cos = if config.point_boundary > 0.0 { config.point_boundary.to_radians().cos() } else { -2.0 };
-    let denoise = has_colors && config.point_denoise;
-
-    let xs: Vec<f32> = positions.iter().map(|p| p.x as f32).collect();
-    let ys: Vec<f32> = positions.iter().map(|p| p.y as f32).collect();
-    let zs: Vec<f32> = positions.iter().map(|p| p.z as f32).collect();
-
-    let volume_radius = diag / (n as f64).cbrt() * 1.5;
-    let radius = if config.point_size > 0.0 {
-        config.point_size
-    } else {
-        let inv = (1.0 / volume_radius) as f32;
-        let mut coarse: HashMap<(i32, i32, i32), Vec<u32>, FxBuildHasher> =
-            HashMap::with_hasher(FxBuildHasher::default());
-        for i in 0..n {
-            coarse
-                .entry(((xs[i] * inv).floor() as i32, (ys[i] * inv).floor() as i32, (zs[i] * inv).floor() as i32))
-                .or_default()
-                .push(i as u32);
-        }
-        let step = (n / 256).max(1);
-        let mut ds: Vec<f32> = Vec::new();
-        let mut worst_kth = 0.0f32;
-        let mut sampled = false;
-        let mut si = 0;
-        while si < n {
-            let i = si;
-            si += step;
-            let (cx, cy, cz) = ((xs[i] * inv).floor() as i32, (ys[i] * inv).floor() as i32, (zs[i] * inv).floor() as i32);
-            ds.clear();
-            for dz in -1i32..=1 {
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
-                        if let Some(b) = coarse.get(&(cx + dx, cy + dy, cz + dz)) {
-                            for &j in b {
-                                if j as usize != i {
-                                    let ex = xs[j as usize] - xs[i];
-                                    let ey = ys[j as usize] - ys[i];
-                                    let ez = zs[j as usize] - zs[i];
-                                    ds.push(ex * ex + ey * ey + ez * ez);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if ds.len() >= max_neighbors {
-                let k = max_neighbors - 1;
-                ds.select_nth_unstable_by(k, |a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                let kth = ds[k].sqrt();
-                if kth > worst_kth { worst_kth = kth; }
-                sampled = true;
-            }
-        }
-        if sampled { ((worst_kth as f64) * 1.2).fmin(volume_radius).fmax(1e-9) } else { volume_radius }
-    };
-    let rsq_f32 = (radius * radius) as f32;
-
-    let inv_cell_f32 = (1.0 / radius) as f32;
-    let mut grid: HashMap<(i32, i32, i32), Vec<u32>, FxBuildHasher> =
-        HashMap::with_hasher(FxBuildHasher::default());
-    for i in 0..n {
-        let cx = (xs[i] * inv_cell_f32).floor() as i32;
-        let cy = (ys[i] * inv_cell_f32).floor() as i32;
-        let cz = (zs[i] * inv_cell_f32).floor() as i32;
-        grid.entry((cx, cy, cz)).or_default().push(i as u32);
-    }
-    let denoised_colors: Vec<(u8, u8, u8)> = if denoise {
-        let cap = max_neighbors.max(8);
-        (0..n)
-            .map(|i| {
-                let (cx, cy, cz) = ((xs[i] * inv_cell_f32).floor() as i32, (ys[i] * inv_cell_f32).floor() as i32, (zs[i] * inv_cell_f32).floor() as i32);
-                let mut nb: Vec<(f32, (u8, u8, u8))> = Vec::new();
-                for dz in -1i32..=1 {
-                    for dy in -1i32..=1 {
-                        for dx in -1i32..=1 {
-                            if let Some(b) = grid.get(&(cx + dx, cy + dy, cz + dz)) {
-                                for &j in b {
-                                    let ju = j as usize;
-                                    let (ex, ey, ez) = (xs[ju] - xs[i], ys[ju] - ys[i], zs[ju] - zs[i]);
-                                    let dsq = ex * ex + ey * ey + ez * ez;
-                                    if dsq < rsq_f32 { nb.push((dsq, cloud.colors[ju])); }
-                                }
-                            }
-                        }
-                    }
-                }
-                if nb.len() <= 1 { return cloud.colors[i]; }
-                if nb.len() > cap {
-                    nb.select_nth_unstable_by(cap, |a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-                    nb.truncate(cap);
-                }
-                let mut best = cloud.colors[i];
-                let mut best_cost = f64::INFINITY;
-                for &(_, ci) in &nb {
-                    let mut cost = 0.0;
-                    for &(_, cj) in &nb {
-                        let (dr, dg, db) = (ci.0 as f64 - cj.0 as f64, ci.1 as f64 - cj.1 as f64, ci.2 as f64 - cj.2 as f64);
-                        cost += (dr * dr + dg * dg + db * db).sqrt();
-                    }
-                    if cost < best_cost { best_cost = cost; best = ci; }
-                }
-                best
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    let mut tri_set: HashSet<(u32, u32, u32), FxBuildHasher> =
-        HashSet::with_hasher(FxBuildHasher::default());
-
-    let fallback_normal = if !has_normals {
-        let bc = bbox_center(bmin, bmax);
-        let br = bbox_radius(bmin, bmax);
-        let view = resolve_config_view(config, bc, br);
-        view.camera.sub(view.center).normalized()
-    } else {
-        Vec3::new(0.0, 1.0, 0.0)
-    };
-
-    let mut candidates: Vec<u32> = Vec::with_capacity(64);
-    let mut neighbors: Vec<(u32, f32)> = Vec::with_capacity(max_neighbors + 4);
-    let mut sorted: Vec<(u32, f64, f64)> = Vec::with_capacity(max_neighbors);
-
-    let cell_keys: Vec<(i32, i32, i32)> = grid.keys().copied().collect();
-    for cell in &cell_keys {
-        candidates.clear();
-        for dz in -1i32..=1 {
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
-                    if let Some(bucket) = grid.get(&(cell.0 + dx, cell.1 + dy, cell.2 + dz)) {
-                        candidates.extend_from_slice(bucket);
-                    }
-                }
-            }
-        }
-
-        let rsq4 = f32x4_splat(rsq_f32);
-
-        for &ii in &grid[cell] {
-            let i = ii as usize;
-            let normal = if has_normals { cloud.normals[i] } else { fallback_normal };
-
-            neighbors.clear();
-            let px4 = f32x4_splat(xs[i]);
-            let py4 = f32x4_splat(ys[i]);
-            let pz4 = f32x4_splat(zs[i]);
-            let self_idx = i32x4_splat(ii as i32);
-
-            let mut k = 0;
-            let len = candidates.len();
-            while k + 4 <= len {
-                let j0 = candidates[k] as usize;
-                let j1 = candidates[k + 1] as usize;
-                let j2 = candidates[k + 2] as usize;
-                let j3 = candidates[k + 3] as usize;
-
-                let jv = i32x4(candidates[k] as i32, candidates[k + 1] as i32,
-                               candidates[k + 2] as i32, candidates[k + 3] as i32);
-                let not_self = v128_not(i32x4_eq(jv, self_idx));
-
-                let dx = f32x4_sub(f32x4(xs[j0], xs[j1], xs[j2], xs[j3]), px4);
-                let dy = f32x4_sub(f32x4(ys[j0], ys[j1], ys[j2], ys[j3]), py4);
-                let dz = f32x4_sub(f32x4(zs[j0], zs[j1], zs[j2], zs[j3]), pz4);
-                let dsq = f32x4_add(f32x4_add(f32x4_mul(dx, dx), f32x4_mul(dy, dy)),
-                                    f32x4_mul(dz, dz));
-
-                let pass = v128_and(not_self, f32x4_lt(dsq, rsq4));
-                let mask = i32x4_bitmask(pass);
-
-                if mask & 1 != 0 { neighbors.push((candidates[k],   f32x4_extract_lane::<0>(dsq))); }
-                if mask & 2 != 0 { neighbors.push((candidates[k+1], f32x4_extract_lane::<1>(dsq))); }
-                if mask & 4 != 0 { neighbors.push((candidates[k+2], f32x4_extract_lane::<2>(dsq))); }
-                if mask & 8 != 0 { neighbors.push((candidates[k+3], f32x4_extract_lane::<3>(dsq))); }
-
-                k += 4;
-            }
-            while k < len {
-                let j = candidates[k];
-                if j != ii {
-                    let dx = xs[j as usize] - xs[i];
-                    let dy = ys[j as usize] - ys[i];
-                    let dz = zs[j as usize] - zs[i];
-                    let dsq = dx * dx + dy * dy + dz * dz;
-                    if dsq < rsq_f32 { neighbors.push((j, dsq)); }
-                }
-                k += 1;
-            }
-
-            if neighbors.len() < 2 { continue; }
-
-            if neighbors.len() > max_neighbors {
-                neighbors.select_nth_unstable_by(max_neighbors, |a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                neighbors.truncate(max_neighbors);
-            }
-
-            let (t1, t2) = normal.tangent_basis();
-
-            sorted.clear();
-            let t1x_t2x = f64x2(t1.x, t2.x);
-            let t1y_t2y = f64x2(t1.y, t2.y);
-            let t1z_t2z = f64x2(t1.z, t2.z);
-            let p = positions[i];
-            for &(j, _) in &neighbors {
-                let q = positions[j as usize];
-                let uv = f64x2_add(f64x2_add(
-                    f64x2_mul(f64x2_splat(q.x - p.x), t1x_t2x),
-                    f64x2_mul(f64x2_splat(q.y - p.y), t1y_t2y)),
-                    f64x2_mul(f64x2_splat(q.z - p.z), t1z_t2z));
-                sorted.push((j, f64x2_extract_lane::<0>(uv), f64x2_extract_lane::<1>(uv)));
-            }
-
-            sorted.sort_unstable_by(|a, b| {
-                let qa = angle_quadrant(a.1, a.2);
-                let qb = angle_quadrant(b.1, b.2);
-                if qa != qb { return qa.cmp(&qb); }
-                let cross = a.1 * b.2 - a.2 * b.1;
-                if cross > 0.0 { core::cmp::Ordering::Less }
-                else if cross < 0.0 { core::cmp::Ordering::Greater }
-                else { core::cmp::Ordering::Equal }
-            });
-
-            let nn = sorted.len();
-            let ni = if has_normals { cloud.normals[i] } else { Vec3::new(0.0, 0.0, 0.0) };
-            for k in 0..nn {
-                let ja = sorted[k].0;
-                let jb = sorted[(k + 1) % nn].0;
-                if ja == jb { continue; }
-                if has_normals
-                    && (ni.dot(cloud.normals[ja as usize]) < boundary_cos
-                        || ni.dot(cloud.normals[jb as usize]) < boundary_cos)
-                {
-                    continue;
-                }
-                let (mut a, mut b, mut c) = (ii, ja, jb);
-                sort3(&mut a, &mut b, &mut c);
-                tri_set.insert((a, b, c));
-            }
-        }
-    }
-    let mut triangles = Vec::with_capacity(tri_set.len());
-    for &(a, b, c) in &tri_set {
-        let (ia, ib, ic) = (a as usize, b as usize, c as usize);
-        let (pa, pb, pc) = (positions[ia], positions[ib], positions[ic]);
-        let normal = if has_normals {
-            cloud.normals[ia].add(cloud.normals[ib]).add(cloud.normals[ic]).normalized()
-        } else {
-            match Vec3::face_normal(pa, pb, pc) {
-                Some(n) => n,
-                None => continue,
-            }
-        };
-        let (color, vertex_colors) = if has_colors {
-            let cs: &[(u8, u8, u8)] = if denoise { &denoised_colors } else { &cloud.colors };
-            (Some(cs[ia]), Some([cs[ia], cs[ib], cs[ic]]))
-        } else {
-            (None, None)
-        };
-        let vertex_normals = if has_normals {
-            Some([cloud.normals[ia], cloud.normals[ib], cloud.normals[ic]])
-        } else {
-            None
-        };
-        let vertex_scalars = if has_scalars {
-            Some([cloud.scalars[ia], cloud.scalars[ib], cloud.scalars[ic]])
-        } else {
-            None
-        };
-        triangles.push(Triangle {
-            vertices: [pa, pb, pc],
-            normal,
-            color,
-            vertex_colors,
-            group_id: None,
-            alpha: None,
-            vertex_normals,
-            smoothing_group: None,
-            vertex_scalars,
-            uvs: None,
-            tex: None,
-        });
-    }
-
-    triangles
-}
-
-/// Render a point cloud *as points*: each point becomes a small camera-facing
-/// disc (a triangle fan). Unlike `pointcloud_to_triangles`, nothing is stitched —
-/// gaps stay gaps — so volumetric clouds (a fractal, a scatter plot) read as
-/// clouds instead of being smoothed into a surface. Discs (not quads) give the
-/// round dots every point-cloud viewer draws; the antialiasing pass smooths
-/// their rims. The disc's face normal faces the camera so no splat is ever
-/// back-face culled, but when the cloud carries per-point normals those are
-/// used as the disc's vertex normals, so `smooth: true` lights the splats by
-/// the surface they sample (revealing 3D form) while they still never cull.
-const SPLAT_SIDES: usize = 8;
-const SPLAT_RINGS: &[(f64, f64, Option<f32>)] = &[
-    (0.0, 0.93, None),
-    (0.93, 1.0, Some(0.5)),
-];
-const SPLAT_MIN_FACE: f64 = 0.34;
-
-fn smallest_eigvec_sym3(a: f64, b: f64, c: f64, d: f64, e: f64, f: f64) -> Vec3 {
-    let p1 = d * d + e * e + f * f;
-    if p1 <= 1e-20 {
-        return if a <= b && a <= c {
-            Vec3::new(1.0, 0.0, 0.0)
-        } else if b <= c {
-            Vec3::new(0.0, 1.0, 0.0)
-        } else {
-            Vec3::new(0.0, 0.0, 1.0)
-        };
-    }
-    let q = (a + b + c) / 3.0;
-    let p2 = (a - q).powi(2) + (b - q).powi(2) + (c - q).powi(2) + 2.0 * p1;
-    let pp = (p2 / 6.0).sqrt();
-    let (ba, bb, bc) = ((a - q) / pp, (b - q) / pp, (c - q) / pp);
-    let (bd, be, bf) = (d / pp, e / pp, f / pp);
-    let detb = ba * (bb * bc - bf * bf) - bd * (bd * bc - bf * be) + be * (bd * bf - bb * be);
-    let r = (detb / 2.0).clamp(-1.0, 1.0);
-    let phi = r.acos() / 3.0;
-    let two_pp = 2.0 * pp;
-    let e1 = q + two_pp * phi.cos();
-    let e2 = q + two_pp * (phi + 2.0 * std::f64::consts::FRAC_PI_3).cos();
-    let e3 = 3.0 * q - e1 - e2;
-    let lambda = e1.fmin(e2).fmin(e3);
-    let r0 = Vec3::new(a - lambda, d, e);
-    let r1 = Vec3::new(d, b - lambda, f);
-    let r2 = Vec3::new(e, f, c - lambda);
-    let cands = [r0.cross(r1), r1.cross(r2), r2.cross(r0)];
-    let best = cands
-        .into_iter()
-        .max_by(|x, y| x.length().partial_cmp(&y.length()).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap();
-    if best.length() < 1e-12 { Vec3::new(0.0, 0.0, 1.0) } else { best.normalized() }
-}
-
-fn splat_estimate_normal(p: Vec3, nbr: &[u32], positions: &[Vec3], cam_dir: Vec3) -> Vec3 {
-    let m = nbr.len();
-    if m < 2 { return cam_dir; }
-    let mut c = p;
-    for &j in nbr { c = c.add(positions[j as usize]); }
-    let c = c.scale(1.0 / (m as f64 + 1.0));
-    let (mut a, mut b, mut cc, mut d, mut e, mut f) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-    for q in std::iter::once(p).chain(nbr.iter().map(|&j| positions[j as usize])) {
-        let (x, y, z) = (q.x - c.x, q.y - c.y, q.z - c.z);
-        a += x * x;
-        b += y * y;
-        cc += z * z;
-        d += x * y;
-        e += x * z;
-        f += y * z;
-    }
-    let nrm = smallest_eigvec_sym3(a, b, cc, d, e, f);
-    if nrm.dot(cam_dir) < 0.0 { nrm.scale(-1.0) } else { nrm }
-}
-
-pub(crate) fn pointcloud_to_splats(
-    cloud: &crate::ply_parser::PointCloud,
-    config: &RenderConfig,
-) -> Vec<Triangle> {
-    let n = cloud.positions.len();
-    if n == 0 { return Vec::new(); }
-    let positions = &cloud.positions;
-    let (bmin, bmax) = bbox_of(positions.iter().copied());
-    let diag = bmax.sub(bmin).length();
-    if diag < 1e-12 { return Vec::new(); }
-
-    let view = resolve_config_view(config, bbox_center(bmin, bmax), bbox_radius(bmin, bmax));
-    let cam_dir = view.camera.sub(view.center).normalized();
-    let (cam_right, cam_up) = cam_dir.tangent_basis();
-
-    let has_normals = cloud.normals.len() == n;
-    let need_grid = config.point_size <= 0.0 || !has_normals;
-    let (radii, est_normals): (Vec<f64>, Option<Vec<Vec3>>) = if !need_grid {
-        (vec![config.point_size; n], None)
-    } else {
-        let base = (diag / (n as f64).sqrt() * 0.5).fmax(diag * 1e-3);
-        let inv = 1.0 / base;
-        let key = |p: Vec3| ((p.x * inv).floor() as i32, (p.y * inv).floor() as i32, (p.z * inv).floor() as i32);
-        let mut grid: HashMap<(i32, i32, i32), Vec<u32>, FxBuildHasher> =
-            HashMap::with_hasher(FxBuildHasher::default());
-        for i in 0..n { grid.entry(key(positions[i])).or_default().push(i as u32); }
-        let adaptive = config.point_size <= 0.0;
-        let mut radii = Vec::with_capacity(n);
-        let mut normals = if has_normals { None } else { Some(Vec::with_capacity(n)) };
-        let mut nbr: Vec<u32> = Vec::with_capacity(32);
-        for i in 0..n {
-            let p = positions[i];
-            let (cx, cy, cz) = key(p);
-            nbr.clear();
-            for dz in -1i32..=1 { for dy in -1i32..=1 { for dx in -1i32..=1 {
-                if let Some(bucket) = grid.get(&(cx + dx, cy + dy, cz + dz)) {
-                    for &j in bucket { if j as usize != i { nbr.push(j); } }
-                }
-            }}}
-            let r = if !adaptive {
-                config.point_size
-            } else if nbr.is_empty() {
-                base
-            } else {
-                let mut ds: Vec<f64> = nbr.iter().map(|&j| positions[j as usize].sub(p).length()).collect();
-                ds.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                (ds[3.min(ds.len() - 1)] * 0.95).fmax(diag * 1e-4)
-            };
-            radii.push(r);
-            if let Some(nv) = normals.as_mut() {
-                nv.push(splat_estimate_normal(p, &nbr, positions, cam_dir));
-            }
-        }
-        (radii, normals)
-    };
-    let rim_dir: Vec<(f64, f64)> = (0..SPLAT_SIDES)
-        .map(|k| {
-            let a = std::f64::consts::TAU * (k as f64) / (SPLAT_SIDES as f64);
-            (a.cos(), a.sin())
-        })
-        .collect();
-
-    let has_colors = cloud.colors.len() == n;
-    let flat_lit = has_colors && config.shading.is_empty();
-    let rings: &[(f64, f64, Option<f32>)] = if flat_lit { &[(0.0, 1.0, None)] } else { SPLAT_RINGS };
-    let mut triangles = Vec::with_capacity(n * SPLAT_SIDES * 3);
-    for i in 0..n {
-        let p = positions[i];
-        let r = radii[i];
-        let color = if has_colors { Some(cloud.colors[i]) } else { None };
-        let vertex_colors = color.map(|c| [c, c, c]);
-        let nrm = if has_normals {
-            Some(cloud.normals[i])
-        } else {
-            est_normals.as_ref().map(|en| en[i])
-        };
-        let shade_n = nrm.map(|v| v.normalized()).unwrap_or(cam_dir);
-        let (right, up) = match nrm {
-            Some(dn) => {
-                let dn = dn.normalized();
-                let f = dn.dot(cam_dir);
-                let disc_n = if f.abs() >= SPLAT_MIN_FACE {
-                    dn
-                } else {
-                    let s = if f < 0.0 { -1.0 } else { 1.0 };
-                    let tang = dn.sub(cam_dir.scale(f)).normalized();
-                    cam_dir
-                        .scale(s * SPLAT_MIN_FACE)
-                        .add(tang.scale((1.0 - SPLAT_MIN_FACE * SPLAT_MIN_FACE).sqrt()))
-                        .normalized()
-                };
-                disc_n.tangent_basis()
-            }
-            None => (cam_right, cam_up),
-        };
-        let vn = if flat_lit { None } else { Some([shade_n; 3]) };
-        let mut push_tri = |v: [Vec3; 3], alpha: Option<f32>| {
-            triangles.push(Triangle {
-                vertices: v,
-                normal: cam_dir,
-                color,
-                vertex_colors,
-                group_id: None,
-                alpha,
-                vertex_normals: vn,
-                smoothing_group: None,
-                vertex_scalars: None,
-                uvs: None,
-                tex: None,
-            });
-        };
-        let at = |c: f64, s: f64, rr: f64| p.add(right.scale(r * rr * c)).add(up.scale(r * rr * s));
-        for &(r0, r1, alpha) in rings {
-            for k in 0..SPLAT_SIDES {
-                let (c0, s0) = rim_dir[k];
-                let (c1, s1) = rim_dir[(k + 1) % SPLAT_SIDES];
-                let o0 = at(c0, s0, r1);
-                let o1 = at(c1, s1, r1);
-                if r0 <= 0.0 {
-                    push_tri([p, o0, o1], alpha);
-                } else {
-                    let i0 = at(c0, s0, r0);
-                    let i1 = at(c1, s1, r0);
-                    push_tri([i0, o0, o1], alpha);
-                    push_tri([i0, o1, i1], alpha);
-                }
-            }
-        }
-    }
-    triangles
-}
-
 
 /// Everything the shade paths need to apply cast shadows. `maps` has one entry
 /// per light (None = non-caster); `factors` is the per-unique-vertex×light
@@ -1237,11 +716,12 @@ fn project_triangles(
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
         let pp = if shadow.map_or(false, |s| s.per_pixel) {
-            Some((tri.vertices, tri.normal))
+            let n = if tri.splat { tri.vertex_normals.map_or(tri.normal, |v| v[0]) } else { tri.normal };
+            Some((tri.vertices, n))
         } else {
             None
         };
-        projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity, pp, uvs: tri.uvs, tex: tri.tex });
+        projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity, pp, uvs: tri.uvs, tex: tri.tex, splat: tri.splat });
     }
 
     projected
@@ -1367,7 +847,7 @@ fn project_shadow(
         let pts = apply_projection(&proj_setup, &cam);
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
-        projected.push(ProjectedTri { pts, depths, depth, r: sr, g: sg, b: sb, vertex_colors: None, group_id: None, opacity: 1.0, pp: None, uvs: None, tex: None });
+        projected.push(ProjectedTri { pts, depths, depth, r: sr, g: sg, b: sb, vertex_colors: None, group_id: None, opacity: 1.0, pp: None, uvs: None, tex: None, splat: false });
     }
 
     projected
@@ -2054,7 +1534,7 @@ fn make_debug_light_tris(
             for i in 0..SEGS {
                 let (i1, i2) = (1 + i, 1 + (i + 1) % SEGS);
                 let depth = (cam_depths[0] + cam_depths[i1] + cam_depths[i2]) / 3.0;
-                out.push(ProjectedTri {
+                out.push(ProjectedTri { splat: false,
                     pts: [proj_pts[0], proj_pts[i1], proj_pts[i2]],
                     depths: [cam_depths[0], cam_depths[i1], cam_depths[i2]],
                     depth,
@@ -2088,7 +1568,7 @@ fn make_debug_light_tris(
 
         for &(a, bi, c) in &faces {
             let depth = (cam_depths[a] + cam_depths[bi] + cam_depths[c]) / 3.0;
-            out.push(ProjectedTri {
+            out.push(ProjectedTri { splat: false,
                 pts: [proj_pts[a], proj_pts[bi], proj_pts[c]],
                 depths: [cam_depths[a], cam_depths[bi], cam_depths[c]],
                 depth,
@@ -2598,6 +2078,14 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     if !is_wireframe {
         for tri in &projected {
             if tri.opacity >= 1.0 {
+                if tri.splat {
+                    let mut c = tri.vertex_colors.map_or((tri.r, tri.g, tri.b), |c| c[0]);
+                    if let (Some(sd), Some((wp, normal))) = (shadow_data, tri.pp) {
+                        c = sd.pp_shade(c, wp[0], normal);
+                    }
+                    buf.rasterize_splat(&tri.pts, &tri.depths, c.0, c.1, c.2);
+                    continue;
+                }
                 let max_d = tri.depths[0].fmax(tri.depths[1]).fmax(tri.depths[2]) as f32;
                 if buf.hiz_can_skip(&tri.pts, max_d) { continue; }
                 if let (Some(ti), Some(uvs)) = (tri.tex, tri.uvs) {

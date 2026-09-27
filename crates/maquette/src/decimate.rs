@@ -175,7 +175,7 @@ pub fn decimate(triangles: &[Triangle], bmin: Vec3, bmax: Vec3, strength: f64) -
             None
         };
 
-        out.push(Triangle {
+        out.push(Triangle { splat: false,
             vertices: [pa, pb, pc],
             normal,
             color: tri.color,

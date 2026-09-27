@@ -15,6 +15,7 @@ mod obj_parser;
 mod outline;
 mod parser;
 mod ply_parser;
+mod pointcloud;
 mod prepared;
 mod prof;
 mod projection;
@@ -202,7 +203,7 @@ fn load_ply(data: &[u8]) -> Result<u64, String> {
     Ok(key)
 }
 
-fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<(u64, PlyTriangles), String> {
+fn cached_ply(data: &[u8], config: &RenderConfig, raster: bool) -> Result<(u64, PlyTriangles), String> {
     let want = config.color_map_property.as_str();
     if !want.is_empty() {
         if prepared::key_of(data).is_some() {
@@ -210,24 +211,59 @@ fn cached_ply(data: &[u8], config: &RenderConfig) -> Result<(u64, PlyTriangles),
         }
         let tris = match ply_parser::parse_ply_with(data, Some(want))? {
             ply_parser::PlyData::Mesh(t) => t,
-            ply_parser::PlyData::Points(cloud) => cloud_to_triangles(&cloud, config),
+            ply_parser::PlyData::Points(cloud) => cloud_to_triangles(&cloud, config, raster),
         };
         return Ok((cache::hash(data), PlyTriangles::Owned(tris)));
     }
     let key = load_ply(data)?;
     let tris = match cache::get_ply(key).unwrap() {
         ply_parser::PlyData::Mesh(t) => PlyTriangles::Cached(t, key),
-        ply_parser::PlyData::Points(cloud) => PlyTriangles::Owned(cloud_to_triangles(cloud, config)),
+        ply_parser::PlyData::Points(cloud) => {
+            let ck = cloud_key(key, cloud, config, raster);
+            if cache::get_cloud(ck).is_none() {
+                cache::put_cloud(ck, cloud_to_triangles(cloud, config, raster));
+            }
+            PlyTriangles::Cached(cache::get_cloud(ck).unwrap(), ck)
+        }
     };
     Ok((key, tris))
 }
 
-fn cloud_to_triangles(cloud: &ply_parser::PointCloud, config: &RenderConfig) -> Vec<parser::Triangle> {
+fn splat_native(config: &RenderConfig, raster: bool) -> bool {
+    raster && config.mode == "solid" && config.opacity >= 1.0 && config.clip.is_none() && config.explode.abs() < 1e-12
+}
+
+fn cloud_to_triangles(cloud: &ply_parser::PointCloud, config: &RenderConfig, raster: bool) -> Vec<parser::Triangle> {
     if config.point_splat {
-        render::pointcloud_to_splats(cloud, config)
+        pointcloud::splats(cloud, config, splat_native(config, raster))
     } else {
-        render::pointcloud_to_triangles(cloud, config)
+        pointcloud::reconstruct(cloud, config)
     }
+}
+
+fn cloud_key(key: u64, cloud: &ply_parser::PointCloud, config: &RenderConfig, raster: bool) -> u64 {
+    let m = |h: u64, x: u64| (h ^ x).wrapping_mul(0x100000001b3);
+    let mut h = m(key, 0xC10D);
+    h = m(h, config.point_splat as u64);
+    h = m(h, config.point_size.to_bits());
+    if config.point_splat {
+        h = m(h, splat_native(config, raster) as u64);
+        h = m(h, config.shading.is_empty() as u64);
+    } else {
+        h = m(h, config.point_neighbors as u64);
+        h = m(h, config.point_boundary.to_bits());
+        h = m(h, config.point_denoise as u64);
+    }
+    if config.point_splat || cloud.normals.len() != cloud.positions.len() {
+        let (bmin, bmax) = render::bbox_of(cloud.positions.iter().copied());
+        let view = projection::resolve_config_view(config, render::bbox_center(bmin, bmax), render::bbox_radius(bmin, bmax));
+        for v in [view.camera, view.center] {
+            h = m(h, v.x.to_bits());
+            h = m(h, v.y.to_bits());
+            h = m(h, v.z.to_bits());
+        }
+    }
+    h
 }
 
 /// Colored point clouds are usually scans whose colors already bake in real
@@ -369,7 +405,7 @@ fn get_obj_info(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> 
 #[wasm_func]
 fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let mut config = parse_config(config_json)?;
-    let (key, tris) = cached_ply(ply_data, &config)?;
+    let (key, tris) = cached_ply(ply_data, &config, false)?;
     apply_pointcloud_matte(key, &mut config);
     let empty = HashMap::new();
     Ok(render::render(tris.triangles(), &config, &empty, tris.mesh_key(), tris.mesh_key()).into_bytes())
@@ -379,7 +415,7 @@ fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
 #[wasm_func]
 fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let mut config = parse_config(config_json)?;
-    let (key, tris) = cached_ply(ply_data, &config)?;
+    let (key, tris) = cached_ply(ply_data, &config, true)?;
     apply_pointcloud_matte(key, &mut config);
     let empty = HashMap::new();
     render::render_raster(tris.triangles(), &config, &empty, tris.mesh_key(), tris.mesh_key(), &[])
@@ -389,7 +425,7 @@ fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
 #[wasm_func]
 fn get_ply_info(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
-    let (_, tris) = cached_ply(ply_data, &config)?;
+    let (_, tris) = cached_ply(ply_data, &config, false)?;
     Ok(render::get_info(tris.triangles(), &config).into_bytes())
 }
 
