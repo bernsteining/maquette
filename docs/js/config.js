@@ -1,17 +1,14 @@
 import { $ } from "./dom.js";
-import { state, model, getSchema, num, fmtT, eq, group, ambientCfg, bgCfg, hlCollapse, outputFormat, topFields } from "./state.js";
+import { state, model, visibleFields, num, fmtT, eq, group, ambientCfg, bgCfg, hlCollapse, outputFormat, topFields } from "./state.js";
+
+const exportable = (f) => !f.k.startsWith("mol_") && !f.k.startsWith("scad_") && !(f.omitIf && f.omitIf(state[f.k]));
 
 function buildConfig() {
   const c = {};
   const gltf = model._gltf;
-  for (const sec of getSchema()) {
-    if (sec.when && !sec.when(state, state)) continue;
-    for (const f of sec.fields) {
-    if (f.when && !f.when(state, state)) continue;
-    if (f.k[0] === "_") continue;
-    if (f.k.startsWith("mol_") || f.k.startsWith("scad_")) continue;
+  for (const f of visibleFields()) {
+    if (f.k[0] === "_" || !exportable(f)) continue;
     if (!gltf && (f.k === "ambient" || f.k === "background")) continue;
-    if (f.omitIf && f.omitIf(state[f.k])) continue;
     switch (f.t) {
       case "grp":
         if (f.toggle && !state[f.k].__on) break;
@@ -23,7 +20,6 @@ function buildConfig() {
       case "map": if (state[f.k].length) c[f.k] = Object.fromEntries(state[f.k].filter(r => r[0]).map(([n, v]) => [n, f.rich ? hlCollapse(v) : v])); break;
       default: c[f.k] = state[f.k];
     }
-  }
   }
   if (!gltf) {
     c.ambient = ambientCfg();
@@ -38,13 +34,8 @@ function buildTypst() {
     : ({ obj: "render-obj", stl: "render-stl", ply: "render-ply" }[model._ext] || "render-obj");
   const P = [];
   const push = (k, v) => P.push(`${k}: ${v}`);
-  for (const sec of getSchema()) {
-    if (sec.when && !sec.when(state, state)) continue;
-    for (const f of sec.fields) {
-    if (f.when && !f.when(state, state)) continue;
-    if (f.noExport || f.k === "_cam" || f.k === "width" || f.k === "height") continue;
-    if (f.k.startsWith("mol_") || f.k.startsWith("scad_")) continue;
-    if (f.omitIf && f.omitIf(state[f.k])) continue;
+  for (const f of visibleFields()) {
+    if (f.noExport || f.k === "_cam" || f.k === "width" || f.k === "height" || !exportable(f)) continue;
     if (!gltf) {
       if (f.k === "background") { const b = bgCfg(); if (b !== f.def) push("background", b === "none" ? "none" : fmtT(b)); continue; }
       if (f.k === "_bgNone") continue;
@@ -77,7 +68,6 @@ function buildTypst() {
       }
       default: if (!eq(state[f.k], f.def)) push(f.k, fmtT(state[f.k]));
     }
-  }
   }
   if (outputFormat === "svg") P.push('format: "svg"');
   const body = P.length ? `#${fn}(model,\n  ${P.join(",\n  ")},\n)` : `#${fn}(model)`;
@@ -270,4 +260,4 @@ function buildMolOpts(s, format) {
 }
 
 
-export { buildConfig, buildTypst, renderCode, updateScadHighlight, buildMolOpts, esc, highlightScad, highlightLine, parseTypst, setCodeGuard, highlightCode, sizeCode };
+export { buildConfig, buildTypst, renderCode, updateScadHighlight, buildMolOpts, parseTypst, setCodeGuard, highlightCode, sizeCode };

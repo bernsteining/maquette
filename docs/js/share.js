@@ -1,26 +1,6 @@
-import { $, ENC, DEC, elOutc } from "./dom.js";
-import { state, model, setModel, makeModel, renderOverride, setRenderOverride, initState, resetState, getSchema, topFields, DEFAULTS_KEYS, MODEL_DEFAULTS, num, fmtT, eq, hlNormalize } from "./state.js";
-import { buildConfig, buildTypst, renderCode } from "./config.js";
-import { rebuildForm, buildForm, refreshVisibility, filterForm, controlRefs } from "./form.js";
-import { onChange, render, safeRender, lastRender, copyText } from "./render.js";
-import { applyModelDefaults, loadPresetByName, kindOf, kindDiffers, triggerRecompile, ingest, loadFile, enterScadMode, enterMolMode, setPlugin, syncGltfInfo, measure, gltfCameraNames, _scadDefault, scadCanonicalSrc } from "./models.js";
-
-$("btn-download").onclick = () => {
-  if (!lastRender) return;
-  const base = model.name.replace(/\.[^.]+$/, "");
-  const save = (blob, ext) => {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = base + "." + ext;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
-  if (lastRender.kind === "raw") {
-    elOutc.toBlob((blob) => save(blob, "png"), "image/png");
-  } else {
-    save(new Blob([lastRender.bytes], { type: "image/svg+xml" }), "svg");
-  }
-};
+import { $, ENC, DEC } from "./dom.js";
+import { state, model, setModel, makeModel, setRenderOverride, initState, resetState, topFields, catalog, overlayDefaults, eq, hlNormalize } from "./state.js";
+import { kindDiffers, canonicalScad } from "./models.js";
 
 const bytesToB64u = (b) => { let s = ""; for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
 const b64uToBytes = (s) => { const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/")); const a = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i); return a; };
@@ -58,18 +38,10 @@ function shareConfig() {
   if (model.scad) {
     modelName = $("preset").value || "__scad__";
     const src = $("scad-src").value;
-    const canon = modelName === "__scad__" ? _scadDefault : scadCanonicalSrc[modelName];
+    const canon = canonicalScad(modelName);
     if (canon == null || src !== canon) { scadSrc = src; modelName = "__scad__"; }
   }
-  const base = initState();
-  const ov = MODEL_DEFAULTS[modelName];
-  if (ov) for (const k in ov) {
-    const v = structuredClone(ov[k]);
-    const cur = base[k];
-    base[k] = (v && typeof v === "object" && !Array.isArray(v)
-             && cur && typeof cur === "object" && !Array.isArray(cur))
-      ? { ...cur, ...v } : v;
-  }
+  const base = overlayDefaults(initState(), catalog.modelDefaults[modelName] || {});
   const cfg = { model: modelName };
   for (const k in state) {
     if (model._mol && k === "materials") continue;
@@ -184,27 +156,4 @@ function applyConfig(cfg) {
     else if ("camera" in cfg) state._cam = "cartesian";
   }
 }
-$("btn-share").onclick = async () => {
-  const url = await bestUrl(shareConfig());
-  history.replaceState(null, "", url);
-  const ok = await copyText(url);
-  const b = $("btn-share"), o = b.textContent; b.textContent = ok ? "Copied!" : "Link in URL"; setTimeout(() => (b.textContent = o), 1400);
-};
-
-$("btn-reset").onclick = () => {
-  resetState();
-  applyModelDefaults(model.scad ? ($("preset").value || "__scad__") : model.name);
-  setRenderOverride(null);
-  history.replaceState(null, "", location.pathname);
-  $("search").value = "";
-  if (model._gltf) { syncGltfInfo(); measure(); }
-  else { rebuildForm(); measure(); onChange(); }
-  if (model.scad) triggerRecompile("scad");
-  else if (model._mol) triggerRecompile("mol");
-};
-
-$("form").addEventListener("input", () => { setRenderOverride(null); }, true);
-
-
-
 export { applyStateFromUrl, shareConfig, bestUrl, applyConfig };

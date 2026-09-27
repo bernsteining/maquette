@@ -8,7 +8,7 @@
 <!-- Start the demo's two heaviest first-load fetches during head parse instead
      of after the deferred module script runs. CI rewrites the modulepreload to
      the bundled JS; the wasm is the boot plugin (maquette), fetched by worker.js. -->
-<link rel="modulepreload" href="js/main.js?v=8">
+<link rel="modulepreload" href="js/main.js?v=9">
 <link rel="preload" as="fetch" type="application/wasm" href="maquette.wasm">
 <style>
   :root {
@@ -219,6 +219,18 @@
   .mini-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
   .rm { color: var(--err); border: none; background: none; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; opacity: .7; }
   .rm:hover { opacity: 1; }
+  .row.wrap { flex-wrap: wrap; }
+  .row > .fixed { flex: 0 0 auto; }
+  .row > .swatch { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+  .swatch > input[type=color] { width: 34px; }
+  .map-row { margin-bottom: 5px; }
+  .map-row > input[type=color] { flex: 0 0 40px; }
+  .item-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .item-head > .spacer { flex: 1; }
+  .light-axis { display: flex; gap: 6px; align-items: center; margin: 2px 0; }
+  .light-axis > span { width: 1em; color: var(--muted); font-size: 12px; }
+  .light-axis > input[type=range] { flex: 1; }
+  .light-axis > input[type=number] { width: 4.5em; }
   .item { border: 1px solid var(--line); border-radius: 8px; padding: 7px; margin-bottom: 7px; background: var(--panel); }
   textarea { width: 100%; font: 11.5px/1.5 ui-monospace, Menlo, monospace; padding: 7px;
     border: 1px solid var(--line); border-radius: 8px; background: var(--code-bg); color: var(--ink); resize: vertical; min-height: 54px; }
@@ -297,6 +309,8 @@
   #stage:not(.ready) #viewport { display: none; }
   /* Transparent-background render: drop the frame so the canvas blends into the stage. */
   #out.bare, #outc.bare { box-shadow: none; border-radius: 0; }
+  #outo { position: absolute; left: 0; top: 0; border-radius: 10px; pointer-events: none; user-select: none; -webkit-user-drag: none; }
+  #outo.bare { border-radius: 0; }
   #tools { position: absolute; top: 0.9rem; right: 0.9rem; display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; }
   #tools button, #tools #btn-docs { font: inherit; font-size: 0.8rem; font-weight: 500; border: 1px solid var(--line);
     background: var(--panel); color: var(--ink-soft); padding: 0.28rem 0.7rem; border-radius: 7px; cursor: pointer; box-shadow: var(--shadow); transition: .12s;
@@ -519,6 +533,7 @@
       <div id="viewport">
         <img id="out" alt="3D render" draggable="false">
         <canvas id="outc" style="display:none" role="img" aria-label="3D render"></canvas>
+        <img id="outo" alt="" aria-hidden="true" draggable="false" style="display:none">
         <button id="fs-toggle" title="Fullscreen (F)" aria-label="Toggle fullscreen">
           <svg class="fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
           <svg class="fs-exit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h3a2 2 0 0 0 2-2V3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M21 16h-3a2 2 0 0 0-2 2v3"/></svg>
@@ -567,6 +582,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=8"></script>
+  <script type="module" src="js/main.js?v=9"></script>
 </body>
 </html>

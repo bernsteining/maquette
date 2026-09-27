@@ -28,6 +28,6 @@ export default [
   {
     files: ["docs/js/**/*.js", "docs/worker.js"],
     languageOptions: { ecmaVersion: "latest", sourceType: "module", globals },
-    rules: { "no-undef": "error" },
+    rules: { "no-undef": "error", "no-unused-vars": ["error", { caughtErrors: "none" }] },
   },
 ];

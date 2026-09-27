@@ -1,12 +1,35 @@
-import { $, ENC, DEC, elCode, elMeasure, elOutc, elOut, announce } from "./dom.js";
-import { state, model, setModel, makeModel, getSchema, ext, isGltf, MOL_FMTS, isMolExt, GLTF_SCHEMA, PLUGINS, MODELS, MODELS_BY_PLUGIN, MOLECULES, PLUGIN_OF_MODEL, MODEL_DEFAULTS, DEFAULTS_KEYS, setRenderOverride, setOutputFormat, resetState, topFields, num, fmtT, eq, outputFormat } from "./state.js";
-import { maquettePlugin, scadPlugin, gltfPlugin, molfigPlugin, bindModel } from "./plugins.js";
-import { buildConfig, buildMolOpts, updateScadHighlight, renderCode, buildTypst } from "./config.js";
-import { buildForm, rebuildForm, refreshVisibility, controlRefs, filterForm } from "./form.js";
-import { onChange, render, safeRender, setStageBusy, showErr, scheduleRender } from "./render.js";
-import { ensureSpherical, setBboxCenter } from "./camera.js";
+import { $, ENC, DEC, elCode, elMeasure, elOut, announce } from "./dom.js";
+import { state, model, setModel, makeModel, ext, isGltf, MOL_FMTS, isMolExt, catalog, setRenderOverride, setOutputFormat, resetState, topFields, overlayDefaults, outputFormat } from "./state.js";
+import { GLTF_SCHEMA } from "./schema.js";
+import { plugins } from "./plugins.js";
+import { buildMolOpts, updateScadHighlight } from "./config.js";
+import { buildForm, refreshVisibility } from "./form.js";
+import { showErr } from "./render.js";
+import { setBboxCenter } from "./camera.js";
+import { hooks } from "./hooks.js";
+
+const PRELOAD_MAX_BYTES = 2 * 1024 * 1024;
+const SCAD_DEFAULT_URL = "openscad-logo.scad";
+const KNOWN_EXTS = new Set(["obj", "stl", "ply", "scad", "glb", "gltf", "blg", "pdb", "cif", "mmcif", "bcif", "xyz"]);
+const INFO_FN = { obj: "get_obj_info", stl: "get_stl_info", ply: "get_ply_info" };
+const GET_MODELS_LINKS = {
+  maquette: { label: "More models on Sketchfab →", url: "https://sketchfab.com/3d-models?features=downloadable" },
+  scad: { label: "More SCAD on Thingiverse →", url: "https://www.thingiverse.com/tag:openscad" },
+  gltf: { label: "More glTF on Sketchfab →", url: "https://sketchfab.com/3d-models?features=downloadable" },
+  molfig: { label: "More structures on RCSB PDB →", url: "https://www.rcsb.org/search/advanced" },
+};
+const GLTF_FIELDS = GLTF_SCHEMA.flatMap((s) => s.fields);
+const GLTF_TIME_FIELD = GLTF_FIELDS.find((f) => f.k === "time");
+const GLTF_CAMERA_FIELD = GLTF_FIELDS.find((f) => f.k === "camera_name");
 
 let currentPluginId = null;
+let scadDefault = null;
+const scadCanonicalSrc = {};
+
+const changed = () => hooks.change();
+const assignDefaults = (defaults) => { for (const k in defaults || {}) state[k] = structuredClone(defaults[k]); };
+const clearUrlState = () => { if (location.search || location.hash) history.replaceState(null, "", location.pathname); };
+const rebuild = () => { buildForm(); refreshVisibility(); };
 
 const isConstrainedDevice = () =>
   matchMedia("(hover: none) and (pointer: coarse)").matches ||
@@ -15,73 +38,58 @@ const isConstrainedDevice = () =>
 
 function preloadDemoModels(skipName) {
   if (isConstrainedDevice()) return;
-  const idle = window.requestIdleCallback || (cb => setTimeout(cb, 300));
+  const idle = window.requestIdleCallback || ((cb) => setTimeout(cb, 300));
   idle(async () => {
-    for (const [presetName] of MODELS) {
-      if (presetName === skipName) continue;
-      if (kindOf(presetName) !== "maquette") continue;
+    for (const [name] of catalog.models) {
+      if (name === skipName || kindOf(name) !== "maquette") continue;
       try {
-        const head = await fetch(presetName, { method: "HEAD" });
-        if (!head.ok) continue;
-        const len = +(head.headers.get("content-length") || 0);
-        if (len > 2 * 1024 * 1024) continue;
-        const r = await fetch(presetName);
+        const ctrl = new AbortController();
+        const r = await fetch(name, { signal: ctrl.signal });
         if (!r.ok) continue;
+        if (+(r.headers.get("content-length") || 0) > PRELOAD_MAX_BYTES) { ctrl.abort(); continue; }
         const bytes = new Uint8Array(await r.arrayBuffer());
-        await maquettePlugin.ensure();
-        await maquettePlugin.cache(presetName, bytes);
-      } catch {  }
+        await plugins.maquette.ensure();
+        await plugins.maquette.prefetch(name, bytes);
+      } catch { }
     }
   });
 }
 
-
-function triggerRecompile(kind) {
-  if (kind === "scad" && currentPluginId === "scad") compileScad();
-  else if (kind === "mol" && model._mol) compileMol();
-}
-
-
-const modelsReady = fetch("models.json").then(r => r.json()).then(j => {
-  PLUGINS.push(...(j.plugins || []));
-  Object.assign(MOLECULES, j.molecules || {});
-  Object.assign(MODEL_DEFAULTS, j.defaults || {});
-  MODELS.length = 0;
-  for (const k in MODELS_BY_PLUGIN) delete MODELS_BY_PLUGIN[k];
-  for (const k in PLUGIN_OF_MODEL) delete PLUGIN_OF_MODEL[k];
-  for (const pl of PLUGINS) {
-    MODELS_BY_PLUGIN[pl.id] = pl.models || [];
-    for (const [name, label] of MODELS_BY_PLUGIN[pl.id]) {
-      MODELS.push([name, label || name]);
-      PLUGIN_OF_MODEL[name] = pl.id;
+const modelsReady = fetch("models.json").then((r) => r.json()).then((j) => {
+  catalog.plugins.push(...(j.plugins || []));
+  Object.assign(catalog.molecules, j.molecules || {});
+  Object.assign(catalog.modelDefaults, j.defaults || {});
+  for (const pl of catalog.plugins) {
+    catalog.modelsByPlugin[pl.id] = pl.models || [];
+    for (const [name, label] of catalog.modelsByPlugin[pl.id]) {
+      catalog.models.push([name, label || name]);
+      catalog.pluginOfModel[name] = pl.id;
     }
   }
-  DEFAULTS_KEYS.push(...new Set(Object.values(MODEL_DEFAULTS).flatMap(Object.keys)));
+  catalog.defaultsKeys.push(...new Set(Object.values(catalog.modelDefaults).flatMap(Object.keys)));
 });
-const SCAD_DEFAULT_URL = "openscad-logo.scad";
-let _scadDefault = null;
-const scadCanonicalSrc = {};
+
 async function loadScadDefault() {
-  if (_scadDefault !== null) return _scadDefault;
+  if (scadDefault !== null) return scadDefault;
   try {
     const r = await fetch(SCAD_DEFAULT_URL);
-    _scadDefault = r.ok ? await r.text() : "";
-  } catch { _scadDefault = ""; }
-  return _scadDefault;
+    scadDefault = r.ok ? await r.text() : "";
+  } catch { scadDefault = ""; }
+  return scadDefault;
 }
+const canonicalScad = (name) => name === "__scad__" ? scadDefault : scadCanonicalSrc[name];
 
-
-const kindOf = (name) => {
+function kindOf(name) {
   if (!name) return "maquette";
-  if (MOLECULES[name] || isMolExt(name)) return "molfig";
+  if (catalog.molecules[name] || isMolExt(name)) return "molfig";
   if (name === "__scad__" || ext(name) === "scad") return "scad";
   return isGltf(name) ? "gltf" : "maquette";
-};
+}
 const kindDiffers = (a, b) => kindOf(a) !== kindOf(b);
 
 function syncFmtToggleForKind(name) {
   const gltf = isGltf(name);
-  const seg = document.getElementById("fmt");
+  const seg = $("fmt");
   if (seg) seg.style.display = gltf ? "none" : "";
   if (gltf && outputFormat !== "png") {
     setOutputFormat("png");
@@ -89,47 +97,27 @@ function syncFmtToggleForKind(name) {
   }
 }
 
-const GLTF_TIME_FIELD = GLTF_SCHEMA.flatMap(s => s.fields).find(f => f.k === "time");
-const GLTF_CAMERA_FIELD = GLTF_SCHEMA.flatMap(s => s.fields).find(f => f.k === "camera_name");
 function gltfCameraNames(bytes) {
   if (!bytes || bytes.length < 20) return [];
   try {
-    let jsonText;
-    if (bytes[0] === 0x67 && bytes[1] === 0x6C && bytes[2] === 0x54 && bytes[3] === 0x46) {
-      const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      jsonText = DEC.decode(bytes.subarray(20, 20 + dv.getUint32(12, true)));
-    } else {
-      jsonText = DEC.decode(bytes);
-    }
-    return (JSON.parse(jsonText).cameras || [])
-      .map(c => (c && typeof c.name === "string") ? c.name : "")
-      .filter(n => n);
+    const glb = bytes[0] === 0x67 && bytes[1] === 0x6C && bytes[2] === 0x54 && bytes[3] === 0x46;
+    const jsonText = glb
+      ? DEC.decode(bytes.subarray(20, 20 + new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true)))
+      : DEC.decode(bytes);
+    return (JSON.parse(jsonText).cameras || []).map((c) => (c && typeof c.name === "string") ? c.name : "").filter(Boolean);
   } catch { return []; }
 }
+
 function applyModelDefaults(name) {
   const TF = topFields();
-  for (const k of DEFAULTS_KEYS) {
+  for (const k of catalog.defaultsKeys) {
     const f = TF[k];
-    if (!f) continue;
-    state[k] = structuredClone(f.init !== undefined ? f.init : f.def);
+    if (f) state[k] = structuredClone(f.init !== undefined ? f.init : f.def);
   }
-  const ov = MODEL_DEFAULTS[name];
-  if (!ov) return;
-  for (const k in ov) {
-    const v = structuredClone(ov[k]);
-    const cur = state[k];
-    state[k] = (v && typeof v === "object" && !Array.isArray(v)
-              && cur && typeof cur === "object" && !Array.isArray(cur))
-      ? { ...cur, ...v } : v;
-  }
+  const ov = catalog.modelDefaults[name];
+  if (ov) overlayDefaults(state, ov);
 }
 
-const GET_MODELS_LINKS = {
-  maquette: { label: "More models on Sketchfab →",       url: "https://sketchfab.com/3d-models?features=downloadable" },
-  scad:     { label: "More SCAD on Thingiverse →",       url: "https://www.thingiverse.com/tag:openscad" },
-  gltf:     { label: "More glTF on Sketchfab →",         url: "https://sketchfab.com/3d-models?features=downloadable" },
-  molfig:   { label: "More structures on RCSB PDB →",    url: "https://www.rcsb.org/search/advanced" },
-};
 function refreshGetModelsLink() {
   const el = $("get-models"); if (!el) return;
   const spec = GET_MODELS_LINKS[kindOf($("preset").value)];
@@ -139,30 +127,38 @@ function refreshGetModelsLink() {
 }
 
 function loadedModel(label) {
-  elOutc.setAttribute("aria-label", "3D render of " + label);
+  $("outc").setAttribute("aria-label", "3D render of " + label);
   elOut.alt = "3D render of " + label;
   announce("Loaded " + label);
 }
-function ingest(name, bytes) {
-  const kindChanged = kindDiffers(model && model.name, name);
+
+function bindModel(name, bytes) {
+  (isGltf(name) ? plugins.gltf : plugins.maquette).bind(bytes, name).catch((e) => console.error("bind failed:", e));
+}
+
+function showModel(name, bytes) {
   setModel(makeModel(name, bytes));
   syncPreset(name);
-  setRenderOverride(null);
-  bindModel(isGltf(name) ? gltfPlugin : maquettePlugin, name, bytes);
-  if (kindChanged) { resetState(); buildForm(); }
+  bindModel(name, bytes);
   syncFmtToggleForKind(name);
-  refreshGetModelsLink();
-  loadedModel(name);
   if (isGltf(name)) syncGltfInfo();
-  if (location.search || location.hash) history.replaceState(null, "", location.pathname);
-  refreshVisibility(); measure(); onChange();
+  refreshGetModelsLink();
+}
+
+function ingest(name, bytes) {
+  const kindChanged = kindDiffers(model && model.name, name);
+  setRenderOverride(null);
+  showModel(name, bytes);
+  if (kindChanged) { resetState(); buildForm(); }
+  loadedModel(name);
+  clearUrlState();
+  refreshVisibility(); measure(); changed();
 }
 
 async function syncGltfInfo() {
   try {
-    await gltfPlugin.ensure();
-    const raw = await gltfPlugin.callWithModel("get_gltf_info", ENC.encode("{}"));
-    const info = JSON.parse(DEC.decode(raw));
+    await plugins.gltf.ensure();
+    const info = JSON.parse(DEC.decode(await plugins.gltf.callWithModel("get_gltf_info", ENC.encode("{}"))));
     const maxT = +info.max_animation_time || 0;
     const f = GLTF_TIME_FIELD;
     if (maxT > 0) {
@@ -172,31 +168,29 @@ async function syncGltfInfo() {
     }
     if (typeof state.time === "number" && state.time > maxT) state.time = 0;
 
-    if (!MODEL_DEFAULTS[model.name] && Array.isArray(info.center) && info.radius > 0) {
+    if (!catalog.modelDefaults[model.name] && Array.isArray(info.center) && info.radius > 0) {
       const [cx, cy, cz] = info.center;
       const d = info.radius * 3;
       state.center = [cx, cy, cz];
       state.camera = [cx + d, cy + d * 0.75, cz + d];
-      state.up     = [0, 1, 0];
-      state.fov    = 40;
+      state.up = [0, 1, 0];
+      state.fov = 40;
     }
     const camNames = gltfCameraNames(model.bytes);
     if (GLTF_CAMERA_FIELD) {
       if (camNames.length) {
         GLTF_CAMERA_FIELD.t = "sel";
-        GLTF_CAMERA_FIELD.opts = [["", "(auto)"], ...camNames.map(n => [n, n])];
+        GLTF_CAMERA_FIELD.opts = [["", "(auto)"], ...camNames.map((n) => [n, n])];
         if (state.camera_name && !camNames.includes(state.camera_name)) state.camera_name = "";
       } else {
         GLTF_CAMERA_FIELD.t = "txt"; delete GLTF_CAMERA_FIELD.opts;
       }
     }
-    buildForm(); refreshVisibility();
-    onChange();
-  } catch {  }
+    rebuild();
+    changed();
+  } catch { }
 }
-const KNOWN_EXTS = new Set([
-  "obj","stl","ply", "scad", "glb","gltf","blg", "pdb","cif","mmcif","bcif","xyz",
-]);
+
 async function loadFile(file) {
   const e = ext(file.name);
   if (e === "scad") return enterScadMode(await file.text());
@@ -207,36 +201,35 @@ async function loadFile(file) {
   $("tab-scad").hidden = true; setTab("typst");
   ingest(file.name, new Uint8Array(await file.arrayBuffer()));
 }
+
 async function loadPreset(name) {
   try {
     const bytes = new Uint8Array(await (await fetch(name)).arrayBuffer());
     ingest(name, bytes);
     applyModelDefaults(name);
-    buildForm(); refreshVisibility();
-    onChange();
+    rebuild();
+    changed();
   } catch (e) { showErr("failed to load " + name + ": " + e.message); }
 }
+
 function syncPreset(name) {
-  const pluginId = PLUGIN_OF_MODEL[name] || kindOf(name);
+  const pluginId = catalog.pluginOfModel[name] || kindOf(name);
   if (pluginId !== currentPluginId) setPlugin(pluginId, { autoLoad: false });
   const sel = $("preset");
-  if (MODELS_BY_PLUGIN[pluginId] && MODELS_BY_PLUGIN[pluginId].some(([v]) => v === name)) {
-    sel.value = name; return;
-  }
+  if ((catalog.modelsByPlugin[pluginId] || []).some(([v]) => v === name)) { sel.value = name; return; }
   let custom = sel.querySelector("option[data-custom]");
   if (!custom) { custom = document.createElement("option"); custom.dataset.custom = "1"; sel.append(custom); }
   custom.value = name; custom.textContent = name + " (loaded)"; sel.value = name;
 }
+
 function fillPresetDropdown(pluginId) {
-  const sel = $("preset");
-  sel.innerHTML = "";
-  const models = MODELS_BY_PLUGIN[pluginId] || [];
-  for (const [v, t] of models) {
+  $("preset").replaceChildren(...(catalog.modelsByPlugin[pluginId] || []).map(([v, t]) => {
     const o = document.createElement("option");
     o.value = v; o.textContent = t;
-    sel.append(o);
-  }
+    return o;
+  }));
 }
+
 async function loadScadPreset(name) {
   try {
     const src = await (await fetch(name)).text();
@@ -244,62 +237,44 @@ async function loadScadPreset(name) {
     await enterScadMode(src, name);
   } catch (e) { showErr("failed to load " + name + ": " + e.message); }
 }
+
 function loadPresetByName(name, opts = {}) {
   if (!name) return;
   if (name === "__scad__") return enterScadMode();
   if (ext(name) === "scad") return loadScadPreset(name);
-  if (MOLECULES[name]) return enterMolMode(name, opts);
+  if (catalog.molecules[name]) return enterMolMode(name, opts);
   $("tab-scad").hidden = true; setTab("typst");
-  loadPreset(name);
+  return loadPreset(name);
 }
+
 function setPlugin(pluginId, { autoLoad = true } = {}) {
   currentPluginId = pluginId;
-  document.querySelectorAll("#plugin button").forEach(b => {
+  document.querySelectorAll("#plugin button").forEach((b) => {
     const on = b.dataset.plugin === pluginId;
     b.classList.toggle("on", on);
     b.setAttribute("aria-pressed", on ? "true" : "false");
   });
   fillPresetDropdown(pluginId);
-  const pl = PLUGINS.find(p => p.id === pluginId);
+  const pl = catalog.plugins.find((p) => p.id === pluginId);
   if (pl) {
-    const set = (id, url, label) => {
-      const el = $(id); if (!el) return;
+    const link = (id, url, label) => {
+      const el = $(id); if (!el || !url) return;
       el.href = url; el.setAttribute("aria-label", `${pl.label} — ${label}`);
     };
-    if (pl.docs)   set("btn-docs",    pl.docs,   "documentation");
-    if (pl.typst)  set("link-typst",  pl.typst,  "on Typst Universe");
-    if (pl.github) set("link-github", pl.github, "on GitHub");
+    link("btn-docs", pl.docs, "documentation");
+    link("link-typst", pl.typst, "on Typst Universe");
+    link("link-github", pl.github, "on GitHub");
     const fmts = $("formats");
     if (fmts) fmts.textContent = pl.formats ? "Supports " + pl.formats.join(", ") : "";
   }
   if (autoLoad) {
-    const first = (MODELS_BY_PLUGIN[pluginId] || [])[0];
+    const first = (catalog.modelsByPlugin[pluginId] || [])[0];
     if (first) loadPresetByName(first[0]);
   }
 }
-(async function initPresets() {
-  await modelsReady;
-  const seg = $("plugin");
-  seg.innerHTML = "";
-  for (const pl of PLUGINS) {
-    const b = document.createElement("button");
-    b.type = "button"; b.dataset.plugin = pl.id;
-    b.textContent = pl.label;
-    b.setAttribute("aria-pressed", "false");
-    if (pl.hint) b.title = pl.hint;
-    b.onclick = () => setPlugin(pl.id);
-    seg.append(b);
-  }
-  if (PLUGINS.length) setPlugin(PLUGINS[0].id, { autoLoad: false });
-  $("preset").onchange = () => loadPresetByName($("preset").value);
-})();
-$("browse").onclick = () => $("file").click();
-$("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
 
-let scadTimer, snippetTab = "typst";
 function setTab(which) {
   if (which === "scad" && $("tab-scad").hidden) which = "typst";
-  snippetTab = which;
   $("tab-scad").classList.toggle("on", which === "scad");
   $("tab-typst").classList.toggle("on", which === "typst");
   $("scad-editor").hidden = which !== "scad";
@@ -308,40 +283,33 @@ function setTab(which) {
   elCode.style.display = which === "typst" ? "" : "none";
   const cs = $("code-status"); if (cs && which !== "typst") cs.hidden = true;
 }
-$("tab-scad").onclick = () => setTab("scad");
-$("tab-typst").onclick = () => setTab("typst");
-$("scad-src").addEventListener("scroll", () => {
-  const hl = $("scad-hl"), src = $("scad-src");
-  hl.scrollTop = src.scrollTop; hl.scrollLeft = src.scrollLeft;
-});
 
 async function renderScadResult(ply) {
   const kindChanged = kindDiffers(model && model.name, "model.ply");
   setModel(makeModel("model.ply", ply, { scad: true }));
-  try { await maquettePlugin.setModel(ply); }
-  catch (e) { console.error("setModel failed:", e); }
+  try { await plugins.maquette.bind(ply); }
+  catch (e) { console.error("bind failed:", e); }
   if (kindChanged) {
     resetState();
-    const sd = MODEL_DEFAULTS.__scad__ || {};
-    for (const k in sd) state[k] = structuredClone(sd[k]);
+    assignDefaults(catalog.modelDefaults.__scad__);
     buildForm();
     syncFmtToggleForKind("model.ply");
   }
   setRenderOverride(null);
-  refreshVisibility(); measure(); onChange();
+  refreshVisibility(); measure(); changed();
 }
+
 async function compileScad() {
   const src = $("scad-src").value;
   const status = $("scad-status");
   if (!src.trim()) { status.textContent = ""; return; }
   try {
     status.textContent = "compiling…";
-    await scadPlugin.ensure();
+    await plugins.scad.ensure();
     const t = performance.now();
     const opts = { fn: 32 };
     if (state.scad_smooth_normals) opts.smooth_normals = 30;
-    const ply = await scadPlugin.call("build_scad", ENC.encode(src), ENC.encode("{}"),
-      ENC.encode(JSON.stringify(opts)), new Uint8Array());
+    const ply = await plugins.scad.call("build_scad", ENC.encode(src), ENC.encode("{}"), ENC.encode(JSON.stringify(opts)), new Uint8Array());
     status.textContent = `compiled in ${Math.round(performance.now() - t)} ms`;
     showErr("");
     await renderScadResult(ply);
@@ -350,6 +318,7 @@ async function compileScad() {
     showErr("OpenSCAD: " + e.message);
   }
 }
+
 async function enterScadMode(initial, presetName = "__scad__") {
   setPlugin("scad", { autoLoad: false });
   $("preset").value = presetName;
@@ -360,66 +329,55 @@ async function enterScadMode(initial, presetName = "__scad__") {
   else if (!ta.value.trim()) ta.value = await loadScadDefault();
   updateScadHighlight();
   setTab("scad");
-  const sd = MODEL_DEFAULTS[presetName] || MODEL_DEFAULTS.__scad__ || {};
-  for (const k in sd) state[k] = structuredClone(sd[k]);
-  buildForm(); refreshVisibility();
+  assignDefaults(catalog.modelDefaults[presetName] || catalog.modelDefaults.__scad__);
+  rebuild();
   refreshGetModelsLink();
   loadedModel("OpenSCAD model");
   await compileScad();
 }
-$("scad-src").addEventListener("input", () => {
-  updateScadHighlight();
-  clearTimeout(scadTimer); scadTimer = setTimeout(compileScad, 350);
-});
-
 
 function unpackMolBundle(buf) {
   const dec = new TextDecoder();
   const materialsLen = +dec.decode(buf.slice(0, 8));
-  const infoLen      = +dec.decode(buf.slice(8, 16));
+  const infoLen = +dec.decode(buf.slice(8, 16));
   const materialsEnd = 16 + materialsLen;
-  const infoEnd      = materialsEnd + infoLen;
-  const materials    = JSON.parse(dec.decode(buf.slice(16, materialsEnd)));
-  const info         = JSON.parse(dec.decode(buf.slice(materialsEnd, infoEnd)));
-  const mesh         = buf.slice(infoEnd);
-  return { materials, info, mesh };
+  return {
+    materials: JSON.parse(dec.decode(buf.slice(16, materialsEnd))),
+    mesh: buf.slice(materialsEnd + infoLen),
+  };
 }
+
 async function compileMol() {
   if (!model._mol || !model._molSrc) return;
   try {
-    await molfigPlugin.ensure();
+    await plugins.molfig.ensure();
     const opts = buildMolOpts(state, model._molFmt);
-    const t = performance.now();
-    const bundle = await molfigPlugin.call("render_object_bundle",
-      model._molSrc, ENC.encode(JSON.stringify(opts)));
+    const bundle = await plugins.molfig.call("render_object_bundle", model._molSrc, ENC.encode(JSON.stringify(opts)));
     const { materials, mesh } = unpackMolBundle(bundle);
     model.bytes = mesh;
     model._molMaterials = materials || {};
     state.materials = Object.entries(model._molMaterials);
-    await maquettePlugin.setModel(mesh);
+    await plugins.maquette.bind(mesh);
     showErr("");
-    refreshVisibility(); measure(); onChange();
+    refreshVisibility(); measure(); changed();
   } catch (e) {
     showErr("molfig: " + e.message);
   }
 }
+
 async function enterMolModeFromFile(name, bytes) {
   try {
-    const fmt = MOL_FMTS[ext(name)] || "auto";
     setPlugin("molfig", { autoLoad: false });
     $("tab-scad").hidden = true; setTab("typst");
     const kindChanged = kindDiffers(model && model.name, name);
-    setModel({
-      name, bytes: null, _ext: "obj", _gltf: false, _mol: true,
-      _molSrc: bytes, _molSrcPath: name, _molFmt: fmt, _molMaterials: null,
-    });
+    setModel({ name, bytes: null, _ext: "obj", _gltf: false, _mol: true, _molSrc: bytes, _molSrcPath: name, _molFmt: MOL_FMTS[ext(name)] || "auto", _molMaterials: null });
     if (kindChanged) resetState();
-    buildForm(); refreshVisibility();
+    rebuild();
     syncPreset(name);
     syncFmtToggleForKind(name);
     refreshGetModelsLink();
     loadedModel(name);
-    if (location.search || location.hash) history.replaceState(null, "", location.pathname);
+    clearUrlState();
     await compileMol();
   } catch (e) { showErr("failed to load molecule " + name + ": " + e.message); }
 }
@@ -429,44 +387,77 @@ async function enterMolMode(name, { applyDefaults = true } = {}) {
     setPlugin("molfig", { autoLoad: false });
     $("preset").value = name;
     $("tab-scad").hidden = true; setTab("typst");
-    const mol = MOLECULES[name];
+    const mol = catalog.molecules[name];
     if (!mol) return showErr("unknown molecule: " + name);
     const kindChanged = kindDiffers(model && model.name, name);
     const srcBytes = new Uint8Array(await (await fetch(mol.src)).arrayBuffer());
     setModel(makeModel(name, null, { _molSrc: srcBytes }));
     if (kindChanged) resetState();
     if (applyDefaults) applyModelDefaults(name);
-    buildForm(); refreshVisibility();
+    rebuild();
     syncFmtToggleForKind(name);
     refreshGetModelsLink();
     loadedModel(name);
-    if (applyDefaults && (location.search || location.hash)) {
-      history.replaceState(null, "", location.pathname);
-    }
+    if (applyDefaults) clearUrlState();
     await compileMol();
   } catch (e) { showErr("failed to load molecule " + name + ": " + e.message); }
 }
 
-const INFO_FN = { obj: "get_obj_info", stl: "get_stl_info", ply: "get_ply_info" };
 async function measure() {
-  elMeasure.innerHTML = "";
-  if (!maquettePlugin.ready || !model.bytes) return;
+  elMeasure.replaceChildren();
   const fn = INFO_FN[model._ext];
-  if (!fn) return;
+  if (!model.bytes || !fn) return;
   try {
-    const info = JSON.parse(DEC.decode(await maquettePlugin.callWithModel(fn, ENC.encode("{}"))));
+    await plugins.maquette.ensure();
+    const info = JSON.parse(DEC.decode(await plugins.maquette.callWithModel(fn, ENC.encode("{}"))));
     if (Array.isArray(info.bbox_center)) setBboxCenter(info.bbox_center);
     const n = (x) => Number.isInteger(x) ? x.toLocaleString() : (+x).toPrecision(3);
-    const stats = [];
-    if (info.triangles != null) stats.push(["tris", n(info.triangles)]);
-    if (info.vertices != null) stats.push(["verts", n(info.vertices)]);
-    if (info.size) stats.push(["size", info.size.map(x => (+x).toPrecision(3)).join(" × ")]);
-    if (info.surface_area != null) stats.push(["area", (+info.surface_area).toPrecision(3)]);
-    if (info.volume != null) stats.push(["volume", (+info.volume).toPrecision(3)]);
-    if (info.bbox_radius != null) stats.push(["radius", (+info.bbox_radius).toPrecision(3)]);
+    const p3 = (x) => (+x).toPrecision(3);
+    const stats = [
+      ["tris", info.triangles != null && n(info.triangles)],
+      ["verts", info.vertices != null && n(info.vertices)],
+      ["size", info.size && info.size.map(p3).join(" × ")],
+      ["area", info.surface_area != null && p3(info.surface_area)],
+      ["volume", info.volume != null && p3(info.volume)],
+      ["radius", info.bbox_radius != null && p3(info.bbox_radius)],
+    ].filter(([, v]) => v);
     elMeasure.innerHTML = stats.map(([k, v]) => `<span class="stat">${k} <b>${v}</b></span>`).join("");
-  } catch {  }
+  } catch { }
 }
 
+function triggerRecompile(kind) {
+  if (kind === "scad" && currentPluginId === "scad") compileScad();
+  else if (kind === "mol" && model._mol) compileMol();
+}
 
-export { currentPluginId, _scadDefault, scadCanonicalSrc, triggerRecompile, isConstrainedDevice, preloadDemoModels, modelsReady, loadScadDefault, kindOf, kindDiffers, syncFmtToggleForKind, gltfCameraNames, applyModelDefaults, GET_MODELS_LINKS, refreshGetModelsLink, ingest, syncGltfInfo, loadFile, loadPreset, syncPreset, fillPresetDropdown, loadScadPreset, loadPresetByName, setPlugin, setTab, renderScadResult, compileScad, enterScadMode, unpackMolBundle, compileMol, enterMolModeFromFile, enterMolMode, measure, INFO_FN };
+async function initModelsUi() {
+  $("browse").onclick = () => $("file").click();
+  $("file").onchange = (e) => e.target.files[0] && loadFile(e.target.files[0]);
+  $("tab-scad").onclick = () => setTab("scad");
+  $("tab-typst").onclick = () => setTab("typst");
+  let scadTimer = null;
+  $("scad-src").addEventListener("input", () => {
+    updateScadHighlight();
+    clearTimeout(scadTimer); scadTimer = setTimeout(compileScad, 350);
+  });
+  $("scad-src").addEventListener("scroll", () => {
+    const hl = $("scad-hl"), src = $("scad-src");
+    hl.scrollTop = src.scrollTop; hl.scrollLeft = src.scrollLeft;
+  });
+  await modelsReady;
+  $("plugin").replaceChildren(...catalog.plugins.map((pl) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.plugin = pl.id; b.textContent = pl.label;
+    b.setAttribute("aria-pressed", "false");
+    if (pl.hint) b.title = pl.hint;
+    b.onclick = () => setPlugin(pl.id);
+    return b;
+  }));
+  if (catalog.plugins.length) setPlugin(catalog.plugins[0].id, { autoLoad: false });
+  $("preset").onchange = () => loadPresetByName($("preset").value);
+}
+
+export {
+  initModelsUi, modelsReady, preloadDemoModels, loadFile, loadPresetByName, showModel, applyModelDefaults, syncGltfInfo,
+  measure, triggerRecompile, enterScadMode, kindOf, kindDiffers, canonicalScad,
+};

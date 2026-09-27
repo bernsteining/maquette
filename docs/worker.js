@@ -1,155 +1,108 @@
-
-function makePlugin(url) {
-  let _argParts, _result, inst, mem, ensurePromise;
-  let activeModel = null;
-  const namedCache = new Map();
-  const imports = { typst_env: {
-    wasm_minimal_protocol_write_args_to_buffer: (ptr) => {
-      const dst = new Uint8Array(mem.buffer);
-      let o = ptr;
-      for (const a of _argParts) { dst.set(a, o); o += a.length; }
-    },
-    wasm_minimal_protocol_send_result_to_host: (ptr, len) =>
-      { _result = new Uint8Array(mem.buffer, ptr, len).slice(); },
-  }};
-  const p = {
-    ready: false,
-    async ensure() {
-      if (inst) return;
-      if (!ensurePromise) {
-        ensurePromise = (async () => {
-          const module = await loadModule(url);
-          const i = await WebAssembly.instantiate(module, imports);
-          inst = i; mem = i.exports.memory;
-        })();
-      }
-      await ensurePromise;
-    },
-    setModel(bytes, key) {
-      activeModel = bytes;
-      if (key) namedCache.set(key, bytes);
-    },
-    cache(key, bytes) { namedCache.set(key, bytes); },
-    useKey(key) {
-      const c = namedCache.get(key);
-      if (!c) throw new Error(`${url}: no cached model for key: ${key}`);
-      activeModel = c;
-    },
-    call(fn, args) {
-      _argParts = args;
-      _result = new Uint8Array();
-      const rc = inst.exports[fn](...args.map((a) => a.length));
-      if (rc !== 0) throw new Error(new TextDecoder().decode(_result) || `${url} call failed`);
-      return _result;
-    },
-    callWithModel(fn, extraArgs) {
-      if (!activeModel) throw new Error(`${url}: no model bound (call setModel/useKey first)`);
-      return p.call(fn, [activeModel, ...extraArgs]);
-    },
-  };
-  return p;
-}
-
-const plugins = {
-  maquette:        makePlugin("maquette.wasm"),
-  "maquette-scad": makePlugin("maquette-scad.wasm"),
-  "maquette-gltf": makePlugin("maquette-gltf.wasm"),
-  molfig:          makePlugin("molfig.wasm"),
-};
-
-const IDB_NAME = "maquette-cache", IDB_STORE = "modules";
-let _dbPromise = null;
-function idbOpen() {
-  return _dbPromise ??= new Promise((res, rej) => {
-    const r = indexedDB.open(IDB_NAME, 1);
-    r.onupgradeneeded = () => r.result.createObjectStore(IDB_STORE);
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => { _dbPromise = null; rej(r.error); };
-  });
-}
-async function idbGet(key) {
-  try {
-    const db = await idbOpen();
-    return await new Promise((res, rej) => {
-      const q = db.transaction(IDB_STORE, "readonly").objectStore(IDB_STORE).get(key);
-      q.onsuccess = () => res(q.result);
-      q.onerror = () => rej(q.error);
-    });
-  } catch { return undefined; }
-}
-async function idbPut(key, val) {
-  try {
-    const db = await idbOpen();
-    await new Promise((res, rej) => {
-      const q = db.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE).put(val, key);
-      q.onsuccess = () => res();
-      q.onerror = () => rej(q.error);
-    });
-  } catch {  }
-}
-
 async function compileModule(url) {
   try { return await WebAssembly.compileStreaming(fetch(url)); }
   catch { return await WebAssembly.compile(await (await fetch(url)).arrayBuffer()); }
 }
-async function loadModule(url) {
-  let tag = null;
-  try {
-    const h = await fetch(url, { method: "HEAD" });
-    tag = h.headers.get("etag") || h.headers.get("last-modified");
-  } catch {  }
 
-  if (tag) {
-    const hit = await idbGet(url);
-    if (hit && hit.tag === tag && hit.module instanceof WebAssembly.Module) return hit.module;
+const HANDLE_FNS = new Set(["render_obj", "render_obj_png", "render_stl", "render_stl_png", "get_obj_info", "get_stl_info"]);
+
+function makePlugin(url) {
+  let argParts = [], result = new Uint8Array(), inst = null, compiled = null, ensuring = null, active = null, handle = null;
+  const models = new Map();
+  const imports = { typst_env: {
+    wasm_minimal_protocol_write_args_to_buffer: (ptr) => {
+      const dst = new Uint8Array(inst.exports.memory.buffer);
+      let o = ptr;
+      for (const a of argParts) { dst.set(a, o); o += a.length; }
+    },
+    wasm_minimal_protocol_send_result_to_host: (ptr, len) => {
+      result = new Uint8Array(inst.exports.memory.buffer, ptr, len).slice();
+    },
+  }};
+  const plugin = {
+    async ensure() {
+      compiled ??= compileModule(url);
+      ensuring ??= compiled.then((m) => WebAssembly.instantiate(m, imports)).then((i) => { inst = i; });
+      try { await ensuring; } catch (e) { compiled = ensuring = null; throw e; }
+    },
+    bind(key, bytes, activate) {
+      if (bytes && key) models.set(key, bytes);
+      if (!activate) return;
+      active = bytes || models.get(key);
+      if (!active) throw new Error(`${url}: no cached model for key: ${key}`);
+      handle = null;
+    },
+    call(fn, args, withModel) {
+      if (!withModel) return invoke(fn, args);
+      if (!active) throw new Error(`${url}: no model bound`);
+      const canHandle = HANDLE_FNS.has(fn) && handle !== false && "model_key" in inst.exports;
+      if (canHandle && handle) {
+        try { return invoke(fn, [handle, ...args]); }
+        catch (e) { if (e instanceof WebAssembly.RuntimeError) throw e; handle = false; }
+      }
+      const out = invoke(fn, [active, ...args]);
+      if (canHandle && handle === null) handle = invoke("model_key", [active]);
+      return out;
+    },
+  };
+  function invoke(fn, args) {
+    argParts = args;
+    result = new Uint8Array();
+    try {
+      const rc = inst.exports[fn](...args.map((a) => a.length));
+      if (rc !== 0) throw new Error(new TextDecoder().decode(result) || `${url}: ${fn} failed`);
+      return result;
+    } catch (e) {
+      if (e instanceof WebAssembly.RuntimeError) { inst = null; ensuring = null; handle = null; }
+      throw e;
+    } finally { argParts = []; }
   }
-  const module = await compileModule(url);
-  if (tag) idbPut(url, { tag, module });
-  return module;
+  return plugin;
 }
 
-const ok  = (id, extra)   => self.postMessage({ id, ok: true, ...extra });
-const err = (id, error)   => self.postMessage({ id, ok: false, error });
+const PLUGIN_URLS = {
+  maquette: "maquette.wasm",
+  "maquette-scad": "maquette-scad.wasm",
+  "maquette-gltf": "maquette-gltf.wasm",
+  molfig: "molfig.wasm",
+};
+const plugins = {};
+const pluginFor = (id) => PLUGIN_URLS[id] ? (plugins[id] ??= makePlugin(PLUGIN_URLS[id])) : null;
 
-async function toBitmapMessage(id, result) {
-  if (!self.createImageBitmap || result.length < 9 || (result[0] !== 0x00 && result[0] !== 0x02)) return null;
-  const w = result[1] | result[2] << 8 | result[3] << 16 | result[4] << 24;
-  const h = result[5] | result[6] << 8 | result[7] << 16 | result[8] << 24;
-  const n = w * h * 4;
+let canvas = null, ctx = null;
+
+function paint(result) {
+  if (!ctx || result.length < 9 || (result[0] !== 0x00 && result[0] !== 0x02)) return null;
+  const dv = new DataView(result.buffer, result.byteOffset);
+  const w = dv.getUint32(1, true), h = dv.getUint32(5, true), n = w * h * 4;
   if (!w || !h || result.length < 9 + n) return null;
-  const px = new Uint8ClampedArray(result.buffer, result.byteOffset + 9, n);
-  const bitmap = await createImageBitmap(new ImageData(px, w, h));
-  const transfer = [bitmap];
-  let svg = null;
-  if (result[0] === 0x02) { svg = result.slice(9 + n); transfer.push(svg.buffer); }
-  return { msg: { id, ok: true, bitmap, w, h, svg }, transfer };
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(result.buffer, result.byteOffset + 9, n), w, h), 0, 0);
+  return { w, h, svg: result[0] === 0x02 ? result.slice(9 + n) : null };
+}
+
+async function handle(msg) {
+  const { kind, plugin: id, fn, args = [], key, bytes, activate, withModel, raster } = msg;
+  if (kind === "canvas") { canvas = msg.canvas; ctx = canvas.getContext("2d"); return {}; }
+  if (kind === "snapshot") return { blob: canvas ? await canvas.convertToBlob({ type: "image/png" }) : null };
+  const p = pluginFor(id);
+  if (!p) throw new Error(`unknown plugin: ${id}`);
+  if (kind === "ensure") { await p.ensure(); return {}; }
+  if (kind === "model") { p.bind(key, bytes, activate); return {}; }
+  if (kind !== "call") throw new Error(`unknown kind: ${kind}`);
+  await p.ensure();
+  const result = p.call(fn, args, withModel);
+  const painted = raster ? paint(result) : null;
+  if (painted) return { painted: true, ...painted, transfer: painted.svg ? [painted.svg.buffer] : [] };
+  return { result, transfer: [result.buffer] };
 }
 
 self.onmessage = async (e) => {
-  const { id, kind, plugin, fn, args, key, raster } = e.data;
-  const p = plugins[plugin];
-  if (!p) return err(id, `unknown plugin: ${plugin}`);
+  const { id } = e.data;
   try {
-    switch (kind) {
-      case "ensure":   await p.ensure(); return ok(id);
-      case "setModel": p.setModel(args[0], key); return ok(id);
-      case "cache":    p.cache(key, args[0]);    return ok(id);
-      case "useKey":   p.useKey(key);            return ok(id);
-      case "call":
-      case "callWithModel": {
-        await p.ensure();
-        const result = kind === "callWithModel" ? p.callWithModel(fn, args) : p.call(fn, args);
-        if (raster) {
-          try {
-            const b = await toBitmapMessage(id, result);
-            if (b) return self.postMessage(b.msg, b.transfer);
-          } catch {  }
-        }
-        return self.postMessage({ id, ok: true, result }, [result.buffer]);
-      }
-      default: return err(id, `unknown kind: ${kind}`);
-    }
-  } catch (e2) {
-    err(id, (e2 && e2.message) || String(e2));
+    const { transfer = [], ...reply } = await handle(e.data);
+    self.postMessage({ id, ok: true, ...reply }, transfer);
+  } catch (err) {
+    self.postMessage({ id, ok: false, error: (err && err.message) || String(err) });
   }
 };
