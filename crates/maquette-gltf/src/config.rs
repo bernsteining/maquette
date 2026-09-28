@@ -10,14 +10,20 @@ use serde_json::Value;
 #[derive(Clone, Copy)]
 pub struct SsaoCfg {
     pub samples: usize,
-    pub radius: f64,
+    /// `None`: 10% of the scene's bounding radius in scene space, half the
+    /// image's shorter side in screen space.
+    pub radius: Option<f64>,
     pub bias: f64,
     pub strength: f64,
+    /// Scene space (default): `radius` in scene units and `bias` a fraction
+    /// of it, sampled around reconstructed positions. Screen space (legacy):
+    /// fractions of the image size and depth range.
+    pub scene_space: bool,
 }
 
 impl Default for SsaoCfg {
     fn default() -> Self {
-        Self { samples: 16, radius: 0.5, bias: 0.025, strength: 1.0 }
+        Self { samples: 16, radius: None, bias: 0.025, strength: 1.0, scene_space: true }
     }
 }
 
@@ -220,8 +226,9 @@ pub struct RenderConfig {
     /// surface identically at any animation time.
     pub shading_key: u64,
     /// Render only output rows `y0..y1` of the full image (pixel-identical to
-    /// those rows of a full render, except with SSAO), for splitting a frame
-    /// across workers.
+    /// those rows of a full render), for splitting a frame across workers.
+    /// With SSAO the render returns the band's depth rows instead and must be
+    /// completed by `finish_gltf_band`.
     pub band: Option<(usize, usize)>,
 }
 
@@ -450,8 +457,9 @@ fn parse_ssao(v: &Value) -> Option<SsaoCfg> {
         Value::Bool(true) => Some(SsaoCfg::default()),
         Value::Object(o) => {
             let mut c = SsaoCfg::default();
+            c.scene_space = o.get("space").and_then(|x| x.as_str()) != Some("screen");
             if let Some(n) = o.get("samples").and_then(|x| x.as_u64()) { c.samples = (n as usize).clamp(4, 64); }
-            if let Some(f) = o.get("radius").and_then(|x| x.as_f64())  { c.radius = f.clamp(0.01, 2.0); }
+            if let Some(f) = o.get("radius").and_then(|x| x.as_f64())  { c.radius = Some(if c.scene_space { f.fmax(1e-9) } else { f.clamp(0.01, 2.0) }); }
             if let Some(f) = o.get("bias").and_then(|x| x.as_f64())    { c.bias = f.fmax(0.0); }
             if let Some(f) = o.get("strength").and_then(|x| x.as_f64()) { c.strength = f.clamp(0.0, 2.0); }
             Some(c)

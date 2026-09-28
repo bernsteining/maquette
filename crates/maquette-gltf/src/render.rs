@@ -22,7 +22,7 @@ use maquette_core::math::{Mat4, Vec3};
 use crate::pbr::{IblContext, MaterialShader, PbrContext, SplattedLight, ToneMap};
 use maquette_core::rasterizer::{BlendMode, PixelBuffer};
 use crate::scene::{AlphaMode, Material, Scene, Triangle, Vertex};
-use maquette_core::ssao::{Hashed256, SSAOParams};
+use maquette_core::ssao::{DepthCamera, Hashed256, SSAOParams};
 
 pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     let width = config.width.max(1);
@@ -39,49 +39,125 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     let mut buffer = PixelBuffer::new(width * factor, (bottom - top).max(1) * factor, bg);
     crate::prof::mark(10);
 
-    if !scene.triangles.is_empty() || !scene.lines.is_empty() || !scene.points.is_empty() {
+    let camera = if !scene.triangles.is_empty() || !scene.lines.is_empty() || !scene.points.is_empty() {
         let frame = Frame { width: (width * factor) as f64, height: (height * factor) as f64, y_off: (top * factor) as f64 };
-        rasterize_scene(&mut buffer, scene, scene_key, config, frame);
-    }
+        Some(rasterize_scene(&mut buffer, scene, scene_key, config, frame).downscaled(factor))
+    } else {
+        None
+    };
 
     crate::prof::mark(14);
     buffer.composite_oit();
     crate::prof::mark(15);
 
-    if let Some(ssao) = &config.ssao {
-        buffer.apply_ssao::<Hashed256>(&SSAOParams {
-            samples: ssao.samples,
-            radius: ssao.radius,
-            bias: ssao.bias,
-            strength: ssao.strength,
-        });
-    }
-
+    let ssao = config.ssao.as_ref().map(|s| {
+        let scene_space = s.scene_space && camera.is_some();
+        let radius = match s.radius {
+            Some(r) => r,
+            None if scene_space => 0.1 * scene.bounds().1,
+            None => 0.5,
+        };
+        SSAOParams {
+            samples: s.samples, radius, strength: s.strength,
+            bias: if scene_space { s.bias * radius } else { s.bias },
+            camera: if scene_space { camera } else { None },
+        }
+    });
+    let mut buffer = if transparent || ssao.is_some() { buffer.downsample_with_depth(factor) } else { buffer.downsample(factor) };
     crate::prof::mark(16);
-    let mut buffer = if transparent { buffer.downsample_with_depth(factor) } else { buffer.downsample(factor) };
-    crate::prof::mark(17);
-
-    if config.fxaa {
-        maquette_core::fxaa::apply_fxaa(&mut buffer.pixels, buffer.width, buffer.height);
+    if let Some(cam) = ssao.as_ref().and_then(|p| p.camera) {
+        depth_to_view_z(&mut buffer.zbuf, &cam);
     }
-    crate::prof::mark(18);
+    let post = Post { width, height, y0, y1, top, band: config.band.is_some(), fxaa: config.fxaa, transparent };
+    match ssao {
+        Some(params) if post.band => {
+            let rows = &buffer.zbuf[(y0 - top) * width..(y1 - top) * width];
+            let mut depth = Vec::with_capacity(rows.len() * 4);
+            for d in rows { depth.extend_from_slice(&d.to_le_bytes()); }
+            PENDING_BANDS.with(|p| {
+                let mut p = p.borrow_mut();
+                p.retain(|b| b.post.y0 != y0);
+                if p.len() >= MAX_PENDING_BANDS { p.remove(0); }
+                p.push(PendingBand { buffer, params, post });
+            });
+            return depth;
+        }
+        Some(params) => buffer.apply_ssao::<Hashed256>(&params),
+        None => {}
+    }
+    crate::prof::mark(17);
+    post.finish(buffer)
+}
 
-    let (w, h, mut rgba) = if transparent {
-        buffer.to_rgba8_transparent_by_depth()
-    } else {
-        buffer.to_rgba8()
-    };
-    let (w, h) = if config.band.is_some() {
-        let row = w as usize * 4;
-        let keep = (y0 - top)..(y1 - top);
-        rgba = rgba[keep.start * row..keep.end * row].to_vec();
-        (w, (y1 - y0) as u32)
-    } else {
-        (w, h)
-    };
-    let out = encode_raw_rgba(w, h, rgba);
-    crate::prof::mark(19);
-    out
+/// Complete a banded render deferred by SSAO: `render` with both `band` and
+/// `ssao` returns the band's output-resolution depth rows (little-endian
+/// `f32`) and keeps its pixels; once the caller has gathered every band's rows
+/// into `full_depth` (the whole frame, top to bottom), this applies SSAO
+/// against it and returns the band's raw RGBA, identical to those rows of a
+/// whole-frame render.
+pub fn finish_band(y0: usize, full_depth: &[u8]) -> Result<Vec<u8>, String> {
+    let PendingBand { mut buffer, params, post } = PENDING_BANDS
+        .with(|p| {
+            let mut p = p.borrow_mut();
+            let i = p.iter().position(|b| b.post.y0 == y0)?;
+            Some(p.remove(i))
+        })
+        .ok_or_else(|| format!("no pending band at row {y0}"))?;
+    if full_depth.len() != post.width * post.height * 4 {
+        return Err(format!("full depth is {} bytes, expected {}", full_depth.len(), post.width * post.height * 4));
+    }
+    let depth: Vec<f32> = full_depth.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+    buffer.apply_ssao_band::<Hashed256>(&params, &depth, post.width, post.height, post.top);
+    Ok(post.finish(buffer))
+}
+
+const MAX_PENDING_BANDS: usize = 8;
+
+struct PendingBand {
+    buffer: PixelBuffer,
+    params: SSAOParams,
+    post: Post,
+}
+
+thread_local! {
+    static PENDING_BANDS: std::cell::RefCell<Vec<PendingBand>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[derive(Clone, Copy)]
+struct Post {
+    width: usize,
+    height: usize,
+    y0: usize,
+    y1: usize,
+    top: usize,
+    band: bool,
+    fxaa: bool,
+    transparent: bool,
+}
+
+impl Post {
+    fn finish(self, mut buffer: PixelBuffer) -> Vec<u8> {
+        if self.fxaa {
+            maquette_core::fxaa::apply_fxaa(&mut buffer.pixels, buffer.width, buffer.height);
+        }
+        crate::prof::mark(18);
+        let (w, h, mut rgba) = if self.transparent {
+            buffer.to_rgba8_transparent_by_depth()
+        } else {
+            buffer.to_rgba8()
+        };
+        let (w, h) = if self.band {
+            let row = w as usize * 4;
+            let keep = (self.y0 - self.top)..(self.y1 - self.top);
+            rgba = rgba[keep.start * row..keep.end * row].to_vec();
+            (w, (self.y1 - self.y0) as u32)
+        } else {
+            (w, h)
+        };
+        let out = encode_raw_rgba(w, h, rgba);
+        crate::prof::mark(19);
+        out
+    }
 }
 
 const BAND_PAD: usize = 24;
@@ -110,7 +186,7 @@ fn shadow_key(scene_key: u64, lights: &[crate::scene::PunctualLight], up: Vec3, 
     h.finish()
 }
 
-fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, config: &RenderConfig, frame: Frame) {
+fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, config: &RenderConfig, frame: Frame) -> DepthCamera {
     let (center, radius) = scene.bounds();
 
     let (camera_pos, view, projection, znear, zfar) = if let Some(sc) = pick_glb_camera(scene, config) {
@@ -498,6 +574,20 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
             Projection::Orthographic { .. } => (-va.z, -vb.z),
         };
         buffer.draw_line_depth((ax, ay), (bx, by), za as f32, zb as f32, rgba_a, rgba_b, y_off as usize);
+    }
+    let (cx, cy) = ((width_f * 0.5) as f32, (height_f * 0.5) as f32);
+    match projection {
+        Projection::Perspective { .. } => DepthCamera::Perspective { fx: focal as f32, fy: focal as f32, cx, cy },
+        Projection::Orthographic { half_w, half_h } => DepthCamera::Ortho { sx: cx / half_w as f32, sy: cy / half_h as f32, cx, cy },
+    }
+}
+
+fn depth_to_view_z(zbuf: &mut [f32], camera: &DepthCamera) {
+    for d in zbuf.iter_mut().filter(|d| **d != f32::NEG_INFINITY) {
+        *d = match camera {
+            DepthCamera::Perspective { .. } => -1.0 / *d,
+            DepthCamera::Ortho { .. } => -*d,
+        };
     }
 }
 

@@ -2207,17 +2207,20 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     if let Some(ref outline) = config.outline {
         if !is_wireframe {
             let (or, og, ob) = parse_hex_color(&outline.color);
-            buf.apply_outline((or, og, ob), outline.width * aa as f64);
+            let scene = outline.threshold.map(|t| (depth_camera(config, &view, vw, vh, br), t as f32));
+            buf.apply_outline((or, og, ob), outline.width * aa as f64, scene);
         }
     }
 
     if let Some(ref ssao) = config.ssao {
         if !is_wireframe {
+            let scene_ao = ssao.space != "screen";
             let ssao_params = maquette_core::ssao::SSAOParams {
                 samples: ssao.samples,
-                radius: ssao.radius,
-                bias: ssao.bias,
+                radius: if scene_ao { ssao.radius.unwrap_or(0.1 * br) } else { ssao.radius.unwrap_or(0.5) },
+                bias: if scene_ao { ssao.bias * ssao.radius.unwrap_or(0.1 * br) } else { ssao.bias },
                 strength: ssao.strength,
+                camera: scene_ao.then(|| depth_camera(config, &view, vw, vh, br)),
             };
             buf.apply_ssao::<maquette_core::ssao::Tiled16>(&ssao_params);
         }

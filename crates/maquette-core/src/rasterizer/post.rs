@@ -12,7 +12,14 @@ impl PixelBuffer {
     /// Apply screen-space outline detection on the depth buffer.
     /// Detects edges via depth discontinuities and normal-from-depth changes.
     /// Uses f32x4 SIMD for 4-neighbor depth checks (true 4-element parallelism).
-    pub fn apply_outline(&mut self, color: (u8, u8, u8), width: f64) {
+    ///
+    /// Without `scene`, a depth jump over 1.5% of the pixel's distance is an
+    /// edge. With `scene = (camera, threshold)`, the jump is measured in
+    /// scene-space pixel footprints instead (an edge when it exceeds
+    /// `threshold` pixels' worth), and creases are found from true
+    /// scene-space slopes, so outlines do not depend on distance, zoom or
+    /// scene scale.
+    pub fn apply_outline(&mut self, color: (u8, u8, u8), width: f64, scene: Option<(crate::ssao::DepthCamera, f32)>) {
         let w = self.width as i32;
         let h = self.height as i32;
         let step = (width * 0.5).fmax(1.0) as i32;
@@ -57,7 +64,13 @@ impl PixelBuffer {
                     continue;
                 }
 
-                let threshold = 0.015 * center.abs().fmax(0.001);
+                let (threshold, slope) = match scene {
+                    Some((cam, t)) => {
+                        let span = cam.pixel_size(center) * step as f32;
+                        (t * span, 0.5 / span)
+                    }
+                    None => (0.015 * center.abs().fmax(0.001), 1.0),
+                };
                 let center_v = f32x4_splat(center);
                 let abs_diff = f32x4_abs(f32x4_sub(depths, center_v));
                 let within = f32x4_le(abs_diff, f32x4_splat(threshold));
@@ -81,7 +94,7 @@ impl PixelBuffer {
                     let ndd = if ndd == f32::NEG_INFINITY { nd } else { ndd };
                     let nu = if nu == f32::NEG_INFINITY { nd } else { nu };
 
-                    if is_normal_edge(dr, dl, dd, du, nr, nl, ndd, nu) {
+                    if is_normal_edge(dr * slope, dl * slope, dd * slope, du * slope, nr * slope, nl * slope, ndd * slope, nu * slope) {
                         edge_mask[idx] = true;
                         break;
                     }
@@ -262,146 +275,33 @@ impl PixelBuffer {
     /// `K` picks the per-pixel rotation of the sample kernel.
     #[inline(never)]
     pub fn apply_ssao<K: NoiseKernel>(&mut self, params: &crate::ssao::SSAOParams) {
-        let w = self.width;
-        let h = self.height;
-        let w_i32 = w as i32;
-        let h_i32 = h as i32;
-
-        let mut zmin = f32::MAX;
-        let mut zmax = f32::MIN;
-        for &d in &self.zbuf {
-            if d != f32::NEG_INFINITY {
-                if d < zmin { zmin = d; }
-                if d > zmax { zmax = d; }
-            }
-        }
-        let depth_range = (zmax - zmin).fmax(0.001);
-
-        let radius_px = (params.radius * w.min(h) as f64) as f32;
-        let bias_scaled = params.bias as f32 * depth_range;
-        let strength = params.strength as f32;
-        let offsets = K::offsets(params.samples, radius_px, bias_scaled);
-
-        let num_samples = offsets[0].len();
-        let batches = num_samples / 4;
-        let n_rot = K::ROTATIONS;
-        let mut flat_offsets = FLAT_OFFSETS.with(|c| std::mem::take(&mut *c.borrow_mut()));
-        let mut z_biases     = Z_BIASES    .with(|c| std::mem::take(&mut *c.borrow_mut()));
-        flat_offsets.clear(); flat_offsets.resize(n_rot * num_samples, 0);
-        z_biases.clear();     z_biases.resize(n_rot * num_samples, 0.0);
-        let mut max_dx = 0i32;
-        let mut max_dy = 0i32;
-        for (p, pattern) in offsets.iter().enumerate() {
-            for (s, sample) in pattern.iter().enumerate() {
-                flat_offsets[p * num_samples + s] = sample.dy * w_i32 + sample.dx;
-                z_biases[p * num_samples + s] = sample.z_bias;
-                max_dx = max_dx.max(sample.dx.abs());
-                max_dy = max_dy.max(sample.dy.abs());
-            }
-        }
-
-        let margin_x = max_dx;
-        let margin_y = max_dy;
-        let interior_x_end = (w_i32 - margin_x).max(margin_x);
-        let interior_y_end = (h_i32 - margin_y).max(margin_y);
-        let neg_inf_v = f32x4_splat(f32::NEG_INFINITY);
-        let zbuf_ptr = self.zbuf.as_ptr();
-
+        let (w, h) = (self.width, self.height);
         let mut ao_buffer = AO_BUFFER.with(|c| std::mem::take(&mut *c.borrow_mut()));
-        ao_buffer.clear();
-        ao_buffer.resize(w * h, 1.0);
-
-        macro_rules! ssao_scalar_pixel {
-            ($x:expr, $y:expr, $idx:expr) => {
-                let depth = unsafe { *self.zbuf.get_unchecked($idx) };
-                if depth != f32::NEG_INFINITY {
-                    let pattern = &offsets[K::index($x, $y)];
-                    let mut occlusion = 0u32;
-                    let mut valid = 0u32;
-                    for s in pattern {
-                        let sx = $x + s.dx;
-                        let sy = $y + s.dy;
-                        if sx < 0 || sx >= w_i32 || sy < 0 || sy >= h_i32 { continue; }
-                        let sd = unsafe { *self.zbuf.get_unchecked(sy as usize * w + sx as usize) };
-                        if sd == f32::NEG_INFINITY { continue; }
-                        valid += 1;
-                        if sd > depth + s.z_bias { occlusion += 1; }
-                    }
-                    if valid > 0 {
-                        unsafe { *ao_buffer.get_unchecked_mut($idx) =
-                            (1.0 - (occlusion as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
-                    }
-                }
-            };
-        }
-
-        for y in 0..h_i32 {
-            let row = y as usize * w;
-            let is_interior_y = y >= margin_y && y < interior_y_end;
-
-            if !is_interior_y {
-                for x in 0..w_i32 {
-                    let idx = row + x as usize;
-                    ssao_scalar_pixel!(x, y, idx);
-                }
-            } else {
-                for x in 0..margin_x.min(w_i32) {
-                    let idx = row + x as usize;
-                    ssao_scalar_pixel!(x, y, idx);
-                }
-                for x in margin_x..interior_x_end {
-                    let idx = row + x as usize;
-                    let depth = unsafe { *self.zbuf.get_unchecked(idx) };
-                    if depth == f32::NEG_INFINITY { continue; }
-                    let pi = K::index(x, y);
-                    let offs = unsafe { flat_offsets.as_ptr().add(pi * num_samples) };
-                    let zbs = unsafe { z_biases.as_ptr().add(pi * num_samples) };
-                    let idx_i32 = idx as i32;
-                    let depth_v = f32x4_splat(depth);
-                    let mut valid = 0u32;
-                    let mut occluded = 0u32;
-                    for b in 0..batches {
-                        let base = b * 4;
-                        let o0 = unsafe { *offs.add(base) };
-                        let o1 = unsafe { *offs.add(base + 1) };
-                        let o2 = unsafe { *offs.add(base + 2) };
-                        let o3 = unsafe { *offs.add(base + 3) };
-                        let sd4 = f32x4(
-                            unsafe { *zbuf_ptr.add((idx_i32 + o0) as usize) },
-                            unsafe { *zbuf_ptr.add((idx_i32 + o1) as usize) },
-                            unsafe { *zbuf_ptr.add((idx_i32 + o2) as usize) },
-                            unsafe { *zbuf_ptr.add((idx_i32 + o3) as usize) },
-                        );
-                        let valid_mask = f32x4_ne(sd4, neg_inf_v);
-                        let zb4 = unsafe { v128_load(zbs.add(base) as *const v128) };
-                        let threshold = f32x4_add(depth_v, zb4);
-                        let occ_mask = v128_and(f32x4_gt(sd4, threshold), valid_mask);
-                        valid += i32x4_bitmask(valid_mask).count_ones();
-                        occluded += i32x4_bitmask(occ_mask).count_ones();
-                    }
-                    for s in batches * 4..num_samples {
-                        let sd = unsafe { *zbuf_ptr.add((idx_i32 + *offs.add(s)) as usize) };
-                        if sd == f32::NEG_INFINITY { continue; }
-                        valid += 1;
-                        if sd > depth + unsafe { *zbs.add(s) } { occluded += 1; }
-                    }
-                    if valid > 0 {
-                        unsafe { *ao_buffer.get_unchecked_mut(idx) =
-                            (1.0 - (occluded as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
-                    }
-                }
-                for x in interior_x_end..w_i32 {
-                    let idx = row + x as usize;
-                    ssao_scalar_pixel!(x, y, idx);
-                }
-            }
-        }
-
+        ssao_occlusion::<K>(&self.zbuf, w, h, params, 0, h, &mut ao_buffer);
         let blurred = crate::ssao::bilateral_blur_separable(&ao_buffer, &self.zbuf, w, h, 4);
+        self.modulate_rows(&blurred, 0);
+        AO_BUFFER.with(|c| *c.borrow_mut() = ao_buffer);
+    }
 
+    /// [`apply_ssao`](Self::apply_ssao) for a buffer holding rows
+    /// `y_off..y_off + height` of a `full_w × full_h` frame whose depth is
+    /// `full_zbuf`: the result equals those rows of a whole-frame pass.
+    #[inline(never)]
+    pub fn apply_ssao_band<K: NoiseKernel>(&mut self, params: &crate::ssao::SSAOParams, full_zbuf: &[f32], full_w: usize, full_h: usize, y_off: usize) {
+        const BLUR: usize = 4;
+        let (y0, y1) = (y_off.saturating_sub(BLUR), (y_off + self.height + BLUR).min(full_h));
+        let mut ao_buffer = AO_BUFFER.with(|c| std::mem::take(&mut *c.borrow_mut()));
+        ssao_occlusion::<K>(full_zbuf, full_w, full_h, params, y0, y1, &mut ao_buffer);
+        let (zmin, zmax) = crate::ssao::depth_bounds(full_zbuf);
+        let blurred = crate::ssao::bilateral_blur_in_range(&ao_buffer, &full_zbuf[y0 * full_w..y1 * full_w], full_w, y1 - y0, BLUR as i32, zmin, zmax);
+        self.modulate_rows(&blurred, (y_off - y0) * full_w);
+        AO_BUFFER.with(|c| *c.borrow_mut() = ao_buffer);
+    }
+
+    fn modulate_rows(&mut self, ao: &[f32], ao_start: usize) {
         unsafe {
-            for i in 0..w * h {
-                let ao = *blurred.get_unchecked(i);
+            for i in 0..self.width * self.height {
+                let ao = *ao.get_unchecked(ao_start + i);
                 if ao == 1.0 { continue; }
                 let p = self.pixels.as_mut_ptr().add(i * 3);
                 *p        = (*p        as f32 * ao + 0.5) as u8;
@@ -409,10 +309,6 @@ impl PixelBuffer {
                 *p.add(2) = (*p.add(2) as f32 * ao + 0.5) as u8;
             }
         }
-
-        AO_BUFFER   .with(|c| *c.borrow_mut() = ao_buffer);
-        FLAT_OFFSETS.with(|c| *c.borrow_mut() = flat_offsets);
-        Z_BIASES    .with(|c| *c.borrow_mut() = z_biases);
     }
 
     /// Dual Kawase downsample: 5-tap filter into pre-allocated dst slice.
@@ -809,5 +705,262 @@ impl PixelBuffer {
             }
         }
         (self.width as u32, self.height as u32, rgba)
+    }
+}
+
+fn ssao_occlusion<K: NoiseKernel>(zbuf: &[f32], w: usize, h: usize, params: &crate::ssao::SSAOParams, y0: usize, y1: usize, ao_buffer: &mut Vec<f32>) {
+    if let Some(cam) = params.camera {
+        ssao_occlusion_scene(zbuf, w, h, params, &cam, y0, y1, ao_buffer);
+        return;
+    }
+    let w_i32 = w as i32;
+    let h_i32 = h as i32;
+
+    let (zmin, zmax) = crate::ssao::depth_bounds(zbuf);
+    let depth_range = (zmax - zmin).fmax(0.001);
+
+    let radius_px = (params.radius * w.min(h) as f64) as f32;
+    let bias_scaled = params.bias as f32 * depth_range;
+    let strength = params.strength as f32;
+    let offsets = K::offsets(params.samples, radius_px, bias_scaled);
+
+    let num_samples = offsets[0].len();
+    let batches = num_samples / 4;
+    let n_rot = K::ROTATIONS;
+    let mut flat_offsets = FLAT_OFFSETS.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    let mut z_biases     = Z_BIASES    .with(|c| std::mem::take(&mut *c.borrow_mut()));
+    flat_offsets.clear(); flat_offsets.resize(n_rot * num_samples, 0);
+    z_biases.clear();     z_biases.resize(n_rot * num_samples, 0.0);
+    let mut max_dx = 0i32;
+    let mut max_dy = 0i32;
+    for (p, pattern) in offsets.iter().enumerate() {
+        for (s, sample) in pattern.iter().enumerate() {
+            flat_offsets[p * num_samples + s] = sample.dy * w_i32 + sample.dx;
+            z_biases[p * num_samples + s] = sample.z_bias;
+            max_dx = max_dx.max(sample.dx.abs());
+            max_dy = max_dy.max(sample.dy.abs());
+        }
+    }
+
+    let margin_x = max_dx;
+    let margin_y = max_dy;
+    let interior_x_end = (w_i32 - margin_x).max(margin_x);
+    let interior_y_end = (h_i32 - margin_y).max(margin_y);
+    let neg_inf_v = f32x4_splat(f32::NEG_INFINITY);
+    let zbuf_ptr = zbuf.as_ptr();
+
+    ao_buffer.clear();
+    ao_buffer.resize(w * (y1 - y0), 1.0);
+    let base = y0 * w;
+
+    macro_rules! ssao_scalar_pixel {
+        ($x:expr, $y:expr, $idx:expr) => {
+            let depth = unsafe { *zbuf.get_unchecked($idx) };
+            if depth != f32::NEG_INFINITY {
+                let pattern = &offsets[K::index($x, $y)];
+                let mut occlusion = 0u32;
+                let mut valid = 0u32;
+                for s in pattern {
+                    let sx = $x + s.dx;
+                    let sy = $y + s.dy;
+                    if sx < 0 || sx >= w_i32 || sy < 0 || sy >= h_i32 { continue; }
+                    let sd = unsafe { *zbuf.get_unchecked(sy as usize * w + sx as usize) };
+                    if sd == f32::NEG_INFINITY { continue; }
+                    valid += 1;
+                    if sd > depth + s.z_bias { occlusion += 1; }
+                }
+                if valid > 0 {
+                    unsafe { *ao_buffer.get_unchecked_mut($idx - base) =
+                        (1.0 - (occlusion as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
+                }
+            }
+        };
+    }
+
+    for y in y0 as i32..y1 as i32 {
+        let row = y as usize * w;
+        let is_interior_y = y >= margin_y && y < interior_y_end;
+
+        if !is_interior_y {
+            for x in 0..w_i32 {
+                let idx = row + x as usize;
+                ssao_scalar_pixel!(x, y, idx);
+            }
+        } else {
+            for x in 0..margin_x.min(w_i32) {
+                let idx = row + x as usize;
+                ssao_scalar_pixel!(x, y, idx);
+            }
+            for x in margin_x..interior_x_end {
+                let idx = row + x as usize;
+                let depth = unsafe { *zbuf.get_unchecked(idx) };
+                if depth == f32::NEG_INFINITY { continue; }
+                let pi = K::index(x, y);
+                let offs = unsafe { flat_offsets.as_ptr().add(pi * num_samples) };
+                let zbs = unsafe { z_biases.as_ptr().add(pi * num_samples) };
+                let idx_i32 = idx as i32;
+                let depth_v = f32x4_splat(depth);
+                let mut valid = 0u32;
+                let mut occluded = 0u32;
+                for b in 0..batches {
+                    let base = b * 4;
+                    let o0 = unsafe { *offs.add(base) };
+                    let o1 = unsafe { *offs.add(base + 1) };
+                    let o2 = unsafe { *offs.add(base + 2) };
+                    let o3 = unsafe { *offs.add(base + 3) };
+                    let sd4 = f32x4(
+                        unsafe { *zbuf_ptr.add((idx_i32 + o0) as usize) },
+                        unsafe { *zbuf_ptr.add((idx_i32 + o1) as usize) },
+                        unsafe { *zbuf_ptr.add((idx_i32 + o2) as usize) },
+                        unsafe { *zbuf_ptr.add((idx_i32 + o3) as usize) },
+                    );
+                    let valid_mask = f32x4_ne(sd4, neg_inf_v);
+                    let zb4 = unsafe { v128_load(zbs.add(base) as *const v128) };
+                    let threshold = f32x4_add(depth_v, zb4);
+                    let occ_mask = v128_and(f32x4_gt(sd4, threshold), valid_mask);
+                    valid += i32x4_bitmask(valid_mask).count_ones();
+                    occluded += i32x4_bitmask(occ_mask).count_ones();
+                }
+                for s in batches * 4..num_samples {
+                    let sd = unsafe { *zbuf_ptr.add((idx_i32 + *offs.add(s)) as usize) };
+                    if sd == f32::NEG_INFINITY { continue; }
+                    valid += 1;
+                    if sd > depth + unsafe { *zbs.add(s) } { occluded += 1; }
+                }
+                if valid > 0 {
+                    unsafe { *ao_buffer.get_unchecked_mut(idx - base) =
+                        (1.0 - (occluded as f32 / valid as f32 * strength).fmin(1.0)).fmax(0.0) };
+                }
+            }
+            for x in interior_x_end..w_i32 {
+                let idx = row + x as usize;
+                ssao_scalar_pixel!(x, y, idx);
+            }
+        }
+    }
+
+    FLAT_OFFSETS.with(|c| *c.borrow_mut() = flat_offsets);
+    Z_BIASES    .with(|c| *c.borrow_mut() = z_biases);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ssao_occlusion_scene(zbuf: &[f32], w: usize, h: usize, params: &crate::ssao::SSAOParams, cam: &crate::ssao::DepthCamera, y0: usize, y1: usize, ao_buffer: &mut Vec<f32>) {
+    const NOISE: [f32; 16] = [0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0];
+    let kernel = crate::ssao::hemisphere_kernel(params.samples);
+    let radius = params.radius.fmax(1e-9) as f32;
+    let bias = params.bias as f32;
+    let strength = 2.0 * params.strength as f32;
+    let (wi, hi) = (w as i32, h as i32);
+    let depth_at = |x: i32, y: i32| -> f32 {
+        if x < 0 || y < 0 || x >= wi || y >= hi { f32::NEG_INFINITY } else { unsafe { *zbuf.get_unchecked(y as usize * w + x as usize) } }
+    };
+    let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let lanes: Vec<(v128, v128, v128)> = kernel.chunks_exact(4)
+        .map(|c| (f32x4(c[0][0], c[1][0], c[2][0], c[3][0]), f32x4(c[0][1], c[1][1], c[2][1], c[3][1]), f32x4(c[0][2], c[1][2], c[2][2], c[3][2])))
+        .collect();
+    let (fx, fy, cx, cy, persp) = match *cam {
+        crate::ssao::DepthCamera::Perspective { fx, fy, cx, cy } => (fx, fy, cx, cy, true),
+        crate::ssao::DepthCamera::Ortho { sx, sy, cx, cy } => (sx, sy, cx, cy, false),
+    };
+    let (fx_v, fy_v, cx_v, cy_v) = (f32x4_splat(fx), f32x4_splat(fy), f32x4_splat(cx), f32x4_splat(cy));
+    let (radius_v, bias_v, w_v, h_v) = (f32x4_splat(radius), f32x4_splat(bias), f32x4_splat(w as f32), f32x4_splat(h as f32));
+    let (zero_v, one_v, two_v, three_v, eps_v, tiny_v) = (f32x4_splat(0.0), f32x4_splat(1.0), f32x4_splat(2.0), f32x4_splat(3.0), f32x4_splat(1e-6), f32x4_splat(1e-12));
+
+    ao_buffer.clear();
+    ao_buffer.resize(w * (y1 - y0), 1.0);
+    for y in y0 as i32..y1 as i32 {
+        for x in 0..wi {
+            let z = depth_at(x, y);
+            if z == f32::NEG_INFINITY { continue; }
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let p = cam.unproject(fx, fy, z);
+            let side = |dx: i32, dy: i32| -> Option<[f32; 3]> {
+                let (a, b) = (depth_at(x + dx, y + dy), depth_at(x - dx, y - dy));
+                let pick = match (a != f32::NEG_INFINITY, b != f32::NEG_INFINITY) {
+                    (true, true) => if (a - z).abs() <= (b - z).abs() { 1 } else { -1 },
+                    (true, false) => 1,
+                    (false, true) => -1,
+                    (false, false) => return None,
+                };
+                let (sx, sy) = (dx * pick, dy * pick);
+                let q = cam.unproject(fx + sx as f32, fy + sy as f32, depth_at(x + sx, y + sy));
+                let d = sub(q, p);
+                Some(if pick > 0 { d } else { [-d[0], -d[1], -d[2]] })
+            };
+            let mut n = match (side(1, 0), side(0, 1)) {
+                (Some(t), Some(b)) => [b[1] * t[2] - b[2] * t[1], b[2] * t[0] - b[0] * t[2], b[0] * t[1] - b[1] * t[0]],
+                _ => [0.0, 0.0, 1.0],
+            };
+            let toward = match cam {
+                crate::ssao::DepthCamera::Perspective { .. } => [-p[0], -p[1], -p[2]],
+                crate::ssao::DepthCamera::Ortho { .. } => [0.0, 0.0, 1.0],
+            };
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            if len < 1e-12 { n = [0.0, 0.0, 1.0]; } else { n = [n[0] / len, n[1] / len, n[2] / len]; }
+            if n[0] * toward[0] + n[1] * toward[1] + n[2] * toward[2] < 0.0 { n = [-n[0], -n[1], -n[2]]; }
+
+            let angle = NOISE[((y & 3) * 4 + (x & 3)) as usize] * (std::f32::consts::TAU / 16.0);
+            let r = [angle.cos(), angle.sin(), 0.0];
+            let rn = r[0] * n[0] + r[1] * n[1];
+            let mut t = [r[0] - n[0] * rn, r[1] - n[1] * rn, -n[2] * rn];
+            let tl = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt();
+            if tl < 1e-6 { t = if n[0].abs() < 0.9 { [1.0 - n[0] * n[0], -n[0] * n[1], -n[0] * n[2]] } else { [-n[1] * n[0], 1.0 - n[1] * n[1], -n[1] * n[2]] }; }
+            let tl = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt().fmax(1e-12);
+            let t = [t[0] / tl, t[1] / tl, t[2] / tl];
+            let b = [n[1] * t[2] - n[2] * t[1], n[2] * t[0] - n[0] * t[2], n[0] * t[1] - n[1] * t[0]];
+
+            let mut occlusion = 0.0f32;
+            let mut valid = 0u32;
+            let splat3 = |a: [f32; 3]| [f32x4_splat(a[0]), f32x4_splat(a[1]), f32x4_splat(a[2])];
+            let (tv, bv, nv, pv) = (splat3(t), splat3(b), splat3(n), splat3(p));
+            for (kx, ky, kz) in &lanes {
+                let axis = |a: usize| f32x4_add(pv[a], f32x4_mul(f32x4_add(f32x4_add(f32x4_mul(tv[a], *kx), f32x4_mul(bv[a], *ky)), f32x4_mul(nv[a], *kz)), radius_v));
+                let (sx, sy, sz) = (axis(0), axis(1), axis(2));
+                let inv = if persp { f32x4_div(one_v, f32x4_max(f32x4_neg(sz), eps_v)) } else { one_v };
+                let px = f32x4_add(cx_v, f32x4_mul(f32x4_mul(sx, fx_v), inv));
+                let py = f32x4_sub(cy_v, f32x4_mul(f32x4_mul(sy, fy_v), inv));
+                let inside = v128_and(
+                    v128_and(f32x4_ge(px, zero_v), f32x4_ge(py, zero_v)),
+                    v128_and(f32x4_lt(px, w_v), f32x4_lt(py, h_v)),
+                );
+                let mask = i32x4_bitmask(inside);
+                if mask == 0 { continue; }
+                valid += mask.count_ones();
+                let (ix, iy) = (i32x4_trunc_sat_f32x4(px), i32x4_trunc_sat_f32x4(py));
+                let lane_depth = |bit: u8, xi: i32, yi: i32| if mask & bit != 0 { unsafe { *zbuf.get_unchecked(yi as usize * w + xi as usize) } } else { f32::NEG_INFINITY };
+                let sd = f32x4(
+                    lane_depth(1, i32x4_extract_lane::<0>(ix), i32x4_extract_lane::<0>(iy)),
+                    lane_depth(2, i32x4_extract_lane::<1>(ix), i32x4_extract_lane::<1>(iy)),
+                    lane_depth(4, i32x4_extract_lane::<2>(ix), i32x4_extract_lane::<2>(iy)),
+                    lane_depth(8, i32x4_extract_lane::<3>(ix), i32x4_extract_lane::<3>(iy)),
+                );
+                let hit = i32x4_bitmask(f32x4_ge(sd, f32x4_add(sz, bias_v)));
+                if hit == 0 { continue; }
+                let range = f32x4_min(f32x4_div(radius_v, f32x4_max(f32x4_abs(f32x4_sub(f32x4_splat(z), sd)), tiny_v)), one_v);
+                let weight = f32x4_mul(f32x4_mul(range, range), f32x4_sub(three_v, f32x4_mul(two_v, range)));
+                if hit & 1 != 0 { occlusion += f32x4_extract_lane::<0>(weight); }
+                if hit & 2 != 0 { occlusion += f32x4_extract_lane::<1>(weight); }
+                if hit & 4 != 0 { occlusion += f32x4_extract_lane::<2>(weight); }
+                if hit & 8 != 0 { occlusion += f32x4_extract_lane::<3>(weight); }
+            }
+            for k in &kernel[lanes.len() * 4..] {
+                let s = [
+                    p[0] + (t[0] * k[0] + b[0] * k[1] + n[0] * k[2]) * radius,
+                    p[1] + (t[1] * k[0] + b[1] * k[1] + n[1] * k[2]) * radius,
+                    p[2] + (t[2] * k[0] + b[2] * k[1] + n[2] * k[2]) * radius,
+                ];
+                let (sx, sy) = cam.project(s);
+                if !(sx >= 0.0 && sy >= 0.0 && sx < w as f32 && sy < h as f32) { continue; }
+                valid += 1;
+                let sd = depth_at(sx as i32, sy as i32);
+                if sd >= s[2] + bias {
+                    let range = (radius / (z - sd).abs().fmax(1e-12)).fmin(1.0);
+                    occlusion += range * range * (3.0 - 2.0 * range);
+                }
+            }
+            if valid > 0 {
+                ao_buffer[(y as usize - y0) * w + x as usize] = (1.0 - (occlusion / valid as f32 * strength).fmin(1.0)).fmax(0.0);
+            }
+        }
     }
 }

@@ -145,9 +145,10 @@ const SCHEMA = [
   ]},
 
   { s: "Outlines", fields: [
-    { k: "outline", label: "Silhouette outline", help: "Bold silhouette contour around the model.", t: "grp", toggle: true, bool: true, def: { color: "#000000", width: 2 }, fields: [
+    { k: "outline", label: "Silhouette outline", help: "Bold silhouette contour around the model.", t: "grp", toggle: true, bool: true, def: { color: "#000000", width: 2, threshold: 5 }, fields: [
       { k: "color", label: "Color", t: "col", def: "#000000" },
       { k: "width", label: "Width", t: "num", def: 2 },
+      { k: "threshold", label: "Depth threshold (pixels)", help: "Edge when the depth jump exceeds this many pixel footprints; stays consistent across zoom and image size.", t: "num", def: 5 },
     ]},
   ]},
 
@@ -174,11 +175,12 @@ const SCHEMA = [
 
   { s: "Post-processing", fields: [
     { k: "antialias", label: "Antialiasing", help: "0 off · 1 FXAA · 2/4 supersampling · 5/6 FXAA on top of supersampling ×2/×4 (PNG only).", t: "sel", def: 2, typstDef: 1, num: true, opts: [[0,"Off"],[1,"FXAA"],[2,"SSAA ×2"],[4,"SSAA ×4"],[5,"FXAA + SSAA ×2"],[6,"FXAA + SSAA ×4"]] },
-    { k: "ssao", label: "Ambient occlusion", help: "Screen-space ambient occlusion — contact shadows (PNG only).", t: "grp", toggle: true, bool: true, def: { __on: true, samples: 16, radius: 0.5, bias: 0.025, strength: 1 }, fields: [
+    { k: "ssao", label: "Ambient occlusion", help: "Ambient occlusion from the depth buffer — contact shadows (PNG only).", t: "grp", toggle: true, bool: true, def: { __on: true, samples: 16, radius: 0, bias: 0.025, strength: 1, space: "scene" }, fields: [
       { k: "samples", label: "Samples", t: "num", def: 16 },
-      { k: "radius", label: "Radius", t: "num", def: 0.5 },
+      { k: "radius", label: "Radius (0 = auto)", help: "Scene units (auto: 10% of the model's size), or a fraction of the image in screen space.", t: "num", def: 0, omitIf: v => !v },
       { k: "bias", label: "Bias", t: "num", def: 0.025 },
       { k: "strength", label: "Strength", t: "rng", def: 1, min: 0, max: 2, step: 0.05 },
+      { k: "space", label: "Space", help: "Screen: radius is a fraction of the image. Scene: radius and bias are in model units, sampled around each pixel's 3D position.", t: "sel", def: "scene", opts: [["scene", "Scene units"], ["screen", "Screen (legacy)"]] },
     ]},
     { k: "bloom", label: "Bloom", help: "Bleed light from bright areas (PNG only).", t: "grp", toggle: true, bool: true, def: { threshold: 0.8, intensity: 0.3, radius: 10 }, fields: [
       { k: "threshold", label: "Threshold", t: "rng", def: 0.8, min: 0, max: 1, step: 0.01 },
@@ -309,13 +311,14 @@ const GLTF_SCHEMA = [
     { k: "fxaa",         label: "FXAA",       t: "bool", def: false },
     { k: "tone_mapping", label: "Tone mapping", help: "HDR tone mapping (ACES/Reinhard) + exposure.", t: "sel", def: "aces", opts: [["none", "None"], ["reinhard", "Reinhard"], ["aces", "ACES"]] },
     { k: "exposure",     label: "Exposure",   t: "rng", def: 1.2, min: 0, max: 4, step: 0.05 },
-    { k: "ssao", label: "SSAO", help: "Screen-space ambient occlusion — contact shadows (PNG only).", t: "grp", toggle: true, bool: false, def: {
-        __on: true, samples: 16, radius: 0.4, bias: 0.02, strength: 1.0
+    { k: "ssao", label: "SSAO", help: "Ambient occlusion from the depth buffer — contact shadows (PNG only).", t: "grp", toggle: true, bool: false, def: {
+        __on: true, samples: 16, radius: 0, bias: 0.025, strength: 1.0, space: "scene"
       }, fields: [
       { k: "samples",  label: "Samples",  t: "num", def: 16 },
-      { k: "radius",   label: "Radius",   t: "num", def: 0.4 },
-      { k: "bias",     label: "Bias",     t: "num", def: 0.02 },
+      { k: "radius",   label: "Radius (0 = auto)", help: "Scene units (auto: 10% of the scene's size), or a fraction of the image in screen space.", t: "num", def: 0, omitIf: v => !v },
+      { k: "bias",     label: "Bias",     t: "num", def: 0.025 },
       { k: "strength", label: "Strength", t: "rng", def: 1.0, min: 0, max: 3, step: 0.05 },
+      { k: "space", label: "Space", help: "Screen: radius is a fraction of the image. Scene: radius and bias are in model units, sampled around each pixel's 3D position.", t: "sel", def: "scene", opts: [["scene", "Scene units"], ["screen", "Screen (legacy)"]] },
     ]},
   ]},
 

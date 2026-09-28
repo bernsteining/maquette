@@ -364,3 +364,18 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
         }
     }
 }
+
+/// Pinhole approximation of the render's projection, for post passes that
+/// reconstruct scene positions from depth. Non-pinhole projections use their
+/// on-axis focal length.
+pub(crate) fn depth_camera(config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64) -> maquette_core::ssao::DepthCamera {
+    use maquette_core::ssao::DepthCamera;
+    use ProjectionSetup::*;
+    let persp = |fx: f64, fy: f64, hw: f64, hh: f64| DepthCamera::Perspective { fx: fx as f32, fy: fy as f32, cx: hw as f32, cy: hh as f32 };
+    match setup_projection(resolve_projection(&config.projection), config, view, vw, vh, br) {
+        Ortho { s, hw, hh } | Cabinet { s, hw, hh, .. } => DepthCamera::Ortho { sx: s as f32, sy: s as f32, cx: hw as f32, cy: hh as f32 },
+        Perspective { sx, sy, hw, hh } => persp(sx, sy, hw, hh),
+        Curvilinear { d, aspect, hw, hh, .. } => persp(d * hw / aspect, d * hh, hw, hh),
+        Fisheye { f, hw, hh } | Stereographic { f, hw, hh } | Cylindrical { f, hw, hh } | Pannini { f, hw, hh } | TinyPlanet { f, hw, hh } => persp(f, f, hw, hh),
+    }
+}

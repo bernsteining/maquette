@@ -17,7 +17,7 @@ Nothing in here knows about STL, OBJ, PLY, glTF, or OpenSCAD. It knows about tri
 | [`rgbe`](src/rgbe.rs) | Radiance .hdr decoder |
 | [`shadow`](src/shadow.rs) | Format-agnostic shadow-map builder (takes any caster-triangle list + `PunctualLight` set) |
 | [`light`](src/light.rs) | `PunctualLight` + `LightKind` — directional / point / spot |
-| [`ssao`](src/ssao.rs) | Screen-space ambient occlusion (golden-angle sunflower sample distribution, bilateral blur) |
+| [`ssao`](src/ssao.rs) | Ambient occlusion from the depth buffer: scene-space hemisphere sampling around reconstructed positions (`DepthCamera`), or legacy screen-space golden-angle discs; bilateral blur |
 | [`fxaa`](src/fxaa.rs) | Fast approximate anti-aliasing (post-process) |
 
 ## Design constraints

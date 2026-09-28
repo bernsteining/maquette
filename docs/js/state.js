@@ -98,6 +98,7 @@ function group(f, mode) {
     const v = s[sub.k];
     if (v === undefined) continue;
     if (sub.allowBlank && v === "") continue;
+    if (sub.omitIf && sub.omitIf(v)) continue;
     if (mode === "diff" && eq(v, sub.def)) continue;
     o[sub.k] = v;
   }

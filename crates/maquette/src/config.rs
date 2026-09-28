@@ -152,6 +152,10 @@ impl<'a> JsonParser<'a> {
         }
     }
 
+    fn parse_opt_f64(&mut self) -> Result<Option<f64>, String> {
+        if self.is_null() { Ok(None) } else { self.parse_f64().map(Some) }
+    }
+
     fn parse_usize(&mut self) -> Result<usize, String> {
         self.parse_f64().map(|v| v as usize)
     }
@@ -299,14 +303,21 @@ impl Default for BloomConfig {
 #[derive(Clone)]
 pub struct SsaoConfig {
     pub samples: usize,
-    pub radius: f64,
+    /// `None` picks the space's default: 10% of the model's bounding radius
+    /// in `"scene"`, half the image's shorter side in `"screen"`.
+    pub radius: Option<f64>,
     pub bias: f64,
     pub strength: f64,
+    /// `"scene"`: `radius` is in scene units and `bias` a fraction of it,
+    /// sampled around each pixel's reconstructed position. `"screen"`
+    /// (legacy): `radius`/`bias` are fractions of the image size and depth
+    /// range.
+    pub space: String,
 }
 
 impl Default for SsaoConfig {
     fn default() -> Self {
-        Self { samples: 16, radius: 0.5, bias: 0.025, strength: 1.0 }
+        Self { samples: 16, radius: None, bias: 0.025, strength: 1.0, space: "scene".into() }
     }
 }
 
@@ -502,16 +513,23 @@ impl Default for AnnotationConfig {
     }
 }
 
+/// Default outline depth threshold, in pixel footprints: flags jumps steeper
+/// than a ~79° slope.
+pub const OUTLINE_THRESHOLD: f64 = 5.0;
+
 /// Outline (edge detection) configuration.
 #[derive(Clone)]
 pub struct OutlineConfig {
     pub color: String,
     pub width: f64,
+    /// Depth jump, in scene-space pixel footprints, that counts as an edge.
+    /// `None` selects the legacy rule (1.5% of the pixel's distance).
+    pub threshold: Option<f64>,
 }
 
 impl Default for OutlineConfig {
     fn default() -> Self {
-        Self { color: "#000000".into(), width: 2.0 }
+        Self { color: "#000000".into(), width: 2.0, threshold: Some(OUTLINE_THRESHOLD) }
     }
 }
 
@@ -1100,6 +1118,7 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                 "outline" => cfg.outline = parse_optional_object!(p, OutlineConfig, {
                     "color" => color = parse_string,
                     "width" => width = parse_f64,
+                    "threshold" => threshold = parse_opt_f64,
                 }),
                 "clip" => cfg.clip = parse_clip(p)?,
                 "explode" => cfg.explode = p.parse_f64()?,
@@ -1112,9 +1131,10 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                 "distance" => cfg.distance = if p.is_null() { None } else { Some(p.parse_f64()?) },
                 "ssao" => cfg.ssao = parse_optional_object!(p, SsaoConfig, {
                     "samples" => samples = parse_usize,
-                    "radius" => radius = parse_f64,
+                    "radius" => radius = parse_opt_f64,
                     "bias" => bias = parse_f64,
                     "strength" => strength = parse_f64,
+                    "space" => space = parse_string,
                 }),
                 "bloom" => cfg.bloom = parse_optional_object!(p, BloomConfig, {
                     "threshold" => threshold = parse_f64,

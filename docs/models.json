@@ -53,13 +53,15 @@
       "_cam": "spherical",
       "azimuth": 219, "elevation": 33, "fov": 40, "zoom": 1.2,
       "color": "#f9d72c", "specular": 0, "cull_backface": false,
-      "scad_smooth_normals": true
+      "scad_smooth_normals": true,
+      "ssao": { "__on": false, "samples": 16, "radius": 0, "bias": 0.025, "strength": 1, "space": "scene" }
     },
     "scad/gear.scad": {
       "_cam": "spherical",
       "azimuth": 219, "elevation": 33, "fov": 40, "zoom": 1.2,
       "color": "#f9d72c", "specular": 0, "cull_backface": false,
-      "scad_smooth_normals": true
+      "scad_smooth_normals": true,
+      "ssao": { "__on": false, "samples": 16, "radius": 0, "bias": 0.025, "strength": 1, "space": "scene" }
     },
     "brain_skull.obj": {
       "highlight": [["Skull", "#e8e8e8"], ["Brain", "#ee69b4"]],

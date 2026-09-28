@@ -41,6 +41,9 @@ function makeHelper(url) {
     async call(plugin, fn, args) {
       return (await req({ kind: "call", plugin, fn, args, withModel: true })).result;
     },
+    async invoke(plugin, fn, args) {
+      return (await req({ kind: "call", plugin, fn, args, withModel: false })).result;
+    },
   };
 }
 
@@ -144,21 +147,24 @@ function makePlugin(url) {
     if (!pool.length) return null;
     let cfg;
     try { cfg = JSON.parse(DEC.decode(args[0])); } catch { return null; }
-    if (!cfg || cfg.ssao || cfg.band) return null;
+    if (!cfg || cfg.band) return null;
     const w = Math.max(1, cfg.width | 0), h = Math.max(1, cfg.height | 0);
     const aa = Math.min(4, Math.max(1, (cfg.antialias | 0) || 1));
     if (w * h * aa * aa < BAND_MIN_SAMPLES) return null;
+    const deferred = !!cfg.ssao;
     const nb = Math.min(h, pool.length + 1);
     const cuts = Array.from({ length: nb + 1 }, (_, k) => Math.round((h * k) / nb));
     const bandArgs = (k) => [ENC.encode(JSON.stringify({ ...cfg, band: [cuts[k], cuts[k + 1]] }))];
+    const rowArg = (k) => new Uint8Array(new Uint32Array([cuts[k]]).buffer);
     const queue = [...Array(nb).keys()];
     const parts = new Array(nb);
+    const owner = new Array(nb).fill(null);
     const [s, bytes, id] = [scope, active, URL_TO_ID[url]];
     const remote = pool.map(async (hp) => {
       try { await hp.bind(id, s, bytes); } catch { return; }
       while (queue.length) {
         const k = queue.shift();
-        try { parts[k] = await hp.call(id, fn, bandArgs(k)); } catch { queue.push(k); return; }
+        try { parts[k] = await hp.call(id, fn, bandArgs(k)); owner[k] = hp; } catch { queue.push(k); return; }
       }
     });
     while (queue.length) {
@@ -168,6 +174,18 @@ function makePlugin(url) {
     }
     await Promise.all(remote);
     for (let k = 0; k < nb; k++) if (!parts[k]) parts[k] = callModel(fn, bandArgs(k));
+    if (deferred) {
+      const depth = new Uint8Array(w * h * 4);
+      for (let k = 0; k < nb; k++) depth.set(parts[k], cuts[k] * w * 4);
+      const finish = (k) => invoke("finish_gltf_band", [rowArg(k), depth]);
+      await Promise.all([...Array(nb).keys()].map(async (k) => {
+        if (owner[k]) {
+          try { parts[k] = await owner[k].invoke(id, "finish_gltf_band", [rowArg(k), depth]); return; } catch { }
+          parts[k] = callModel(fn, bandArgs(k));
+        }
+        parts[k] = finish(k);
+      }));
+    }
     let len = 9;
     for (const p of parts) len += p.length - 9;
     const outBuf = new Uint8Array(len);

@@ -9,9 +9,18 @@ use crate::math::FloatExt;
 #[derive(Clone)]
 pub struct SSAOParams {
     pub samples: usize,
+    /// Sampling radius: a fraction of the image's shorter side, or scene
+    /// units when `camera` is set.
     pub radius: f64,
+    /// Depth bias: a fraction of the frame's depth range, or scene units when
+    /// `camera` is set.
     pub bias: f64,
     pub strength: f64,
+    /// Sample a scene-space hemisphere around each pixel's reconstructed
+    /// position instead of a fixed screen-space disc, so the effect does not
+    /// change with image size or zoom. `strength` 1 then fully darkens a
+    /// pixel whose hemisphere is half blocked.
+    pub camera: Option<DepthCamera>,
 }
 
 impl Default for SSAOParams {
@@ -21,8 +30,79 @@ impl Default for SSAOParams {
             radius: 0.5,
             bias: 0.025,
             strength: 1.0,
+            camera: None,
         }
     }
+}
+
+/// Maps view-space points (camera looking down −z, y up, depth buffer holding
+/// view-space z) to continuous buffer pixel coordinates, whose pixel `(x, y)`
+/// covers `[x, x+1) × [y, y+1)`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DepthCamera {
+    /// Pinhole: `px = cx + x·fx/−z`, `py = cy − y·fy/−z`.
+    Perspective { fx: f32, fy: f32, cx: f32, cy: f32 },
+    /// Parallel: `px = cx + x·sx`, `py = cy − y·sy`.
+    Ortho { sx: f32, sy: f32, cx: f32, cy: f32 },
+}
+
+impl DepthCamera {
+    /// Scene-space height of one pixel at view depth `z`.
+    #[inline(always)]
+    pub fn pixel_size(&self, z: f32) -> f32 {
+        match *self {
+            DepthCamera::Perspective { fy, .. } => (-z).fmax(1e-6) / fy,
+            DepthCamera::Ortho { sy, .. } => 1.0 / sy,
+        }
+    }
+
+    /// View-space point at depth `z` under pixel coordinate `(px, py)`.
+    #[inline(always)]
+    pub fn unproject(&self, px: f32, py: f32, z: f32) -> [f32; 3] {
+        match *self {
+            DepthCamera::Perspective { fx, fy, cx, cy } => {
+                let d = (-z).fmax(1e-6);
+                [(px - cx) * d / fx, (cy - py) * d / fy, z]
+            }
+            DepthCamera::Ortho { sx, sy, cx, cy } => [(px - cx) / sx, (cy - py) / sy, z],
+        }
+    }
+
+    /// Pixel coordinate of view-space point `p`.
+    #[inline(always)]
+    pub fn project(&self, p: [f32; 3]) -> (f32, f32) {
+        match *self {
+            DepthCamera::Perspective { fx, fy, cx, cy } => {
+                let inv = 1.0 / (-p[2]).fmax(1e-6);
+                (cx + p[0] * fx * inv, cy - p[1] * fy * inv)
+            }
+            DepthCamera::Ortho { sx, sy, cx, cy } => (cx + p[0] * sx, cy - p[1] * sy),
+        }
+    }
+
+    /// The same camera on a buffer downsampled by `factor`.
+    pub fn downscaled(self, factor: usize) -> Self {
+        let k = 1.0 / factor.max(1) as f32;
+        match self {
+            DepthCamera::Perspective { fx, fy, cx, cy } => DepthCamera::Perspective { fx: fx * k, fy: fy * k, cx: cx * k, cy: cy * k },
+            DepthCamera::Ortho { sx, sy, cx, cy } => DepthCamera::Ortho { sx: sx * k, sy: sy * k, cx: cx * k, cy: cy * k },
+        }
+    }
+}
+
+/// Normal-oriented hemisphere kernel for scene-space SSAO: unit-radius
+/// points with `z ≥ 0`, denser near the origin.
+pub fn hemisphere_kernel(samples: usize) -> Vec<[f32; 3]> {
+    const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653;
+    (0..samples.max(1)).map(|i| {
+        let t = (i as f64 + 0.5) / samples.max(1) as f64;
+        let cos_t = (1.0 - t).sqrt();
+        let sin_t = (1.0 - cos_t * cos_t).fmax(0.0).sqrt();
+        let a = i as f64 * GOLDEN_ANGLE;
+        let u = ((i as u32).wrapping_mul(0x9E37_79B9) >> 8) as f64 / (1u32 << 24) as f64;
+        let scale = 0.1 + 0.9 * u * u;
+        [(a.cos() * sin_t * scale) as f32, (a.sin() * sin_t * scale) as f32, (cos_t * scale) as f32]
+    }).collect()
 }
 
 /// Pre-computed integer sample offset for one kernel sample at one noise rotation.
@@ -156,9 +236,12 @@ pub fn bilateral_blur_separable(
     height: usize,
     blur_radius: i32,
 ) -> Vec<f32> {
-    let n = width * height;
-    let r = blur_radius;
+    let (zmin, zmax) = depth_bounds(depth_buffer);
+    bilateral_blur_in_range(ao_buffer, depth_buffer, width, height, blur_radius, zmin, zmax)
+}
 
+/// Min and max of the finite (non −∞) depths; `(f32::MAX, f32::MIN)` if none.
+pub fn depth_bounds(depth_buffer: &[f32]) -> (f32, f32) {
     let mut zmin = f32::MAX;
     let mut zmax = f32::MIN;
     for &d in depth_buffer {
@@ -167,6 +250,24 @@ pub fn bilateral_blur_separable(
             if d > zmax { zmax = d; }
         }
     }
+    (zmin, zmax)
+}
+
+/// [`bilateral_blur_separable`] with the depth range supplied instead of
+/// measured, so a block of rows blurs exactly as it would inside the frame
+/// the range was taken from (away from the block's top and bottom `radius`
+/// rows).
+pub fn bilateral_blur_in_range(
+    ao_buffer: &[f32],
+    depth_buffer: &[f32],
+    width: usize,
+    height: usize,
+    blur_radius: i32,
+    zmin: f32,
+    zmax: f32,
+) -> Vec<f32> {
+    let n = width * height;
+    let r = blur_radius;
     let inv_depth_range = 1.0 / (zmax - zmin).fmax(0.001);
     let depth_factor = 50.0 * inv_depth_range;
 

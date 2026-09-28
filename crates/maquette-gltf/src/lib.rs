@@ -119,6 +119,16 @@ fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_b
     Ok(render::render(scene, scene_key, &config))
 }
 
+/// Finish a band rendered with `band` and `ssao`: `y0` is the band's first
+/// row as a little-endian `u32`, `full_depth` the whole frame's depth gathered
+/// from every band's render output. Returns the band's raw RGBA.
+#[cfg_attr(target_arch = "wasm32", wasm_func)]
+fn finish_gltf_band(y0: &[u8], full_depth: &[u8]) -> Result<Vec<u8>, String> {
+    install_panic_hook();
+    let y0: [u8; 4] = y0.try_into().map_err(|_| "band row must be 4 bytes".to_string())?;
+    render::finish_band(u32::from_le_bytes(y0) as usize, full_depth)
+}
+
 /// Return scene metadata (triangle count, bounding box, animation length) as
 /// JSON, without rendering. Skips texture decoding for speed — info only
 /// needs geometry. `max_animation_time` is the largest input-time keyframe
@@ -237,6 +247,10 @@ pub mod native {
 
     pub fn model_key(gltf_data: &[u8]) -> Result<Vec<u8>, String> {
         super::model_key(gltf_data)
+    }
+
+    pub fn finish_gltf_band(y0: &[u8], full_depth: &[u8]) -> Result<Vec<u8>, String> {
+        super::finish_gltf_band(y0, full_depth)
     }
 
     pub fn get_gltf_info(gltf_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
