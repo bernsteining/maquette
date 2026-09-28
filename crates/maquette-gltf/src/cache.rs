@@ -34,6 +34,7 @@ static mut SHADOW_CACHE: Vec<(u64, Vec<Option<LightShadow>>)> = Vec::new();
 static mut STATIC_SHADOW_CACHE: Option<(u64, Vec<Option<LightShadow>>)> = None;
 static mut STATIC_PASS_CACHE: Vec<(u64, StaticPass)> = Vec::new();
 static mut WORK_SHADOWS: Option<WorkShadows> = None;
+static mut PASS_REQUESTS: Vec<u64> = Vec::new();
 /// Leaky Vec of texture-bundle cache entries. Each entry lives forever, so
 /// references into it are safely `'static`.
 static mut TEXTURE_CACHE: Vec<(u64, Vec<Texture>)> = Vec::new();
@@ -228,6 +229,8 @@ pub struct StaticPass {
     /// the shadow-map texel that pixel samples (see `render::TEXEL_*`).
     pub pixels: Option<Vec<u8>>,
     pub texels: Vec<u32>,
+    /// Supersampling blocks the snapshot shaded once, `(top-left, owner + 1)`.
+    pub blocks: Vec<(usize, u32)>,
     pub entries: Vec<StaticEntry>,
 }
 
@@ -235,6 +238,19 @@ pub fn static_pass(key: u64) -> Option<&'static StaticPass> {
     unsafe {
         let cache = &*std::ptr::addr_of!(STATIC_PASS_CACHE);
         cache.iter().find(|(k, _)| *k == key).map(|(_, p)| std::mem::transmute::<&StaticPass, &'static StaticPass>(p))
+    }
+}
+
+/// Records a request for the static pass `key` and reports whether it was
+/// already requested recently: the pass is only worth building when the same
+/// camera and settings come back (scrubbing an animation), not for a one-off.
+pub fn static_pass_requested(key: u64) -> bool {
+    unsafe {
+        let seen = &mut *std::ptr::addr_of_mut!(PASS_REQUESTS);
+        if seen.contains(&key) { return true; }
+        if seen.len() >= 8 { seen.remove(0); }
+        seen.push(key);
+        false
     }
 }
 

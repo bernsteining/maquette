@@ -209,6 +209,9 @@ impl PixelBuffer {
     /// linear interp of z and colour. Used by glTF LINES / LINE_STRIP /
     /// LINE_LOOP primitives. Bresenham-ish stepping via DDA — good enough
     /// for 1-pixel unlit primitives, no anti-aliasing.
+    /// `a`/`b` are in full-image coordinates; this buffer holds image rows
+    /// from `y_off` on (0 for a whole-image buffer).
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_line_depth(
         &mut self,
         a: (f64, f64),
@@ -217,6 +220,7 @@ impl PixelBuffer {
         zb: f32,
         rgba_a: [f32; 4],
         rgba_b: [f32; 4],
+        y_off: usize,
     ) {
         let (mut x0, mut y0) = (a.0, a.1);
         let (x1, y1) = (b.0, b.1);
@@ -224,7 +228,9 @@ impl PixelBuffer {
         let dy = (y1 - y0).abs();
         let steps = dx.fmax(dy).ceil() as i32;
         if steps == 0 {
-            self.write_point((x0 as usize, y0 as usize), za, rgba_a);
+            if let Some(row) = (y0 as usize).checked_sub(y_off) {
+                self.write_point((x0 as usize, row), za, rgba_a);
+            }
             return;
         }
         let inv_steps = 1.0 / steps as f64;
@@ -241,9 +247,9 @@ impl PixelBuffer {
         let mut cb = rgba_a[2] as f64;
         let mut ca = rgba_a[3] as f64;
         for _ in 0..=steps {
-            if x0 >= 0.0 && y0 >= 0.0 && (x0 as usize) < self.width && (y0 as usize) < self.height {
+            if x0 >= 0.0 && y0 >= 0.0 && (x0 as usize) < self.width && (y0 as usize) >= y_off && (y0 as usize) - y_off < self.height {
                 self.write_point(
-                    (x0 as usize, y0 as usize),
+                    (x0 as usize, y0 as usize - y_off),
                     zc as f32,
                     [cr as f32, cg as f32, cb as f32, ca as f32],
                 );
@@ -349,6 +355,56 @@ impl PixelBuffer {
             if *v != 0 && !keep(i, *v as usize - 1) { *v = 0; }
         }
         self.owned.iter_mut().for_each(|o| *o = 0);
+    }
+
+    /// Owner of each pixel during a deferred pass (`id + 1`, 0 = none).
+    pub fn owners(&self) -> &[u32] {
+        &self.vis
+    }
+
+    /// Supersampling shading-rate reduction. For every `factor`×`factor`
+    /// block whose samples all have the same owner, keep only the top-left
+    /// sample owned, so deferred shading shades one sample per block. Returns
+    /// those blocks as `(top-left pixel, owner + 1)` for
+    /// [`fill_shading_rate`](Self::fill_shading_rate), and clears the
+    /// ownership flags (call `resolve_owners` again after).
+    pub fn reduce_shading_rate(&mut self, factor: usize) -> Vec<(usize, u32)> {
+        let mut blocks = Vec::new();
+        if factor < 2 { return blocks; }
+        let (w, h) = (self.width, self.height);
+        for by in (0..h - h % factor).step_by(factor) {
+            for bx in (0..w - w % factor).step_by(factor) {
+                let top = by * w + bx;
+                let owner = self.vis[top];
+                if owner == 0 { continue; }
+                let uniform = (0..factor).all(|dy| self.vis[top + dy * w..top + dy * w + factor].iter().all(|&v| v == owner));
+                if !uniform { continue; }
+                for dy in 0..factor {
+                    let row = top + dy * w;
+                    self.vis[row..row + factor].iter_mut().for_each(|v| *v = 0);
+                }
+                self.vis[top] = owner;
+                blocks.push((top, owner));
+            }
+        }
+        self.owned.iter_mut().for_each(|o| *o = 0);
+        blocks
+    }
+
+    /// Copy each reduced block's shaded top-left colour to its other samples
+    /// and restore their owner.
+    pub fn fill_shading_rate(&mut self, factor: usize, blocks: &[(usize, u32)]) {
+        let w = self.width;
+        for &(top, owner) in blocks {
+            let rgb = [self.pixels[top * 3], self.pixels[top * 3 + 1], self.pixels[top * 3 + 2]];
+            for dy in 0..factor {
+                for dx in 0..factor {
+                    let i = top + dy * w + dx;
+                    self.pixels[i * 3..i * 3 + 3].copy_from_slice(&rgb);
+                    self.vis[i] = owner;
+                }
+            }
+        }
     }
 
     pub fn end_deferred(&mut self) {

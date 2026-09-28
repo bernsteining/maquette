@@ -219,6 +219,10 @@ pub struct RenderConfig {
     /// Hash of every config entry except `time`: equal keys shade a static
     /// surface identically at any animation time.
     pub shading_key: u64,
+    /// Render only output rows `y0..y1` of the full image (pixel-identical to
+    /// those rows of a full render, except with SSAO), for splitting a frame
+    /// across workers.
+    pub band: Option<(usize, usize)>,
 }
 
 impl Default for RenderConfig {
@@ -257,6 +261,7 @@ impl Default for RenderConfig {
             time: 0.0,
             material_variant: 0,
             shading_key: 0,
+            band: None,
         }
     }
 }
@@ -336,6 +341,9 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
             "no_textures"   => if let Some(b) = v.as_bool() { cfg.no_textures = b; }
             "texture_max_size" => cfg.texture_max_size = as_usize(v).map(|n| n as u32).filter(|&n| n >= 4),
             "time"          => if let Some(f) = v.as_f64() { cfg.time = f.fmax(0.0); }
+            "band"          => if let Some([a, b]) = v.as_array().map(|a| a.as_slice()) {
+                if let (Some(a), Some(b)) = (a.as_u64(), b.as_u64()) { cfg.band = Some((a as usize, b as usize)); }
+            }
             "material_variant" => if let Some(n) = as_usize(v) { cfg.material_variant = n as u32; }
             _ => {}
         }

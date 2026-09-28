@@ -103,6 +103,10 @@ pub enum ToneMap { None, Reinhard, Aces }
 
 /// Everything a shader call needs that doesn't vary per pixel.
 pub struct PbrContext {
+    /// Texture LOD area multiplier for the deferred pass: `factor²` when
+    /// supersampling shades one sample per output pixel, so textures are
+    /// filtered for the output pixel instead of the sample.
+    pub lod_scale_mul: f32,
     pub light_dir: Vec3,
     pub light_color: [f32; 3],
     pub ambient: [f32; 3],
@@ -941,16 +945,18 @@ impl<'a> PixelShader for MaterialShader<'a> {
 
             let lit_mask = v128_and(f32x4_gt(n_dot_l, zero), f32x4_gt(n_dot_v, zero));
 
+            let lit_bits = i32x4_bitmask(lit_mask);
             let shadow_v = match self.shadows.get(light_idx).and_then(|s| s.as_ref()) {
-                Some(sh) => {
+                Some(sh) if lit_bits != 0 => {
                     let pcss = self.shadow_pcss_light_size as f64;
-                    let s0 = shadow_lane::<0>(&in_, sh, self.shadow_bias, self.shadow_softness, pcss);
-                    let s1 = shadow_lane::<1>(&in_, sh, self.shadow_bias, self.shadow_softness, pcss);
-                    let s2 = shadow_lane::<2>(&in_, sh, self.shadow_bias, self.shadow_softness, pcss);
-                    let s3 = shadow_lane::<3>(&in_, sh, self.shadow_bias, self.shadow_softness, pcss);
+                    let (b, sf) = (self.shadow_bias, self.shadow_softness);
+                    let s0 = if lit_bits & 1 != 0 { shadow_lane::<0>(&in_, sh, b, sf, pcss) } else { 1.0 };
+                    let s1 = if lit_bits & 2 != 0 { shadow_lane::<1>(&in_, sh, b, sf, pcss) } else { 1.0 };
+                    let s2 = if lit_bits & 4 != 0 { shadow_lane::<2>(&in_, sh, b, sf, pcss) } else { 1.0 };
+                    let s3 = if lit_bits & 8 != 0 { shadow_lane::<3>(&in_, sh, b, sf, pcss) } else { 1.0 };
                     f32x4(s0, s1, s2, s3)
                 }
-                None => one,
+                _ => one,
             };
 
             let mut base_r = f32x4_mul(f32x4_mul(f32x4_mul(f32x4_add(diff_r, spec_r), atten_r), n_dot_l), shadow_v);

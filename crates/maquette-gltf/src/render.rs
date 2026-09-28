@@ -30,11 +30,18 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     let factor = config.antialias.clamp(1, 4);
     let (bg, transparent) = resolve_background(&config.background);
 
-    let mut buffer = PixelBuffer::new(width * factor, height * factor, bg);
+    let (y0, y1) = match config.band {
+        Some((a, b)) => (a.min(height), b.clamp(a.min(height), height)),
+        None => (0, height),
+    };
+    let pad = if config.band.is_some() && config.fxaa { BAND_PAD } else { 0 };
+    let (top, bottom) = (y0.saturating_sub(pad), (y1 + pad).min(height));
+    let mut buffer = PixelBuffer::new(width * factor, (bottom - top).max(1) * factor, bg);
     crate::prof::mark(10);
 
     if !scene.triangles.is_empty() || !scene.lines.is_empty() || !scene.points.is_empty() {
-        rasterize_scene(&mut buffer, scene, scene_key, config);
+        let frame = Frame { width: (width * factor) as f64, height: (height * factor) as f64, y_off: (top * factor) as f64 };
+        rasterize_scene(&mut buffer, scene, scene_key, config, frame);
     }
 
     crate::prof::mark(14);
@@ -59,14 +66,31 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     }
     crate::prof::mark(18);
 
-    let (w, h, rgba) = if transparent {
+    let (w, h, mut rgba) = if transparent {
         buffer.to_rgba8_transparent_by_depth()
     } else {
         buffer.to_rgba8()
     };
+    let (w, h) = if config.band.is_some() {
+        let row = w as usize * 4;
+        let keep = (y0 - top)..(y1 - top);
+        rgba = rgba[keep.start * row..keep.end * row].to_vec();
+        (w, (y1 - y0) as u32)
+    } else {
+        (w, h)
+    };
     let out = encode_raw_rgba(w, h, rgba);
     crate::prof::mark(19);
     out
+}
+
+const BAND_PAD: usize = 24;
+
+#[derive(Clone, Copy)]
+struct Frame {
+    width: f64,
+    height: f64,
+    y_off: f64,
 }
 
 fn shadow_key(scene_key: u64, lights: &[crate::scene::PunctualLight], up: Vec3, radius: f64, resolution: usize) -> u64 {
@@ -85,7 +109,7 @@ fn shadow_key(scene_key: u64, lights: &[crate::scene::PunctualLight], up: Vec3, 
     h.finish()
 }
 
-fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, config: &RenderConfig) {
+fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, config: &RenderConfig, frame: Frame) {
     let (center, radius) = scene.bounds();
 
     let (camera_pos, view, projection, znear, zfar) = if let Some(sc) = pick_glb_camera(scene, config) {
@@ -104,8 +128,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         (pos, view, Projection::Perspective { fov_deg: config.fov }, 1e-4, None)
     };
 
-    let width_f = buffer.width as f64;
-    let height_f = buffer.height as f64;
+    let (width_f, height_f, y_off) = (frame.width, frame.height, frame.y_off);
     let focal = match projection {
         Projection::Perspective { fov_deg } => (height_f * 0.5) / (fov_deg.to_radians() * 0.5).tan(),
         Projection::Orthographic { .. } => 0.0,
@@ -137,6 +160,8 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
 
     let (ground_tris, ground_material) = build_ground(scene, config);
 
+    let moving_tris: usize = scene.dynamic.iter().map(|&(a, b)| b - a).sum();
+    let split_static = !scene.dynamic.is_empty() && scene.static_key != 0 && moving_tris * 2 <= scene.triangles.len();
     let (shadows, base_shadows, base_shadow_key, shadow_bias, shadow_softness, shadow_pcss_light_size) = if let Some(sh_cfg) = config.shadows {
         let (bc, br) = scene.bounds();
         let up = Vec3::from(config.up);
@@ -148,7 +173,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
             bias: sh_cfg.bias as f64, normal_bias: sh_cfg.normal_bias as f64, slope_bias: sh_cfg.slope_bias as f64,
         };
         let frame_key = shadow_key(scene_key, &raw_lights, up, effective_br, sh_cfg.resolution);
-        if scene.dynamic.is_empty() || scene.static_key == 0 {
+        if !split_static {
             let maps = crate::cache::shadows_for(frame_key, || {
                 let caster_tris: Vec<[Vec3; 3]> = scene.triangles.iter().map(caster).collect();
                 maquette_core::shadow::build_shadow_maps(&caster_tris, &raw_lights, bc, effective_br, up, sh_cfg.resolution)
@@ -189,7 +214,9 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         (&[][..], None, 0, maquette_core::shadow::BiasParams { bias: 0.0, normal_bias: 0.0, slope_bias: 0.0 }, 0, 0.0)
     };
 
+    let factor = config.antialias.clamp(1, 4);
     let make_pbr = |shadows: &'static [Option<maquette_core::shadow::LightShadow>]| PbrContext {
+        lod_scale_mul: (factor * factor) as f32,
         light_dir: Vec3::from(config.light_dir).normalized(),
         light_color: [1.0, 1.0, 1.0],
         ambient: {
@@ -233,17 +260,20 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
     let n_scene = scene.triangles.len();
     let total = n_scene + ground_tris.len();
     let tris = Tris { scene, ground: &ground_tris, ground_material: ground_material.as_deref() };
-    let cam = Cam { pos: camera_pos, view, projection, znear, zfar, focal, width: width_f, height: height_f, cull: config.cull_backface };
+    let cam = Cam { pos: camera_pos, view, projection, znear, zfar, focal, width: width_f, height: height_f, y_off, cull: config.cull_backface };
     let mut out = DepthPassOut { deferred: Vec::new(), deferred_idx: Vec::new(), blend: Vec::new() };
     buffer.begin_deferred(total);
 
-    let cacheable = !scene.dynamic.is_empty() && scene.static_key != 0 && !scene.materials_animated;
-    let shade_static: Option<&'static [Option<maquette_core::shadow::LightShadow>]> = match base_shadows {
-        _ if !cacheable => None,
+    let shade_reusable: Option<&'static [Option<maquette_core::shadow::LightShadow>]> = match base_shadows {
         None if config.shadows.is_none() => Some(&[][..]),
         Some(base) if base.iter().flatten().all(|l| l.single().is_some()) => Some(base),
         _ => None,
     };
+    let pass_key = (split_static && !scene.materials_animated).then(|| {
+        static_pass_key(scene.static_key, &cam, &ground_tris, config.shading_key, base_shadow_key, &raw_lights, shade_reusable.is_some())
+    });
+    let cacheable = pass_key.is_some_and(|k| crate::cache::static_pass(k).is_some() || crate::cache::static_pass_requested(k));
+    let shade_static = if cacheable { shade_reusable } else { None };
     let reach = {
         let pcf = shadow_softness as i64;
         let pcss = if shadow_pcss_light_size > 0.0 { 24 } else { 0 };
@@ -251,10 +281,12 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
     };
     let mut static_count = 0usize;
     let mut texels: &[u32] = &[];
+    let mut snapshot_blocks: Vec<(usize, u32)> = Vec::new();
+    let mut reduced: &[(usize, u32)] = &[];
     if cacheable {
         let mut moving = vec![false; n_scene];
         for &(a, b) in &scene.dynamic { moving[a..b].iter_mut().for_each(|m| *m = true); }
-        let key = static_pass_key(scene.static_key, &cam, &ground_tris, config.shading_key, base_shadow_key, &raw_lights, shade_static.is_some());
+        let key = pass_key.unwrap();
         let sp = match crate::cache::static_pass(key) {
             Some(sp) => {
                 buffer.restore_depth_state(&sp.zbuf, &sp.vis);
@@ -292,19 +324,22 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
                 out.deferred_idx.retain(|_| { id += 1; map[id - 1] != u32::MAX });
                 let (pixels, rects) = if let Some(base) = shade_static {
                     let pbr_static = make_pbr(base);
+                    let blocks = buffer.reduce_shading_rate(factor);
                     buffer.resolve_owners();
                     for (id, (prepared, material)) in out.deferred.iter().enumerate() {
                         if buffer.owns_pixels(id) {
                             shade_triangle_deferred(buffer, &pbr_static, material, prepared, id);
                         }
                     }
+                    buffer.fill_shading_rate(factor, &blocks);
+                    snapshot_blocks = blocks;
                     let maps: Vec<Option<&maquette_core::shadow::ShadowMap>> = base.iter().map(|l| l.as_ref().and_then(|l| l.single())).collect();
                     let (zbuf, vis) = buffer.depth_state();
                     let (w, half_w, half_h) = (buffer.width, width_f * 0.5, height_f * 0.5);
                     let mut texels = vec![TEXEL_NONE; vis.len() * maps.len()];
                     for (i, &v) in vis.iter().enumerate() {
                         if v == 0 || maps.is_empty() { continue; }
-                        let (sx, sy) = ((i % w) as f64 + 0.5, (i / w) as f64 + 0.5);
+                        let (sx, sy) = ((i % w) as f64 + 0.5, (i / w) as f64 + 0.5 + y_off);
                         let k = zbuf[i] as f64;
                         let vp = match projection {
                             Projection::Perspective { .. } => {
@@ -326,6 +361,17 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
                             };
                         }
                     }
+                    let n_maps = maps.len();
+                    for &(top, _) in &snapshot_blocks {
+                        for dy in 0..factor {
+                            for dx in 0..factor {
+                                let i = top + dy * w + dx;
+                                if i == top || n_maps == 0 { continue; }
+                                let (src, dst) = (top * n_maps, i * n_maps);
+                                texels.copy_within(src..src + n_maps, dst);
+                            }
+                        }
+                    }
                     (Some(buffer.pixels.clone()), texels)
                 } else {
                     (None, Vec::new())
@@ -336,13 +382,14 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
                 let mut entries: Vec<crate::cache::StaticEntry> = out.deferred.iter().zip(&out.deferred_idx).map(|((p, _), &i)| entry(i, p, false)).collect();
                 entries.extend(out.blend.iter().map(|(i, p)| entry(*i, p, true)));
                 let (zbuf, vis) = buffer.depth_state();
-                crate::cache::put_static_pass(key, crate::cache::StaticPass { zbuf, vis, pixels, texels: rects, entries });
+                crate::cache::put_static_pass(key, crate::cache::StaticPass { zbuf, vis, pixels, texels: rects, blocks: std::mem::take(&mut snapshot_blocks), entries });
                 crate::cache::static_pass(key).unwrap()
             }
         };
         if sp.pixels.is_some() {
             static_count = out.deferred.len();
             texels = &sp.texels;
+            reduced = &sp.blocks;
         }
         for i in 0..n_scene {
             if moving[i] { depth_pass_tri(i, &tris, &cam, &pbr, buffer, &mut out); }
@@ -360,16 +407,32 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
             _ => DirtyTiles::between(shadows, shade_static.unwrap_or(&[])),
         }.dilated(reach + 1);
         let n_maps = shadows.len();
+        let w = buffer.width;
+        let mut broken = vec![false; if reduced.is_empty() { 0 } else { buffer.width * buffer.height }];
+        {
+            let owners = buffer.owners();
+            for &(top, owner) in reduced {
+                let intact = (0..factor).all(|dy| owners[top + dy * w..top + dy * w + factor].iter().all(|&v| v == owner));
+                if intact { continue; }
+                for dy in 0..factor {
+                    broken[top + dy * w..top + dy * w + factor].iter_mut().for_each(|b| *b = true);
+                }
+            }
+        }
         buffer.retain_owners(|i, owner| {
-            owner >= static_count || texels[i * n_maps..(i + 1) * n_maps].iter().enumerate().any(|(m, &t)| dirty.hit(m, t))
+            owner >= static_count
+                || broken.get(i).copied().unwrap_or(false)
+                || texels[i * n_maps..(i + 1) * n_maps].iter().enumerate().any(|(m, &t)| dirty.hit(m, t))
         });
     }
+    let blocks = buffer.reduce_shading_rate(factor);
     buffer.resolve_owners();
     for (id, (prepared, material)) in deferred.iter().enumerate() {
         if buffer.owns_pixels(id) {
             shade_triangle_deferred(buffer, &pbr, material, prepared, id);
         }
     }
+    buffer.fill_shading_rate(factor, &blocks);
     buffer.end_deferred();
 
     crate::prof::mark(12);
@@ -388,8 +451,8 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
             Projection::Orthographic { half_w, half_h } => project_ortho(vp, half_w, half_h, width_f, height_f),
         };
         let x = sx as i32;
-        let y = sy as i32;
-        if x < 0 || y < 0 || x >= buffer.width as i32 || y >= buffer.height as i32 { continue; }
+        let y = sy as i32 - y_off as i32;
+        if x < 0 || y < 0 || x >= buffer.width as i32 || y >= buffer.height as i32 || (sy as i32) < 0 { continue; }
         let material = if pt.material_id == u32::MAX {
             ground_material.as_ref().expect("ground material required")
         } else {
@@ -432,7 +495,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
             Projection::Perspective { .. } => (-1.0 / va.z, -1.0 / vb.z),
             Projection::Orthographic { .. } => (-va.z, -vb.z),
         };
-        buffer.draw_line_depth((ax, ay), (bx, by), za as f32, zb as f32, rgba_a, rgba_b);
+        buffer.draw_line_depth((ax, ay), (bx, by), za as f32, zb as f32, rgba_a, rgba_b, y_off as usize);
     }
 }
 
@@ -479,6 +542,7 @@ struct Cam {
     focal: f64,
     width: f64,
     height: f64,
+    y_off: f64,
     cull: bool,
 }
 
@@ -500,7 +564,7 @@ fn static_pass_key(static_key: u64, cam: &Cam, ground: &[Triangle], shading_key:
         for v in [l.color[0], l.color[1], l.color[2], l.range, l.inner_cone_cos, l.outer_cone_cos] { h.write_u32(v.to_bits()); }
         h.write_u8(l.cast_shadow as u8);
     }
-    for v in [cam.pos.x, cam.pos.y, cam.pos.z, cam.znear, cam.zfar.unwrap_or(-1.0), cam.focal, cam.width, cam.height] {
+    for v in [cam.pos.x, cam.pos.y, cam.pos.z, cam.znear, cam.zfar.unwrap_or(-1.0), cam.focal, cam.width, cam.height, cam.y_off] {
         h.write_u64(v.to_bits());
     }
     for v in cam.view.0.iter().flatten() { h.write_u64(v.to_bits()); }
@@ -705,6 +769,7 @@ fn depth_pass_tri<'a>(i: usize, tris: &Tris<'a>, cam: &Cam, pbr: &PbrContext, bu
             [-v0.z, -v1.z, -v2.z],
         ),
     };
+    let pts = pts.map(|(x, y)| (x, y - cam.y_off));
     let prepared = PreparedTriangle {
         tri,
         pts,
@@ -814,7 +879,8 @@ fn shade_with(
         let s = material.xform_base.scale;
         (s[0] * s[1]).abs()
     };
-    let lod_scale = compute_lod_scale(&prepared.pts, tri) as f32 * xform_area_scale;
+    let rate = if matches!(pass, Pass::Deferred) { pbr.lod_scale_mul } else { 1.0 };
+    let lod_scale = compute_lod_scale(&prepared.pts, tri) as f32 * xform_area_scale * rate;
 
     let shader = MaterialShader::new(pbr, material, &prepared.textures, mask_cutoff, lod_scale);
     match pass {
