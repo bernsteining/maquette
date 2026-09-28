@@ -89,6 +89,41 @@ impl ShadowMap {
         Some((sx, sy, depth))
     }
 
+    /// Texel-space bounds `[x0, y0, x1, y1]` (inclusive, unclamped) of a
+    /// world-space triangle's projection, or `None` when a corner is behind
+    /// the light. Every point inside the triangle projects inside it.
+    pub fn texel_rect(&self, tri: &[Vec3; 3]) -> Option<[i64; 4]> {
+        let mut r = [i64::MAX, i64::MAX, i64::MIN, i64::MIN];
+        for v in tri {
+            let (x, y, _) = self.project(*v)?;
+            let (fx, fy) = (x.floor() as i64, y.floor() as i64);
+            r = [r[0].min(fx), r[1].min(fy), r[2].max(fx), r[3].max(fy)];
+        }
+        Some(r)
+    }
+
+    /// Texel containing the projection of `p`, or `None` behind the light.
+    pub fn texel_of(&self, p: Vec3) -> Option<(i64, i64)> {
+        let (x, y, _) = self.project(p)?;
+        Some((x.floor() as i64, y.floor() as i64))
+    }
+
+    /// Side length of the square depth map, in texels.
+    pub fn resolution(&self) -> usize {
+        self.res
+    }
+
+    /// Row-major depth texels (`resolution²`).
+    pub fn texels(&self) -> &[f32] {
+        &self.depth
+    }
+
+    /// Mutable depth texels, for callers that patch a map in place (e.g.
+    /// restoring regions from another map of the same frustum).
+    pub fn texels_mut(&mut self) -> &mut [f32] {
+        &mut self.depth
+    }
+
     #[inline(always)]
     fn texel_world(&self, p: Vec3) -> f64 {
         if self.ortho {
@@ -320,6 +355,22 @@ impl LightShadow {
             LightShadow::Cube(f) => f[cube_face(p, f[0].eye)].lit_pcss(p, normal, b, softness, light_size),
         }
     }
+    /// The single frustum, or `None` for an omnidirectional cube.
+    pub fn single(&self) -> Option<&ShadowMap> {
+        match self {
+            LightShadow::Single(m) => Some(m),
+            LightShadow::Cube(_) => None,
+        }
+    }
+
+    /// Mutable single frustum, or `None` for an omnidirectional cube.
+    pub fn single_mut(&mut self) -> Option<&mut ShadowMap> {
+        match self {
+            LightShadow::Single(m) => Some(m),
+            LightShadow::Cube(_) => None,
+        }
+    }
+
     /// Rasterise more casters into an existing shadow. Depth keeps the nearest
     /// value per texel, so splitting casters across calls gives the same map.
     pub fn add_casters(&mut self, triangles: &[CasterTri]) {

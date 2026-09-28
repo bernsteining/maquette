@@ -317,6 +317,40 @@ impl PixelBuffer {
         }
     }
 
+    /// Copy of the depth and ownership buffers mid deferred pass, to restore
+    /// with [`restore_depth_state`](Self::restore_depth_state) on a later
+    /// render that starts from the same geometry.
+    pub fn depth_state(&self) -> (Vec<f32>, Vec<u32>) {
+        (self.zbuf.clone(), self.vis.clone())
+    }
+
+    /// Overwrite the depth and ownership buffers after `begin_deferred`. Both
+    /// slices must match this buffer's pixel count.
+    pub fn restore_depth_state(&mut self, zbuf: &[f32], vis: &[u32]) {
+        self.zbuf.copy_from_slice(zbuf);
+        self.vis.copy_from_slice(vis);
+    }
+
+    /// Renumber the owners recorded in the visibility buffer through `map`
+    /// (old id → new id) and clear the ownership flags, so a caller can drop
+    /// deferred triangles that own no pixel. Call `resolve_owners` again after.
+    pub fn remap_owners(&mut self, map: &[u32]) {
+        for v in &mut self.vis {
+            if *v != 0 { *v = map[*v as usize - 1] + 1; }
+        }
+        self.owned.iter_mut().for_each(|o| *o = 0);
+    }
+
+    /// Clear the owner of every pixel for which `keep(pixel, owner_id)` is
+    /// false, so deferred shading leaves those pixels as they are, and clear
+    /// the ownership flags. Call `resolve_owners` again after.
+    pub fn retain_owners(&mut self, mut keep: impl FnMut(usize, usize) -> bool) {
+        for (i, v) in self.vis.iter_mut().enumerate() {
+            if *v != 0 && !keep(i, *v as usize - 1) { *v = 0; }
+        }
+        self.owned.iter_mut().for_each(|o| *o = 0);
+    }
+
     pub fn end_deferred(&mut self) {
         self.vis = Vec::new();
         self.owned = Vec::new();

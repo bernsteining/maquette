@@ -32,6 +32,8 @@ static mut LOADED_CACHE: Option<(u64, LoadedGltf)> = None;
 static mut EMIT_CACHE: Option<(u64, Vec<NodeEmit>)> = None;
 static mut SHADOW_CACHE: Vec<(u64, Vec<Option<LightShadow>>)> = Vec::new();
 static mut STATIC_SHADOW_CACHE: Option<(u64, Vec<Option<LightShadow>>)> = None;
+static mut STATIC_PASS_CACHE: Vec<(u64, StaticPass)> = Vec::new();
+static mut WORK_SHADOWS: Option<WorkShadows> = None;
 /// Leaky Vec of texture-bundle cache entries. Each entry lives forever, so
 /// references into it are safely `'static`.
 static mut TEXTURE_CACHE: Vec<(u64, Vec<Texture>)> = Vec::new();
@@ -138,6 +140,16 @@ pub fn scene_for(
         }
         let (_, ref loaded) = LOADED_CACHE.as_ref().unwrap();
         let base = hash(input.key, SceneOpts { time: 0.0, ..opts });
+        if matches!(EMIT_CACHE, Some((b, _)) if b == base) && SCENE_CACHE.is_some() {
+            let (_, mut scene) = SCENE_CACHE.take().unwrap();
+            let (b, mut emits) = EMIT_CACHE.take().unwrap();
+            if crate::scene::update_in_place(loaded, opts, &mut scene, &mut emits) {
+                SCENE_CACHE = Some((key, scene));
+                EMIT_CACHE = Some((b, emits));
+                let (_, ref s) = SCENE_CACHE.as_ref().unwrap();
+                return Ok((key, std::mem::transmute::<&Scene, &'static Scene>(s)));
+            }
+        }
         let prev = match (&SCENE_CACHE, &EMIT_CACHE) {
             (Some((_, ps)), Some((b, pe))) if *b == base => Some((ps, pe.as_slice())),
             _ => None,
@@ -178,6 +190,59 @@ pub fn static_shadows_for(key: u64, build: impl FnOnce() -> Vec<Option<LightShad
             *slot = Some((key, build()));
         }
         std::mem::transmute::<&[Option<LightShadow>], &'static [Option<LightShadow>]>(slot.as_ref().unwrap().1.as_slice())
+    }
+}
+
+/// Shadow maps for the current animation frame, kept between calls and
+/// patched in place: `dirty` marks, per single-frustum light, the tiles where
+/// `maps` differs from the static-only `base_key` maps.
+pub struct WorkShadows {
+    pub base_key: u64,
+    pub frame_key: u64,
+    pub maps: Vec<Option<LightShadow>>,
+    pub dirty: Vec<Option<(i64, Vec<bool>)>>,
+}
+
+pub fn work_shadows() -> &'static mut Option<WorkShadows> {
+    unsafe { &mut *std::ptr::addr_of_mut!(WORK_SHADOWS) }
+}
+
+/// One static triangle's projection, recorded by the depth pass.
+pub struct StaticEntry {
+    pub index: usize,
+    pub pts: [(f64, f64); 3],
+    pub depths: [f64; 3],
+    pub zbuf_depths: [f64; 3],
+    pub view_center_z: f64,
+    pub blend: bool,
+}
+
+/// Depth and ownership buffers after rasterising a scene's static triangles
+/// for one camera and resolution, plus what each of those triangles became
+/// (deferred opaque/mask, or queued for blending), in draw order.
+pub struct StaticPass {
+    pub zbuf: Vec<f32>,
+    pub vis: Vec<u32>,
+    /// Static triangles shaded against static-only shadow maps, when the
+    /// shading can be reused; `texels` then holds, per pixel and per light,
+    /// the shadow-map texel that pixel samples (see `render::TEXEL_*`).
+    pub pixels: Option<Vec<u8>>,
+    pub texels: Vec<u32>,
+    pub entries: Vec<StaticEntry>,
+}
+
+pub fn static_pass(key: u64) -> Option<&'static StaticPass> {
+    unsafe {
+        let cache = &*std::ptr::addr_of!(STATIC_PASS_CACHE);
+        cache.iter().find(|(k, _)| *k == key).map(|(_, p)| std::mem::transmute::<&StaticPass, &'static StaticPass>(p))
+    }
+}
+
+pub fn put_static_pass(key: u64, pass: StaticPass) {
+    unsafe {
+        let cache = &mut *std::ptr::addr_of_mut!(STATIC_PASS_CACHE);
+        if cache.len() >= 3 { cache.remove(0); }
+        cache.push((key, pass));
     }
 }
 

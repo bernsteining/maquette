@@ -216,6 +216,9 @@ pub struct RenderConfig {
     /// declare mappings. Defaults to 0 (first variant, or the primitive's
     /// baked material when no mapping matches).
     pub material_variant: u32,
+    /// Hash of every config entry except `time`: equal keys shade a static
+    /// surface identically at any animation time.
+    pub shading_key: u64,
 }
 
 impl Default for RenderConfig {
@@ -253,6 +256,7 @@ impl Default for RenderConfig {
             texture_max_size: None,
             time: 0.0,
             material_variant: 0,
+            shading_key: 0,
         }
     }
 }
@@ -268,6 +272,18 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
     };
 
     let mut cfg = RenderConfig::default();
+    {
+        use std::hash::Hasher;
+        let mut h = maquette_core::math::FxHasher::default();
+        for (key, v) in map.iter() {
+            if key == "time" { continue; }
+            h.write(key.as_bytes());
+            h.write_u8(0);
+            h.write(v.to_string().as_bytes());
+            h.write_u8(1);
+        }
+        cfg.shading_key = h.finish() | 1;
+    }
     for (key, v) in map.iter() {
         if v.is_null() || v.as_str() == Some("none") {
             match key.as_str() {

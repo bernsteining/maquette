@@ -92,6 +92,11 @@ fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_b
     install_panic_hook();
     let mut config = config::parse(config_json)?;
     if !hdr_data.is_empty() {
+        use std::hash::Hasher;
+        let mut h = maquette_core::math::FxHasher::default();
+        h.write_u64(config.shading_key);
+        h.write(hdr_data);
+        config.shading_key = h.finish() | 1;
         if let Some(ref mut ibl) = config.ibl {
             ibl.hdr_bytes = Some(hdr_data.to_vec());
         } else {

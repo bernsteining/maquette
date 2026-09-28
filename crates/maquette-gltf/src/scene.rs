@@ -384,6 +384,9 @@ pub struct Scene {
     /// Identifies the scene up to animation time (0 = unknown): together with
     /// `dynamic`, lets per-time work reuse what the static part produced.
     pub static_key: u64,
+    /// True when `KHR_animation_pointer` channels rewrite materials, so even
+    /// static geometry can look different at another time.
+    pub materials_animated: bool,
 }
 
 pub use maquette_core::light::{LightKind, PunctualLight};
@@ -427,6 +430,7 @@ impl Scene {
             bbox_max: Vec3::new(-f64::INFINITY, -f64::INFINITY, -f64::INFINITY),
             dynamic: Vec::new(),
             static_key: 0,
+            materials_animated: false,
         }
     }
 
@@ -517,6 +521,7 @@ pub fn flatten_with_cached_textures(loaded: &LoadedGltf, opts: SceneOpts, asset_
     scene.materials = collect_materials(loaded);
     let (anim, pointer_writes) = sample_animations(loaded, opts.time, opts.animation_index);
     apply_pointer_writes(&mut scene, &pointer_writes);
+    scene.materials_animated = !pointer_writes.is_empty();
     let emits = fill_scene(&mut scene, loaded, &anim, opts.variant, opts.scene_index, prev);
     (scene, emits)
 }
@@ -726,6 +731,84 @@ fn fill_scene(scene: &mut Scene, loaded: &LoadedGltf, anim: &[AnimSample], varia
         }
     }
     emits
+}
+
+/// Advance a flattened scene to another animation time in place: nodes whose
+/// inputs changed are re-emitted into the slots they occupied. Returns false
+/// (leaving `scene` unusable) when a node's primitive counts changed or the
+/// records don't line up, in which case the caller must flatten from scratch.
+pub fn update_in_place(loaded: &LoadedGltf, opts: SceneOpts, scene: &mut Scene, emits: &mut [NodeEmit]) -> bool {
+    let (anim, pointer_writes) = sample_animations(loaded, opts.time, opts.animation_index);
+    let world_transforms = compute_world_transforms(loaded, &anim);
+    let root_scene = opts.scene_index
+        .and_then(|i| loaded.document.scenes().nth(i))
+        .or_else(|| loaded.document.default_scene())
+        .or_else(|| loaded.document.scenes().next());
+    let Some(root_scene) = root_scene else { return false; };
+
+    let mut stack: Vec<usize> = root_scene.nodes().map(|n| n.index()).collect();
+    let mut seen = vec![false; loaded.document.nodes().count()];
+    let mut scratch = Scene::empty();
+    let mut k = 0;
+    while let Some(node_index) = stack.pop() {
+        if seen[node_index] { continue; }
+        seen[node_index] = true;
+        let node = loaded.document.nodes().nth(node_index).unwrap();
+
+        if let Some(mesh) = node.mesh() {
+            let Some(e) = emits.get_mut(k) else { return false; };
+            k += 1;
+            if e.node != node_index { return false; }
+            let palette = node.skin().map(|s| compute_joint_palette(loaded, &s, &world_transforms));
+            let world = world_transforms[node_index];
+            let node_weights = anim.get(node_index).and_then(|a| a.weights.clone())
+                .or_else(|| node.weights().map(|w| w.to_vec()))
+                .or_else(|| mesh.weights().map(|w| w.to_vec()));
+            if !e.matches(node_index, &world, &palette, &node_weights) {
+                let empty = Scene::empty();
+                scratch.triangles.clear();
+                scratch.lines.clear();
+                scratch.points.clear();
+                scratch.bbox_min = empty.bbox_min;
+                scratch.bbox_max = empty.bbox_max;
+                emit_mesh(&mut scratch, loaded, mesh, world, palette.as_deref(), node_weights.as_deref(), opts.variant);
+                if scratch.triangles.len() != e.tris.1 - e.tris.0
+                    || scratch.lines.len() != e.lines.1 - e.lines.0
+                    || scratch.points.len() != e.points.1 - e.points.0
+                {
+                    return false;
+                }
+                scene.triangles[e.tris.0..e.tris.1].copy_from_slice(&scratch.triangles);
+                scene.lines[e.lines.0..e.lines.1].copy_from_slice(&scratch.lines);
+                scene.points[e.points.0..e.points.1].copy_from_slice(&scratch.points);
+                e.world = world;
+                e.palette = palette;
+                e.weights = node_weights;
+                e.bbox = (scratch.bbox_min, scratch.bbox_max);
+            }
+        }
+
+        for child in node.children() {
+            stack.push(child.index());
+        }
+    }
+    if k != emits.len() { return false; }
+
+    let empty = Scene::empty();
+    scene.bbox_min = empty.bbox_min;
+    scene.bbox_max = empty.bbox_max;
+    for e in emits.iter() {
+        if e.bbox.0.x <= e.bbox.1.x {
+            scene.extend_bbox(e.bbox.0);
+            scene.extend_bbox(e.bbox.1);
+        }
+    }
+    scene.materials = collect_materials(loaded);
+    apply_pointer_writes(scene, &pointer_writes);
+    scene.materials_animated = !pointer_writes.is_empty();
+    scene.lights = collect_lights(loaded, &world_transforms);
+    scene.cameras = collect_cameras(loaded, &world_transforms);
+    true
 }
 
 fn animated_nodes(loaded: &LoadedGltf) -> Vec<bool> {
