@@ -173,8 +173,8 @@ const SCHEMA = [
   ]},
 
   { s: "Post-processing", fields: [
-    { k: "antialias", label: "Antialiasing", help: "0 off · 1 FXAA · 2/4 supersampling (PNG only).", t: "sel", def: 1, num: true, opts: [[0,"Off"],[1,"FXAA"],[2,"SSAA ×2"],[4,"SSAA ×4"]] },
-    { k: "ssao", label: "Ambient occlusion", help: "Screen-space ambient occlusion — contact shadows (PNG only).", t: "grp", toggle: true, bool: true, def: { samples: 16, radius: 0.5, bias: 0.025, strength: 1 }, fields: [
+    { k: "antialias", label: "Antialiasing", help: "0 off · 1 FXAA · 2/4 supersampling · 5/6 FXAA on top of supersampling ×2/×4 (PNG only).", t: "sel", def: 2, typstDef: 1, num: true, opts: [[0,"Off"],[1,"FXAA"],[2,"SSAA ×2"],[4,"SSAA ×4"],[5,"FXAA + SSAA ×2"],[6,"FXAA + SSAA ×4"]] },
+    { k: "ssao", label: "Ambient occlusion", help: "Screen-space ambient occlusion — contact shadows (PNG only).", t: "grp", toggle: true, bool: true, def: { __on: true, samples: 16, radius: 0.5, bias: 0.025, strength: 1 }, fields: [
       { k: "samples", label: "Samples", t: "num", def: 16 },
       { k: "radius", label: "Radius", t: "num", def: 0.5 },
       { k: "bias", label: "Bias", t: "num", def: 0.025 },
@@ -305,12 +305,12 @@ const GLTF_SCHEMA = [
   ]},
 
   { s: "Post-processing", fields: [
-    { k: "antialias",    label: "SSAA", help: "0 off · 1 FXAA · 2/4 supersampling (PNG only).",       t: "sel", def: 1, num: true, opts: [[1, "Off"], [2, "×2"], [4, "×4"]] },
-    { k: "fxaa",         label: "FXAA",       t: "bool", def: true },
+    { k: "antialias",    label: "SSAA", help: "0 off · 1 FXAA · 2/4 supersampling (PNG only).",       t: "sel", def: 2, typstDef: 1, num: true, opts: [[1, "Off"], [2, "×2"], [4, "×4"]] },
+    { k: "fxaa",         label: "FXAA",       t: "bool", def: false },
     { k: "tone_mapping", label: "Tone mapping", help: "HDR tone mapping (ACES/Reinhard) + exposure.", t: "sel", def: "aces", opts: [["none", "None"], ["reinhard", "Reinhard"], ["aces", "ACES"]] },
     { k: "exposure",     label: "Exposure",   t: "rng", def: 1.2, min: 0, max: 4, step: 0.05 },
     { k: "ssao", label: "SSAO", help: "Screen-space ambient occlusion — contact shadows (PNG only).", t: "grp", toggle: true, bool: false, def: {
-        samples: 16, radius: 0.4, bias: 0.02, strength: 1.0
+        __on: true, samples: 16, radius: 0.4, bias: 0.02, strength: 1.0
       }, fields: [
       { k: "samples",  label: "Samples",  t: "num", def: 16 },
       { k: "radius",   label: "Radius",   t: "num", def: 0.4 },

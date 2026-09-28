@@ -49,7 +49,7 @@ function buildTypst() {
         if (f.build === "clip") { push(f.k, fmtT(group(f, "cfg"))); break; }
         if (f.build === "turntable") { const s = state[f.k]; push("turntable", s.elevation === f.def.elevation ? num(s.iterations) : fmtT({ iterations: s.iterations, elevation: s.elevation })); break; }
         const d = group(f, "diff");
-        if (Object.keys(d).length === 0) { if (f.toggle && f.bool) push(f.k, "true"); break; }
+        if (Object.keys(d).length === 0) { if (f.toggle) push(f.k, f.bool ? "true" : fmtT(group(f, "cfg"))); break; }
         push(f.k, fmtT(d));
         break;
       }
@@ -66,7 +66,7 @@ function buildTypst() {
           : `(\n    ${entries.join(",\n    ")},\n  )`);
         break;
       }
-      default: if (!eq(state[f.k], f.def)) push(f.k, fmtT(state[f.k]));
+      default: if (!eq(state[f.k], f.typstDef ?? f.def)) push(f.k, fmtT(state[f.k]));
     }
   }
   if (outputFormat === "svg") P.push('format: "svg"');
