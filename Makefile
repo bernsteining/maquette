@@ -17,6 +17,7 @@ wasm:
 	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo rustc --target wasm32-unknown-unknown --release -p maquette --crate-type cdylib
 	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(WASM_TARGET) -o $(WASM_OUT)
 	@ls -lh $(WASM_OUT)
+	@[ -n "$$CI" ] || cp $(WASM_OUT) docs/maquette.wasm
 
 # Local: build + install into the typst local package dir. Copies the
 # whole package (wasm + typst.toml + .typ) so `@local/maquette:0.2.0`
@@ -73,13 +74,20 @@ demo-assets:
 	cp $(addprefix examples/data/molecules/,$(DEMO_MOL_MODELS)) docs/molecules/
 	cp $(addprefix examples/data/scad/,$(DEMO_SCAD_MODELS)) docs/scad/
 
+# Serve docs/ on :8000 with caching disabled, so a reload always picks up the
+# freshly built wasm and JS (plain http.server lets browsers reuse them).
+PORT ?= 8000
+serve:
+	@git rev-parse --short HEAD > docs/build.txt 2>/dev/null || true
+	python3 -c 'import functools, http.server as h; S = h.SimpleHTTPRequestHandler; H = type("H", (S,), {"end_headers": lambda s: (s.send_header("Cache-Control", "no-store"), S.end_headers(s))[1]}); print("serving docs/ on http://localhost:$(PORT) (no-store)"); h.ThreadingHTTPServer(("", $(PORT)), functools.partial(H, directory="docs")).serve_forever()'
+
 # Assemble the demo dir locally: fresh wasm + models, ready to serve.
 demo: wasm demo-assets scad-wasm gltf-wasm
 	cp $(WASM_OUT) docs/maquette.wasm
 	cp $(SCAD_WASM_OUT) docs/maquette-scad.wasm
 	cp $(GLTF_WASM_OUT) docs/maquette-gltf.wasm
 	@git rev-parse --short HEAD > docs/build.txt 2>/dev/null || true   # local build stamp; the pill reads it
-	@echo "docs/ ready — serve with:  python3 -m http.server -d docs"
+	@echo "docs/ ready — serve with:  make serve"
 
 # --- maquette-scad: OpenSCAD/CSG plugin (workspace member, Manifold kernel) ---
 SCAD_WASM_TARGET = target/wasm32-unknown-unknown/release/maquette_scad.wasm
@@ -135,6 +143,7 @@ scad-wasm:
 	  cargo build --target wasm32-unknown-unknown --release -p maquette-scad
 	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops --converge $(SCAD_WASM_TARGET) -o $(SCAD_WASM_OUT)
 	@ls -lh $(SCAD_WASM_OUT)
+	@[ -n "$$CI" ] || cp $(SCAD_WASM_OUT) docs/maquette-scad.wasm
 	@[ -n "$(SCAD_CXX_FLAGS)" ] && echo "  (built with $(SCAD_CXX_FLAGS) via emsdk wasm-ld)" || echo "  (built without LTO — set EMSDK to enable)"
 
 # --- maquette-gltf: glTF 2.0 plugin (workspace member, shares maquette-core) ---
@@ -151,6 +160,7 @@ gltf-wasm:
 	RUSTFLAGS="$(RUSTFLAGS_WASM)" cargo rustc --target wasm32-unknown-unknown --release -p maquette-gltf --crate-type cdylib
 	wasm-opt -O3 --enable-simd --enable-bulk-memory --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-multivalue --traps-never-happen --fast-math --closed-world --directize --inline-functions-with-loops $(GLTF_WASM_TARGET) -o $(GLTF_WASM_OUT)
 	@ls -lh $(GLTF_WASM_OUT)
+	@[ -n "$$CI" ] || cp $(GLTF_WASM_OUT) docs/maquette-gltf.wasm
 
 # Install glTF plugin into the local Typst package dir (mirror of `build`).
 gltf-build: gltf-wasm
@@ -215,4 +225,4 @@ install-hooks:
 	git config core.hooksPath .githooks
 	@echo "git hooks path set to .githooks — pre-commit active (skip with git commit --no-verify)"
 
-.PHONY: wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint lint-js test check install-hooks cli cli-install
+.PHONY: serve wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint lint-js test check install-hooks cli cli-install
