@@ -254,10 +254,21 @@ pub fn static_pass_requested(key: u64) -> bool {
     }
 }
 
+const STATIC_PASS_BUDGET: usize = 256 << 20;
+
+impl StaticPass {
+    fn bytes(&self) -> usize {
+        self.zbuf.len() * 4 + self.vis.len() * 4 + self.pixels.as_ref().map_or(0, |p| p.len()) + self.texels.len() * 4
+    }
+}
+
 pub fn put_static_pass(key: u64, pass: StaticPass) {
     unsafe {
         let cache = &mut *std::ptr::addr_of_mut!(STATIC_PASS_CACHE);
-        if cache.len() >= 3 { cache.remove(0); }
+        let incoming = pass.bytes();
+        while !cache.is_empty() && (cache.len() >= 3 || cache.iter().map(|(_, p)| p.bytes()).sum::<usize>() + incoming > STATIC_PASS_BUDGET) {
+            cache.remove(0);
+        }
         cache.push((key, pass));
     }
 }

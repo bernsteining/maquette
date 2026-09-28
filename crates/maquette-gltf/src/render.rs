@@ -85,6 +85,7 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
 }
 
 const BAND_PAD: usize = 24;
+const STATIC_PASS_MAX_SAMPLES: usize = 8 << 20;
 
 #[derive(Clone, Copy)]
 struct Frame {
@@ -269,7 +270,8 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         Some(base) if base.iter().flatten().all(|l| l.single().is_some()) => Some(base),
         _ => None,
     };
-    let pass_key = (split_static && !scene.materials_animated).then(|| {
+    let small_enough = buffer.width * buffer.height <= STATIC_PASS_MAX_SAMPLES;
+    let pass_key = (split_static && small_enough && !scene.materials_animated).then(|| {
         static_pass_key(scene.static_key, &cam, &ground_tris, config.shading_key, base_shadow_key, &raw_lights, shade_reusable.is_some())
     });
     let cacheable = pass_key.is_some_and(|k| crate::cache::static_pass(k).is_some() || crate::cache::static_pass_requested(k));
