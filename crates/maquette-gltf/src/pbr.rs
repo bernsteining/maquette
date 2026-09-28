@@ -94,12 +94,8 @@ impl SplattedLight {
     }
 }
 
-/// Tone-mapping operator. `None` = raw linear (clamped at gamma encode);
-/// `Reinhard` = simple `x / (1 + x)`; `Aces` = ACES-fitted rational
-/// approximation. Both non-None operators multiply by `exposure` first, so
-/// they work like a virtual camera EV setting.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ToneMap { None, Reinhard, Aces }
+pub use maquette_core::tonemap::ToneMap;
+use maquette_core::tonemap::{tone_map as tone_map_scalar, tone_map_4};
 
 /// Everything a shader call needs that doesn't vary per pixel.
 pub struct PbrContext {
@@ -326,46 +322,6 @@ fn resolve_light_scalar(light: &SplattedLight, world_pos: Vec3) -> ([f32; 3], [f
         }
     }
 }
-
-#[inline]
-fn tone_map_scalar(r: f32, g: f32, b: f32, method: ToneMap, exposure: f32) -> (f32, f32, f32) {
-    if method == ToneMap::None { return (r, g, b); }
-    let (r, g, b) = (r * exposure, g * exposure, b * exposure);
-    match method {
-        ToneMap::Reinhard => (r / (1.0 + r), g / (1.0 + g), b / (1.0 + b)),
-        ToneMap::Aces => {
-            #[inline]
-            fn aces(x: f32) -> f32 {
-                let a = x * (2.51 * x + 0.03);
-                let b = x * (2.43 * x + 0.59) + 0.14;
-                (a / b).clamp(0.0, 1.0)
-            }
-            (aces(r), aces(g), aces(b))
-        }
-        ToneMap::None => unreachable!(),
-    }
-}
-
-#[inline(always)]
-fn tone_map_4(v: v128, method: ToneMap, exp4: v128) -> v128 {
-    match method {
-        ToneMap::None => v,
-        ToneMap::Reinhard => {
-            let ve = f32x4_mul(v, exp4);
-            f32x4_div(ve, f32x4_add(f32x4_splat(1.0), ve))
-        }
-        ToneMap::Aces => {
-            let ve = f32x4_mul(v, exp4);
-            let a = f32x4_mul(ve, f32x4_add(f32x4_mul(f32x4_splat(2.51), ve), f32x4_splat(0.03)));
-            let b = f32x4_add(
-                f32x4_mul(ve, f32x4_add(f32x4_mul(f32x4_splat(2.43), ve), f32x4_splat(0.59))),
-                f32x4_splat(0.14),
-            );
-            f32x4_min(f32x4_max(f32x4_div(a, b), f32x4_splat(0.0)), f32x4_splat(1.0))
-        }
-    }
-}
-
 
 pub struct MaterialShader<'a> {
     ctx: &'a PbrContext,

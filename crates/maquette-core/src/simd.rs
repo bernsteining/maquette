@@ -83,6 +83,8 @@ pub fn f32x4_lt(a: v128, b: v128) -> v128 { uwf(wf(a).simd_lt(wf(b))) }
 #[inline]
 pub fn f32x4_ne(a: v128, b: v128) -> v128 { uwf(wf(a).simd_ne(wf(b))) }
 #[inline]
+pub fn f32x4_eq(a: v128, b: v128) -> v128 { uwf(wf(a).simd_eq(wf(b))) }
+#[inline]
 pub fn f32x4_extract_lane<const N: usize>(a: v128) -> f32 { af32(a)[N] }
 #[inline]
 pub fn f32x4_replace_lane<const N: usize>(a: v128, x: f32) -> v128 {
@@ -199,6 +201,11 @@ pub fn u32x4_extend_low_u16x8(a: v128) -> v128 {
     let l = au16(a);
     vi32([l[0] as i32, l[1] as i32, l[2] as i32, l[3] as i32])
 }
+#[inline]
+pub fn u32x4_extend_high_u16x8(a: v128) -> v128 {
+    let l = au16(a);
+    vi32([l[4] as i32, l[5] as i32, l[6] as i32, l[7] as i32])
+}
 
 #[inline]
 pub fn u8x16_splat(a: u8) -> v128 { v128([a; 16]) }
@@ -260,6 +267,12 @@ pub fn i8x16_bitmask(a: v128) -> u16 {
         m |= ((a.0[i] >> 7) as u16) << i;
     }
     m
+}
+#[inline]
+pub fn i32x4_shuffle<const I0: usize, const I1: usize, const I2: usize, const I3: usize>(a: v128, b: v128) -> v128 {
+    let (la, lb) = (ai32(a), ai32(b));
+    let pick = |j: usize| if j < 4 { la[j] } else { lb[j - 4] };
+    vi32([pick(I0), pick(I1), pick(I2), pick(I3)])
 }
 #[inline]
 pub fn i8x16_shuffle<

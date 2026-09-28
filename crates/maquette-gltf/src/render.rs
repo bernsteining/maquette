@@ -22,7 +22,8 @@ use maquette_core::math::{Mat4, Vec3};
 use crate::pbr::{IblContext, MaterialShader, PbrContext, SplattedLight, ToneMap};
 use maquette_core::rasterizer::{BlendMode, PixelBuffer};
 use crate::scene::{AlphaMode, Material, Scene, Triangle, Vertex};
-use maquette_core::ssao::{DepthCamera, Hashed256, SSAOParams};
+use maquette_core::effects::{raw_raster, PostEffects};
+use maquette_core::ssao::{DepthCamera, SSAOParams};
 
 pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     let width = config.width.max(1);
@@ -51,19 +52,10 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     crate::prof::mark(15);
 
     let ssao = config.ssao.as_ref().map(|s| {
-        let scene_space = s.scene_space && camera.is_some();
-        let radius = match s.radius {
-            Some(r) => r,
-            None if scene_space => 0.1 * scene.bounds().1,
-            None => 0.5,
-        };
-        SSAOParams {
-            samples: s.samples, radius, strength: s.strength,
-            bias: if scene_space { s.bias * radius } else { s.bias },
-            camera: if scene_space { camera } else { None },
-        }
+        let scene_space = if s.scene_space { camera.map(|c| (c, scene.bounds().1)) } else { None };
+        SSAOParams::new(s.samples, s.radius, s.bias, s.strength, scene_space)
     });
-    let mut buffer = if transparent || ssao.is_some() { buffer.downsample_with_depth(factor) } else { buffer.downsample(factor) };
+    let (mut buffer, _) = buffer.resolve(factor, false, transparent || ssao.is_some());
     crate::prof::mark(16);
     if let Some(cam) = ssao.as_ref().and_then(|p| p.camera) {
         depth_to_view_z(&mut buffer.zbuf, &cam);
@@ -80,13 +72,13 @@ pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
                 if p.len() >= MAX_PENDING_BANDS { p.remove(0); }
                 p.push(PendingBand { buffer, params, post });
             });
-            return depth;
+            depth
         }
-        Some(params) => buffer.apply_ssao::<Hashed256>(&params),
-        None => {}
+        ssao => {
+            crate::prof::mark(17);
+            post.finish(buffer, ssao)
+        }
     }
-    crate::prof::mark(17);
-    post.finish(buffer)
 }
 
 /// Complete a banded render deferred by SSAO: `render` with both `band` and
@@ -107,8 +99,8 @@ pub fn finish_band(y0: usize, full_depth: &[u8]) -> Result<Vec<u8>, String> {
         return Err(format!("full depth is {} bytes, expected {}", full_depth.len(), post.width * post.height * 4));
     }
     let depth: Vec<f32> = full_depth.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
-    buffer.apply_ssao_band::<Hashed256>(&params, &depth, post.width, post.height, post.top);
-    Ok(post.finish(buffer))
+    buffer.apply_ssao_band(&params, &depth, post.width, post.height, post.top);
+    Ok(post.finish(buffer, None))
 }
 
 const MAX_PENDING_BANDS: usize = 8;
@@ -136,10 +128,8 @@ struct Post {
 }
 
 impl Post {
-    fn finish(self, mut buffer: PixelBuffer) -> Vec<u8> {
-        if self.fxaa {
-            maquette_core::fxaa::apply_fxaa(&mut buffer.pixels, buffer.width, buffer.height);
-        }
+    fn finish(self, mut buffer: PixelBuffer, ssao: Option<SSAOParams>) -> Vec<u8> {
+        buffer.apply_post(&PostEffects { ssao, fxaa: self.fxaa, ..Default::default() });
         crate::prof::mark(18);
         let (w, h, mut rgba) = if self.transparent {
             buffer.to_rgba8_transparent_by_depth()
@@ -154,7 +144,7 @@ impl Post {
         } else {
             (w, h)
         };
-        let out = encode_raw_rgba(w, h, rgba);
+        let out = raw_raster(0x00, w, h, &rgba, &[]);
         crate::prof::mark(19);
         out
     }
@@ -301,11 +291,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
             [a, a, a]
         },
         camera_pos,
-        tone_map: match config.tone_mapping.as_str() {
-            "reinhard" => ToneMap::Reinhard,
-            "aces" => ToneMap::Aces,
-            _ => ToneMap::None,
-        },
+        tone_map: ToneMap::parse(&config.tone_mapping),
         exposure: config.exposure as f32,
         ibl: config.ibl.as_ref().map(|c| IblContext { sky: c.sky, ground: c.ground, intensity: c.intensity }),
         ibl_env: config.ibl.as_ref().and_then(|c| {
@@ -1151,14 +1137,4 @@ fn resolve_background(bg: &str) -> ((u8, u8, u8), bool) {
     (maquette_core::color::parse_hex_color(bg), false)
 }
 
-/// Wire format for the Typst wrapper:
-///   `[0x00][w u32 LE][h u32 LE][rgba8...]`
-fn encode_raw_rgba(w: u32, h: u32, mut rgba: Vec<u8>) -> Vec<u8> {
-    let mut out = Vec::with_capacity(9 + rgba.len());
-    out.push(0x00);
-    out.extend_from_slice(&w.to_le_bytes());
-    out.extend_from_slice(&h.to_le_bytes());
-    out.append(&mut rgba);
-    out
-}
 

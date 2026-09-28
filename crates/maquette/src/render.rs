@@ -10,7 +10,9 @@ use crate::color::{linear_to_srgb, parse_hex_color, srgb_to_linear};
 use crate::math::{quantize, fx_hashmap_cap, FxBuildHasher, FxHashMap, Mat4, Vec3, ViewMatSimd};
 use crate::outline;
 use crate::parser::Triangle;
+use maquette_core::effects::{raw_raster, Bloom, Fog, Glow, PostEffects};
 use maquette_core::rasterizer::PixelBuffer;
+use maquette_core::ssao::SSAOParams;
 use crate::smooth;
 use crate::projection::*;
 use crate::shading::*;
@@ -172,7 +174,7 @@ fn build_shadow_data(
     allow_per_pixel: bool,
 ) -> Option<ShadowData> {
     let cfg = config.shadows.as_ref()?;
-    if cfg.strength <= 0.0 || lights.is_empty() {
+    if cfg.strength <= 0.0 || lights.is_empty() || config.shading == "unlit" {
         return None;
     }
     let per_pixel = cfg.per_pixel && allow_per_pixel;
@@ -260,6 +262,9 @@ fn shadow_data_for<'a>(
     allow_per_pixel: bool,
 ) -> Option<&'a ShadowData> {
     static mut CACHE: Vec<(u64, Option<ShadowData>)> = Vec::new();
+    if config.shading == "unlit" {
+        return None;
+    }
     let build = || build_shadow_data(tris, lights, smooth, config, group_styles, bc, br, allow_per_pixel);
     let Some(key) = prep_key.and_then(|p| shadow_cache_key(p, smooth.is_some(), lights, config, group_styles, allow_per_pixel)) else {
         *owned = build();
@@ -330,10 +335,10 @@ fn project_triangles(
     } else {
         Vec::new()
     };
-    let tm = match config.tone_mapping.method.as_str() { "reinhard" => ToneMapMethod::Reinhard, "aces" => ToneMapMethod::Aces, _ => ToneMapMethod::None };
+    let tm = ToneMap::parse(&config.tone_mapping.method);
     let shading = match config.shading.as_str() {
         "gooch" => ShadingMode::Gooch, "cel" => ShadingMode::Cel,
-        "flat" => ShadingMode::Flat, "normal" => ShadingMode::Normal, _ => ShadingMode::BlinnPhong,
+        "flat" => ShadingMode::Flat, "normal" => ShadingMode::Normal, "unlit" => ShadingMode::Unlit, _ => ShadingMode::BlinnPhong,
     };
     let (gooch_warm, gooch_cool) = if shading == ShadingMode::Gooch {
         let w = { let (r, g, b) = parse_hex_color(&config.gooch_warm); (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b)) };
@@ -414,7 +419,9 @@ fn project_triangles(
         (gnd.0 + (sky.0 - gnd.0) * t, gnd.1 + (sky.1 - gnd.1) * t, gnd.2 + (sky.2 - gnd.2) * t)
     }
 
-    let shade_cache: Option<Vec<(u8, u8, u8)>> = if let Some(sd) = smooth {
+    let shade_cache: Option<Vec<(u8, u8, u8)>> = if shading == ShadingMode::Unlit {
+        None
+    } else if let Some(sd) = smooth {
         let groups_uniform = group_styles.values().all(|a|
             a.specular.is_none() && a.shininess.is_none() && a.ambient.is_none());
         let can_memoize = !is_wireframe && !is_xray && groups_uniform
@@ -565,6 +572,21 @@ fn project_triangles(
 
         let (r, g, b, vertex_colors, opacity) = if is_wireframe {
             (0, 0, 0, None, 1.0)
+        } else if shading == ShadingMode::Unlit {
+            let ga = tri.group_id.and_then(|gid| group_styles.get(&gid));
+            let mut opacity = ga.and_then(|a| a.opacity).unwrap_or(config.opacity);
+            if is_xray {
+                opacity = if is_back_facing { 1.0 } else { cfg_xray_opacity };
+            }
+            opacity *= tri.alpha.unwrap_or(1.0) as f64;
+            let (r, g, b) = if tri.tex.is_some() { (255, 255, 255) } else { tri.color.unwrap_or((base_r, base_g, base_b)) };
+            match tri.vertex_colors {
+                Some(vc) => {
+                    let (r, g, b) = crate::color::avg3(vc[0], vc[1], vc[2]);
+                    (r, g, b, Some(vc), opacity)
+                }
+                None => (r, g, b, None, opacity),
+            }
         } else if let Some(ref cache) = shade_cache {
             let sd = unsafe { smooth.unwrap_unchecked() };
             let [i0, i1, i2] = sd.tri_indices[ti];
@@ -715,7 +737,7 @@ fn project_triangles(
         let pts = apply_projection(&proj_setup, &cam);
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
-        let pp = if shadow.map_or(false, |s| s.per_pixel) {
+        let pp = if shading != ShadingMode::Unlit && shadow.map_or(false, |s| s.per_pixel) {
             let n = if tri.splat { tri.vertex_normals.map_or(tri.normal, |v| v[0]) } else { tri.normal };
             Some((tri.vertices, n))
         } else {
@@ -1297,7 +1319,8 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Hash
     let needs_smooth = config.smooth
         && config.mode != "wireframe"
         && config.shading != "cel"
-        && config.shading != "flat";
+        && config.shading != "flat"
+        && config.shading != "unlit";
     let owned_smooth: Option<smooth::SmoothData> = if needs_smooth && data_key.is_none() {
         Some(smooth::compute_vertex_normals(&tris))
     } else {
@@ -1905,46 +1928,42 @@ pub(crate) fn antialias_mode(antialias: usize) -> (usize, bool) {
     }
 }
 
-fn raster_rgba(buf: &PixelBuffer, aa: usize, transparent: bool, fxaa: bool) -> (u32, u32, Vec<u8>) {
-    if transparent {
-        buf.to_rgba8_transparent(aa)
-    } else if aa > 1 {
-        let mut out = buf.downsample(aa);
-        if fxaa { crate::fxaa::apply_fxaa(&mut out.pixels, out.width, out.height); }
-        out.to_rgba8()
-    } else {
-        buf.to_rgba8()
+/// Raster blob, see [`raw_raster`]: tag `0x00` for a plain image, `0x02` for
+/// an image followed by a transparent SVG overlay (labels, grid lines,
+/// annotations, debug text) that the host layers on top in the raster's pixel
+/// space. Either tag also distinguishes the blob from SVG output ('<').
+fn encode_raster(out: &PixelBuffer, alpha: Option<&[u8]>, overlay: Option<&str>) -> Vec<u8> {
+    let (w, h, rgba) = out.to_rgba8_alpha(alpha);
+    match overlay {
+        Some(svg) => raw_raster(0x02, w, h, &rgba, svg.as_bytes()),
+        None => raw_raster(0x00, w, h, &rgba, &[]),
     }
 }
 
-/// Plain raster blob: `[0x00][width u32 LE][height u32 LE][rgba8…]`. The leading
-/// 0x00 distinguishes it from SVG output ('<' = 0x3C) and a raster+overlay blob
-/// (0x02); the host slices the 9-byte header and embeds the pixels via
-/// `image(px, format: (encoding: "rgba8", width, height))`.
-fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool, fxaa: bool) -> Result<Vec<u8>, String> {
-    let (w, h, rgba) = raster_rgba(buf, aa, transparent, fxaa);
-    let mut out = Vec::with_capacity(9 + rgba.len());
-    out.push(0x00);
-    out.extend_from_slice(&w.to_le_bytes());
-    out.extend_from_slice(&h.to_le_bytes());
-    out.extend_from_slice(&rgba);
-    Ok(out)
+/// Resolve a supersampled buffer with no post effects and encode it.
+fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool, overlay: Option<&str>) -> Result<Vec<u8>, String> {
+    let (out, alpha) = buf.resolve(aa, transparent, false);
+    Ok(encode_raster(&out, alpha.as_deref(), overlay))
 }
 
-/// Raster + vector overlay blob: `[0x02][w u32 LE][h u32 LE][rgba8 w*h*4][svg…]`.
-/// The raster is drawn as raw pixels and the transparent SVG (labels, grid
-/// lines, annotations, debug text) is layered on top by the host — no image
-/// encoding, so the plugin needs no PNG. The overlay's coordinates share the
-/// raster's pixel space (`viewBox = 0 0 w h`).
-fn pack_raster_overlay(buf: &PixelBuffer, aa: usize, transparent: bool, fxaa: bool, overlay: &str) -> Vec<u8> {
-    let (w, h, rgba) = raster_rgba(buf, aa, transparent, fxaa);
-    let mut out = Vec::with_capacity(9 + rgba.len() + overlay.len());
-    out.push(0x02);
-    out.extend_from_slice(&w.to_le_bytes());
-    out.extend_from_slice(&h.to_le_bytes());
-    out.extend_from_slice(&rgba);
-    out.extend_from_slice(overlay.as_bytes());
-    out
+/// The configured post effects, for a frame resolved from `aa`× supersampling.
+#[allow(clippy::too_many_arguments)]
+fn post_effects(config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64, bg: (u8, u8, u8), aa: usize, fxaa: bool, is_wireframe: bool) -> PostEffects {
+    let lit = !is_wireframe;
+    PostEffects {
+        ssao: config.ssao.as_ref().filter(|_| lit).map(|s| {
+            let scene = (s.space != "screen").then(|| (depth_camera(config, view, vw, vh, br).downscaled(aa), br));
+            SSAOParams::new(s.samples, s.radius, s.bias, s.strength, scene)
+        }),
+        fog: config.fog.as_ref().map(|f| {
+            let color = if f.color.is_empty() { bg } else { parse_hex_color(&f.color) };
+            Fog::molstar((view.camera - view.center).length(), br, f.intensity, color)
+        }),
+        bloom: config.bloom.as_ref().filter(|_| lit).map(|b| Bloom { threshold: b.threshold as f32, intensity: b.intensity as f32, radius: b.radius }),
+        glow: config.glow.as_ref().filter(|_| lit).map(|g| Glow { color: parse_hex_color(&g.color), intensity: g.intensity as f32, radius: g.radius }),
+        sharpen: config.sharpen.as_ref().map(|s| s.strength as f32),
+        fxaa,
+    }
 }
 
 /// Open a transparent overlay SVG sized to the raster's pixel space. Emits
@@ -1964,10 +1983,10 @@ fn svg_overlay_open(w: f64, h: f64) -> String {
     svg
 }
 
-/// Rasterize to a bitmap. Plain images are a raw RGBA blob (see
-/// [`finish_raster`]); the annotation/debug/labelled-grid variants return a
-/// raster+overlay blob (see [`pack_raster_overlay`]) so the host layers vector
-/// text over raw pixels — the plugin never encodes an image format.
+/// Rasterize to a bitmap. Plain images are a raw RGBA blob; the
+/// annotation/debug/labelled-grid variants return a raster+overlay blob (see
+/// [`encode_raster`]) so the host layers vector text over raw pixels — the
+/// plugin never encodes an image format.
 /// Per-triangle mip LOD from the screen-area / UV-area ratio. Constant over the
 /// triangle (no per-pixel derivatives) — cheap and good enough for the mesh
 /// path. Uses supersampled screen coords, so SSAA naturally sharpens then
@@ -1986,7 +2005,6 @@ fn triangle_texture_lod(pts: &[(f64, f64); 3], uvs: &[[f32; 2]; 3], tex: &maquet
 
 pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>, textures: &[maquette_core::texture::Texture]) -> Result<Vec<u8>, String> {
     let (aa, fxaa) = antialias_mode(config.antialias);
-    let post_fxaa = fxaa && aa > 1;
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
     let vw = config.width * aa as f64;
@@ -2000,7 +2018,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     if triangles.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return finish_raster(&buf, 1, transparent, false);
+        return finish_raster(&buf, 1, transparent, None);
     }
 
     crate::prof::mark(10);
@@ -2009,7 +2027,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     crate::prof::mark(11);
     if tris.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return finish_raster(&buf, 1, transparent, false);
+        return finish_raster(&buf, 1, transparent, None);
     }
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
@@ -2024,9 +2042,9 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         let buf = render_grid_png_buf(&tris, config, &views, br, bmin.z, w, h, bg, group_styles);
         return if config.grid_labels {
             let overlay = overlay_grid_labels(config.width, config.height, &views);
-            Ok(pack_raster_overlay(&buf, aa, transparent, false, &overlay))
+            finish_raster(&buf, aa, transparent, Some(&overlay))
         } else {
-            finish_raster(&buf, aa, transparent, false)
+            finish_raster(&buf, aa, transparent, None)
         };
     }
 
@@ -2036,9 +2054,9 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
             let buf = render_grid_png_buf(&tris, config, &resolved, br, bmin.z, w, h, bg, group_styles);
             return if config.grid_labels {
                 let overlay = overlay_grid_labels(config.width, config.height, &resolved);
-                Ok(pack_raster_overlay(&buf, aa, transparent, false, &overlay))
+                finish_raster(&buf, aa, transparent, Some(&overlay))
             } else {
-                finish_raster(&buf, aa, transparent, false)
+                finish_raster(&buf, aa, transparent, None)
             };
         }
     }
@@ -2046,7 +2064,8 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     let needs_smooth = config.smooth
         && config.mode != "wireframe"
         && config.shading != "cel"
-        && config.shading != "flat";
+        && config.shading != "flat"
+        && config.shading != "unlit";
     let owned_smooth: Option<smooth::SmoothData> = if needs_smooth && data_key.is_none() {
         Some(smooth::compute_vertex_normals(&tris))
     } else {
@@ -2212,57 +2231,25 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    if let Some(ref ssao) = config.ssao {
-        if !is_wireframe {
-            let scene_ao = ssao.space != "screen";
-            let ssao_params = maquette_core::ssao::SSAOParams {
-                samples: ssao.samples,
-                radius: if scene_ao { ssao.radius.unwrap_or(0.1 * br) } else { ssao.radius.unwrap_or(0.5) },
-                bias: if scene_ao { ssao.bias * ssao.radius.unwrap_or(0.1 * br) } else { ssao.bias },
-                strength: ssao.strength,
-                camera: scene_ao.then(|| depth_camera(config, &view, vw, vh, br)),
-            };
-            buf.apply_ssao::<maquette_core::ssao::Tiled16>(&ssao_params);
-        }
-    }
-
-    if let Some(ref bloom) = config.bloom {
-        if !is_wireframe {
-            buf.apply_bloom(bloom.threshold as f32, bloom.intensity as f32, bloom.radius);
-        }
-    }
-
-    if let Some(ref glow) = config.glow {
-        if !is_wireframe {
-            let gc = parse_hex_color(&glow.color);
-            buf.apply_glow(gc, glow.intensity as f32, glow.radius);
-        }
-    }
-
-    if let Some(ref sharpen) = config.sharpen {
-        buf.apply_sharpen(sharpen.strength as f32);
-    }
-
+    let effects = post_effects(config, &view, vw, vh, br, bg, aa, fxaa && !transparent, is_wireframe);
     crate::prof::mark(18);
-    if fxaa && aa == 1 && !transparent {
-        crate::fxaa::apply_fxaa(&mut buf.pixels, buf.width, buf.height);
-    }
+    let (mut out, alpha) = buf.resolve(aa, transparent, effects.needs_depth());
+    out.apply_post(&effects);
     crate::prof::mark(19);
 
-    if let Some(ref ann_cfg) = config.annotations {
+    let overlay = if let Some(ref ann_cfg) = config.annotations {
         let scale = 1.0 / aa as f64;
         let centroids: FxHashMap<u32, (f64, f64)> = compute_group_centroids(&projected)
             .into_iter()
             .map(|(gid, (x, y))| (gid, (x * scale, y * scale)))
             .collect();
-        let overlay = overlay_annotations(config.width, config.height, &centroids, group_styles, ann_cfg);
-        Ok(pack_raster_overlay(&buf, aa, transparent, post_fxaa, &overlay))
+        Some(overlay_annotations(config.width, config.height, &centroids, group_styles, ann_cfg))
     } else if config.debug {
-        let overlay = overlay_debug(config.width, config.height, &tris, bmin, bmax, &view, config);
-        Ok(pack_raster_overlay(&buf, aa, transparent, post_fxaa, &overlay))
+        Some(overlay_debug(config.width, config.height, &tris, bmin, bmax, &view, config))
     } else {
-        finish_raster(&buf, aa, transparent, post_fxaa)
-    }
+        None
+    };
+    Ok(encode_raster(&out, alpha.as_deref(), overlay.as_deref()))
 }
 
 fn render_grid_png_buf(

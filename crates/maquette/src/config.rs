@@ -335,6 +335,22 @@ impl Default for GlowConfig {
     }
 }
 
+/// Depth-cueing fog, following Mol*: the fade starts between the front
+/// (`intensity` 100) and the back (`intensity` 0) of the model's bounding
+/// sphere, midway at 50, and is complete at its back.
+#[derive(Clone)]
+pub struct FogConfig {
+    pub intensity: f64,
+    /// Fog colour; empty means the background colour (white when transparent).
+    pub color: String,
+}
+
+impl Default for FogConfig {
+    fn default() -> Self {
+        Self { intensity: 50.0, color: String::new() }
+    }
+}
+
 /// Sharpening post-processing configuration.
 #[derive(Clone)]
 pub struct SharpenConfig {
@@ -722,6 +738,7 @@ pub struct RenderConfig {
     pub bloom: Option<BloomConfig>,
     pub glow: Option<GlowConfig>,
     pub sharpen: Option<SharpenConfig>,
+    pub fog: Option<FogConfig>,
     pub scalar_function: String,
     /// For `color_map: "ply_scalar"` — the named vertex property to sample
     /// (`"quality"`, `"confidence"`, `"curvature"`, …). Empty = auto-pick
@@ -807,6 +824,7 @@ impl Default for RenderConfig {
             bloom: None,
             glow: None,
             sharpen: None,
+            fog: None,
             scalar_function: String::new(),
             color_map_property: String::new(),
             vertex_smoothing: 4,
@@ -1148,6 +1166,10 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                 }),
                 "sharpen" => cfg.sharpen = parse_optional_object!(p, SharpenConfig, {
                     "strength" => strength = parse_f64,
+                }),
+                "fog" => cfg.fog = parse_optional_object!(p, FogConfig, {
+                    "intensity" => intensity = parse_f64,
+                    "color" => color = parse_string,
                 }),
                 "scalar_function" => cfg.scalar_function = p.parse_string()?,
                 "color_map_property" => cfg.color_map_property = p.parse_string()?,

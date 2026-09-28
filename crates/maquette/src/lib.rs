@@ -25,7 +25,7 @@ mod shadow;
 mod smooth;
 mod svg;
 
-use maquette_core::{color, fxaa};
+use maquette_core::color;
 use maquette_core::texture::{build_mips, Filter, MipLevel, Texture, Wrap};
 use config::RenderConfig;
 use std::collections::HashMap;

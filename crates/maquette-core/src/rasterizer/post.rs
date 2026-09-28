@@ -1,11 +1,12 @@
 use super::*;
-use crate::ssao::NoiseKernel;
+use crate::ssao::{noise_index, noise_rotation, precompute_sample_offsets, NOISE_ROTATIONS};
 use std::cell::RefCell;
 
 thread_local! {
     static AO_BUFFER:    RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
     static FLAT_OFFSETS: RefCell<Vec<i32>> = const { RefCell::new(Vec::new()) };
     static Z_BIASES:     RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+    static KAWASE_SCRATCH: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
 }
 
 impl PixelBuffer {
@@ -159,21 +160,53 @@ impl PixelBuffer {
     pub fn downsample_with_depth(&self, factor: usize) -> Self {
         let mut out = self.downsample(factor);
         if factor <= 1 { return out; }
-        let (nw, nh, src_w) = (out.width, out.height, self.width);
-        let mut zbuf = vec![f32::NEG_INFINITY; nw * nh];
-        for ny in 0..nh {
-            for nx in 0..nw {
-                let mut z = f32::NEG_INFINITY;
-                for sy in 0..factor {
-                    for sx in 0..factor {
-                        let sz = self.zbuf[(ny * factor + sy) * src_w + nx * factor + sx];
-                        if sz != f32::NEG_INFINITY && sz > z { z = sz; }
+        out.zbuf = if factor == 2 {
+            Self::nearest_depth_2x(&self.zbuf, self.width, out.width, out.height)
+        } else if factor == 4 {
+            let half = Self::nearest_depth_2x(&self.zbuf, self.width, self.width / 2, self.height / 2);
+            Self::nearest_depth_2x(&half, self.width / 2, out.width, out.height)
+        } else {
+            let (nw, nh, src_w) = (out.width, out.height, self.width);
+            let mut zbuf = vec![f32::NEG_INFINITY; nw * nh];
+            for ny in 0..nh {
+                for nx in 0..nw {
+                    let mut z = f32::NEG_INFINITY;
+                    for sy in 0..factor {
+                        for sx in 0..factor {
+                            let sz = self.zbuf[(ny * factor + sy) * src_w + nx * factor + sx];
+                            if sz > z { z = sz; }
+                        }
                     }
+                    zbuf[ny * nw + nx] = z;
                 }
-                zbuf[ny * nw + nx] = z;
+            }
+            zbuf
+        };
+        out
+    }
+
+    /// Nearest (largest) depth of each 2×2 block; −∞ (empty) never wins.
+    fn nearest_depth_2x(src: &[f32], src_w: usize, nw: usize, nh: usize) -> Vec<f32> {
+        let mut out = vec![f32::NEG_INFINITY; nw * nh];
+        let sp = src.as_ptr();
+        for ny in 0..nh {
+            let (r0, r1) = (2 * ny * src_w, (2 * ny + 1) * src_w);
+            let mut nx = 0;
+            while nx + 4 <= nw && 2 * nx + 8 <= src_w {
+                unsafe {
+                    let ld = |i: usize| v128_load(sp.add(i) as *const v128);
+                    let a = f32x4_max(ld(r0 + 2 * nx), ld(r1 + 2 * nx));
+                    let b = f32x4_max(ld(r0 + 2 * nx + 4), ld(r1 + 2 * nx + 4));
+                    let m = f32x4_max(i32x4_shuffle::<0, 2, 4, 6>(a, b), i32x4_shuffle::<1, 3, 5, 7>(a, b));
+                    v128_store(out.as_mut_ptr().add(ny * nw + nx) as *mut v128, m);
+                }
+                nx += 4;
+            }
+            for nx in nx..nw {
+                let (i0, i1) = (r0 + 2 * nx, r1 + 2 * nx);
+                out[ny * nw + nx] = src[i0].fmax(src[i0 + 1]).fmax(src[i1]).fmax(src[i1 + 1]);
             }
         }
-        out.zbuf = zbuf;
         out
     }
 
@@ -272,12 +305,11 @@ impl PixelBuffer {
 
     /// Screen-Space Ambient Occlusion. Modulates the RGB pixel buffer by a
     /// per-pixel AO term derived from the depth buffer + bilateral blur.
-    /// `K` picks the per-pixel rotation of the sample kernel.
     #[inline(never)]
-    pub fn apply_ssao<K: NoiseKernel>(&mut self, params: &crate::ssao::SSAOParams) {
+    pub fn apply_ssao(&mut self, params: &crate::ssao::SSAOParams) {
         let (w, h) = (self.width, self.height);
         let mut ao_buffer = AO_BUFFER.with(|c| std::mem::take(&mut *c.borrow_mut()));
-        ssao_occlusion::<K>(&self.zbuf, w, h, params, 0, h, &mut ao_buffer);
+        ssao_occlusion(&self.zbuf, w, h, params, 0, h, &mut ao_buffer);
         let blurred = crate::ssao::bilateral_blur_separable(&ao_buffer, &self.zbuf, w, h, 4);
         self.modulate_rows(&blurred, 0);
         AO_BUFFER.with(|c| *c.borrow_mut() = ao_buffer);
@@ -287,197 +319,228 @@ impl PixelBuffer {
     /// `y_off..y_off + height` of a `full_w × full_h` frame whose depth is
     /// `full_zbuf`: the result equals those rows of a whole-frame pass.
     #[inline(never)]
-    pub fn apply_ssao_band<K: NoiseKernel>(&mut self, params: &crate::ssao::SSAOParams, full_zbuf: &[f32], full_w: usize, full_h: usize, y_off: usize) {
+    pub fn apply_ssao_band(&mut self, params: &crate::ssao::SSAOParams, full_zbuf: &[f32], full_w: usize, full_h: usize, y_off: usize) {
         const BLUR: usize = 4;
         let (y0, y1) = (y_off.saturating_sub(BLUR), (y_off + self.height + BLUR).min(full_h));
         let mut ao_buffer = AO_BUFFER.with(|c| std::mem::take(&mut *c.borrow_mut()));
-        ssao_occlusion::<K>(full_zbuf, full_w, full_h, params, y0, y1, &mut ao_buffer);
+        ssao_occlusion(full_zbuf, full_w, full_h, params, y0, y1, &mut ao_buffer);
         let (zmin, zmax) = crate::ssao::depth_bounds(full_zbuf);
         let blurred = crate::ssao::bilateral_blur_in_range(&ao_buffer, &full_zbuf[y0 * full_w..y1 * full_w], full_w, y1 - y0, BLUR as i32, zmin, zmax);
         self.modulate_rows(&blurred, (y_off - y0) * full_w);
         AO_BUFFER.with(|c| *c.borrow_mut() = ao_buffer);
     }
 
+    /// Rewrite every pixel's channels from their 0–255 values: `simd` gets
+    /// four pixels at a time as R, G, B lanes starting at pixel `i`,
+    /// `scalar` one pixel; results are truncated and saturated to `u8`.
+    /// `keep(i)` may report that the four pixels from `i` stay unchanged.
+    fn map_rgb(&mut self, keep: impl Fn(usize) -> bool, simd: impl Fn(usize, [v128; 3]) -> [v128; 3], scalar: impl Fn(usize, [f32; 3]) -> [f32; 3]) {
+        let n = self.width * self.height;
+        let pp = self.pixels.as_mut_ptr();
+        let simd_end = if n >= 6 { ((n - 2) / 4) * 4 } else { 0 };
+        let mut i = 0;
+        while i < simd_end {
+            if keep(i) { i += 4; continue; }
+            unsafe {
+                let raw = v128_load(pp.add(i * 3) as *const v128);
+                let lane = |v: v128| f32x4_convert_u32x4(u32x4_extend_low_u16x8(u16x8_extend_low_u8x16(v)));
+                let [r, g, b] = simd(i, [
+                    lane(i8x16_shuffle::<0, 3, 6, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw)),
+                    lane(i8x16_shuffle::<1, 4, 7, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw)),
+                    lane(i8x16_shuffle::<2, 5, 8, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw)),
+                ]);
+                let (r, g, b) = (i32x4_trunc_sat_f32x4(r), i32x4_trunc_sat_f32x4(g), i32x4_trunc_sat_f32x4(b));
+                let packed = u8x16_narrow_i16x8(u16x8_narrow_i32x4(r, g), u16x8_narrow_i32x4(b, b));
+                let rgb = i8x16_shuffle::<0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11, 0, 0, 0, 0>(packed, packed);
+                let p = pp.add(i * 3);
+                (p as *mut i32).write_unaligned(i32x4_extract_lane::<0>(rgb));
+                (p.add(4) as *mut i32).write_unaligned(i32x4_extract_lane::<1>(rgb));
+                (p.add(8) as *mut i32).write_unaligned(i32x4_extract_lane::<2>(rgb));
+            }
+            i += 4;
+        }
+        for i in simd_end..n {
+            let px = &mut self.pixels[i * 3..i * 3 + 3];
+            let out = scalar(i, [px[0] as f32, px[1] as f32, px[2] as f32]);
+            for c in 0..3 { px[c] = out[c] as u8; }
+        }
+    }
+
     fn modulate_rows(&mut self, ao: &[f32], ao_start: usize) {
-        unsafe {
-            for i in 0..self.width * self.height {
-                let ao = *ao.get_unchecked(ao_start + i);
-                if ao == 1.0 { continue; }
-                let p = self.pixels.as_mut_ptr().add(i * 3);
-                *p        = (*p        as f32 * ao + 0.5) as u8;
-                *p.add(1) = (*p.add(1) as f32 * ao + 0.5) as u8;
-                *p.add(2) = (*p.add(2) as f32 * ao + 0.5) as u8;
-            }
-        }
+        let (ap, half, one) = (ao[ao_start..].as_ptr(), f32x4_splat(0.5), f32x4_splat(1.0));
+        self.map_rgb(
+            |i| i32x4_bitmask(f32x4_eq(unsafe { v128_load(ap.add(i) as *const v128) }, one)) == 0xF,
+            |i, rgb| {
+                let a = unsafe { v128_load(ap.add(i) as *const v128) };
+                rgb.map(|c| f32x4_add(f32x4_mul(c, a), half))
+            },
+            |i, rgb| {
+                let a = ao[ao_start + i];
+                rgb.map(|c| c * a + 0.5)
+            },
+        );
     }
 
-    /// Dual Kawase downsample: 5-tap filter into pre-allocated dst slice.
-    fn kawase_down_into(src: &[f32], w: usize, h: usize, dst: &mut [f32], dw: usize, dh: usize) {
-        let w_i = w as i32;
-        let h_i = h as i32;
-        let half = f32x4_splat(0.5);
-        let eighth = f32x4_splat(0.125);
+    /// Dual Kawase downsample of one colour plane: 5-tap filter, four
+    /// destination pixels per SIMD step away from the borders.
+    fn kawase_down_plane(src: &[f32], w: usize, h: usize, dst: &mut [f32], dw: usize, dh: usize) {
+        let tap = |x: usize, y: usize| -> f32 {
+            let (cx, cy) = (2 * x, 2 * y);
+            let (xl, xr) = (cx.saturating_sub(1), (cx + 1).min(w - 1));
+            let (yu, yd) = (cy.saturating_sub(1), (cy + 1).min(h - 1));
+            let corners = (src[yu * w + xl] + src[yu * w + xr]) + (src[yd * w + xl] + src[yd * w + xr]);
+            src[cy * w + cx] * 0.5 + corners * 0.125
+        };
+        let (half, eighth) = (f32x4_splat(0.5), f32x4_splat(0.125));
+        let simd_end = if w >= 9 { ((w - 8) / 2 + 1).min(dw) } else { 0 };
         let sp = src.as_ptr();
         for y in 0..dh {
-            for x in 0..dw {
-                let cx = (x * 2) as i32;
-                let cy = (y * 2) as i32;
-                let di = (y * dw + x) * 3;
-                let ci = (cy as usize * w + cx as usize) * 3;
-                let tli = ((cy - 1).max(0) as usize * w + (cx - 1).max(0) as usize) * 3;
-                let tri = ((cy - 1).max(0) as usize * w + (cx + 1).min(w_i - 1) as usize) * 3;
-                let bli = ((cy + 1).min(h_i - 1) as usize * w + (cx - 1).max(0) as usize) * 3;
-                let bri = ((cy + 1).min(h_i - 1) as usize * w + (cx + 1).min(w_i - 1) as usize) * 3;
-                unsafe {
-                    let cv = v128_load(sp.add(ci) as *const v128);
-                    let corners = f32x4_add(
-                        f32x4_add(v128_load(sp.add(tli) as *const v128), v128_load(sp.add(tri) as *const v128)),
-                        f32x4_add(v128_load(sp.add(bli) as *const v128), v128_load(sp.add(bri) as *const v128)),
-                    );
-                    let result = f32x4_add(f32x4_mul(cv, half), f32x4_mul(corners, eighth));
-                    let dp = dst.as_mut_ptr().add(di);
-                    *dp = f32x4_extract_lane::<0>(result);
-                    *dp.add(1) = f32x4_extract_lane::<1>(result);
-                    *dp.add(2) = f32x4_extract_lane::<2>(result);
-                }
+            let cy = 2 * y;
+            if cy == 0 || cy + 1 >= h {
+                for x in 0..dw { dst[y * dw + x] = tap(x, y); }
+                continue;
             }
+            let (ru, rc, rd) = ((cy - 1) * w, cy * w, (cy + 1) * w);
+            dst[y * dw] = tap(0, y);
+            let mut x = 1;
+            while x + 4 <= simd_end {
+                unsafe {
+                    let lo = |row: usize, off: usize| v128_load(sp.add(row + 2 * x + off - 1) as *const v128);
+                    let odd = |row: usize| (i32x4_shuffle::<0, 2, 4, 6>(lo(row, 0), lo(row, 4)), i32x4_shuffle::<0, 2, 4, 6>(lo(row, 2), lo(row, 6)));
+                    let (tl, tr) = odd(ru);
+                    let (bl, br) = odd(rd);
+                    let c = i32x4_shuffle::<1, 3, 5, 7>(lo(rc, 0), lo(rc, 4));
+                    let corners = f32x4_add(f32x4_add(tl, tr), f32x4_add(bl, br));
+                    v128_store(dst.as_mut_ptr().add(y * dw + x) as *mut v128, f32x4_add(f32x4_mul(c, half), f32x4_mul(corners, eighth)));
+                }
+                x += 4;
+            }
+            for x in x..dw { dst[y * dw + x] = tap(x, y); }
         }
     }
 
-    /// Dual Kawase upsample: 9-tap filter into pre-allocated dst slice.
-    fn kawase_up_into(src: &[f32], sw: usize, sh: usize, dst: &mut [f32], dw: usize, dh: usize) {
-        let sw_i = sw as i32;
-        let sh_i = sh as i32;
-        let cross_w = f32x4_splat(2.0 / 12.0);
-        let diag_w = f32x4_splat(1.0 / 12.0);
-        let center_w = f32x4_splat(4.0 / 12.0);
+    /// Dual Kawase upsample of one colour plane: every destination pixel
+    /// reads the 9-tap neighbourhood of source pixel `(x/2, y/2)`, so the
+    /// filter runs once per source pixel and each result fills its 2×2 block.
+    fn kawase_up_plane(src: &[f32], sw: usize, sh: usize, dst: &mut [f32], dw: usize, dh: usize) {
+        let (cross_w, diag_w, center_w) = (2.0f32 / 12.0, 1.0f32 / 12.0, 4.0f32 / 12.0);
+        let tap = |sx: usize, sy: usize| -> f32 {
+            let (xl, xr) = (sx.saturating_sub(1), (sx + 1).min(sw - 1));
+            let (ru, rc, rd) = (sy.saturating_sub(1) * sw, sy * sw, (sy + 1).min(sh - 1) * sw);
+            let cross = (src[rc + xl] + src[rc + xr]) + (src[ru + sx] + src[rd + sx]);
+            let diag = (src[ru + xl] + src[ru + xr]) + (src[rd + xl] + src[rd + xr]);
+            (cross * cross_w + diag * diag_w) + src[rc + sx] * center_w
+        };
+        let (cw, dgw, ctw) = (f32x4_splat(cross_w), f32x4_splat(diag_w), f32x4_splat(center_w));
+        let mut blurred = KAWASE_SCRATCH.with(|c| std::mem::take(&mut *c.borrow_mut()));
+        blurred.clear();
+        blurred.resize(sw * sh + 8, 0.0);
         let sp = src.as_ptr();
-        for y in 0..dh {
-            let sy = ((y as i32) / 2).min(sh_i - 1);
-            let row_u = (sy - 1).max(0) as usize * sw;
-            let row_c = sy as usize * sw;
-            let row_d = (sy + 1).min(sh_i - 1) as usize * sw;
-            for x in 0..dw {
-                let sx = ((x as i32) / 2).min(sw_i - 1);
-                let di = (y * dw + x) * 3;
-                let xl = (sx - 1).max(0) as usize;
-                let xr = (sx + 1).min(sw_i - 1) as usize;
-                let sxu = sx as usize;
-                let ci = row_c * 3 + sxu * 3;
-                let li = row_c * 3 + xl * 3;
-                let ri = row_c * 3 + xr * 3;
-                let ui = row_u * 3 + sxu * 3;
-                let ddi = row_d * 3 + sxu * 3;
-                let tli = row_u * 3 + xl * 3;
-                let tri = row_u * 3 + xr * 3;
-                let bli = row_d * 3 + xl * 3;
-                let bri = row_d * 3 + xr * 3;
+        for sy in 0..sh {
+            let (ru, rc, rd) = (sy.saturating_sub(1) * sw, sy * sw, (sy + 1).min(sh - 1) * sw);
+            let out = &mut blurred[rc..];
+            let mut sx = 0;
+            while sx < 1.min(sw) { out[sx] = tap(sx, sy); sx += 1; }
+            while sx + 5 <= sw {
                 unsafe {
-                    let cross = f32x4_add(
-                        f32x4_add(v128_load(sp.add(li) as *const v128), v128_load(sp.add(ri) as *const v128)),
-                        f32x4_add(v128_load(sp.add(ui) as *const v128), v128_load(sp.add(ddi) as *const v128)),
-                    );
-                    let diag = f32x4_add(
-                        f32x4_add(v128_load(sp.add(tli) as *const v128), v128_load(sp.add(tri) as *const v128)),
-                        f32x4_add(v128_load(sp.add(bli) as *const v128), v128_load(sp.add(bri) as *const v128)),
-                    );
-                    let result = f32x4_add(f32x4_add(
-                        f32x4_mul(cross, cross_w), f32x4_mul(diag, diag_w)),
-                        f32x4_mul(v128_load(sp.add(ci) as *const v128), center_w),
-                    );
-                    let dp = dst.as_mut_ptr().add(di);
-                    *dp = f32x4_extract_lane::<0>(result);
-                    *dp.add(1) = f32x4_extract_lane::<1>(result);
-                    *dp.add(2) = f32x4_extract_lane::<2>(result);
+                    let ld = |i: usize| v128_load(sp.add(i) as *const v128);
+                    let cross = f32x4_add(f32x4_add(ld(rc + sx - 1), ld(rc + sx + 1)), f32x4_add(ld(ru + sx), ld(rd + sx)));
+                    let diag = f32x4_add(f32x4_add(ld(ru + sx - 1), ld(ru + sx + 1)), f32x4_add(ld(rd + sx - 1), ld(rd + sx + 1)));
+                    let v = f32x4_add(f32x4_add(f32x4_mul(cross, cw), f32x4_mul(diag, dgw)), f32x4_mul(ld(rc + sx), ctw));
+                    v128_store(out.as_mut_ptr().add(sx) as *mut v128, v);
                 }
+                sx += 4;
             }
+            for sx in sx..sw { out[sx] = tap(sx, sy); }
         }
+        let bp = blurred.as_ptr();
+        for y in 0..dh {
+            let row = (y / 2).min(sh - 1) * sw;
+            let out = &mut dst[y * dw..(y + 1) * dw];
+            let mut x = 0;
+            while x + 8 <= dw && x / 2 + 4 <= sw {
+                unsafe {
+                    let v = v128_load(bp.add(row + x / 2) as *const v128);
+                    v128_store(out.as_mut_ptr().add(x) as *mut v128, i32x4_shuffle::<0, 0, 1, 1>(v, v));
+                    v128_store(out.as_mut_ptr().add(x + 4) as *mut v128, i32x4_shuffle::<2, 2, 3, 3>(v, v));
+                }
+                x += 8;
+            }
+            for x in x..dw { out[x] = blurred[row + (x / 2).min(sw - 1)]; }
+        }
+        KAWASE_SCRATCH.with(|c| *c.borrow_mut() = blurred);
     }
 
-    /// Dual Kawase blur via mip chain with ping-pong buffers (2 allocations total).
-    fn dual_kawase_blur(source: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
+    /// Dual Kawase blur of a planar RGB buffer (three planes of `plane`
+    /// floats) via a mip chain with ping-pong buffers.
+    fn dual_kawase_blur(mut buf_a: Vec<f32>, plane: usize, w: usize, h: usize, radius: usize) -> Vec<f32> {
         let max_levels = ((w.min(h) as f32).log2() as usize).saturating_sub(1);
         let levels = ((radius + 3) / 4).max(1).min(max_levels).min(8);
-
-        let full = w * h * 3;
-        let mut buf_a = source.to_vec();
-        buf_a.extend_from_slice(&[0.0; 4]);
-        let mut buf_b = vec![0.0f32; full + 4];
-
+        let mut buf_b = vec![0.0f32; buf_a.len()];
         let mut dims: Vec<(usize, usize)> = Vec::with_capacity(levels + 1);
         dims.push((w, h));
         let mut src_is_a = true;
+        let pass = |from: &[f32], to: &mut [f32], f: &dyn Fn(&[f32], &mut [f32])| {
+            for c in 0..3 { f(&from[c * plane..(c + 1) * plane], &mut to[c * plane..(c + 1) * plane]); }
+        };
 
         for _ in 0..levels {
-            let &(pw, ph) = unsafe { dims.last().unwrap_unchecked() };
+            let (pw, ph) = dims[dims.len() - 1];
             if pw < 4 || ph < 4 { break; }
-            let dw = pw / 2;
-            let dh = ph / 2;
-            if src_is_a {
-                Self::kawase_down_into(&buf_a, pw, ph, &mut buf_b, dw, dh);
-            } else {
-                Self::kawase_down_into(&buf_b, pw, ph, &mut buf_a, dw, dh);
-            }
+            let (dw, dh) = (pw / 2, ph / 2);
+            let down = |s: &[f32], d: &mut [f32]| Self::kawase_down_plane(s, pw, ph, d, dw, dh);
+            if src_is_a { pass(&buf_a, &mut buf_b, &down); } else { pass(&buf_b, &mut buf_a, &down); }
             dims.push((dw, dh));
             src_is_a = !src_is_a;
         }
 
-        let last = dims.len() - 1;
-        for i in (0..last).rev() {
-            let (cw, ch) = dims[i + 1];
-            let (tw, th) = dims[i];
-            if src_is_a {
-                Self::kawase_up_into(&buf_a, cw, ch, &mut buf_b, tw, th);
-            } else {
-                Self::kawase_up_into(&buf_b, cw, ch, &mut buf_a, tw, th);
-            }
+        for i in (0..dims.len() - 1).rev() {
+            let ((cw, ch), (tw, th)) = (dims[i + 1], dims[i]);
+            let up = |s: &[f32], d: &mut [f32]| Self::kawase_up_plane(s, cw, ch, d, tw, th);
+            if src_is_a { pass(&buf_a, &mut buf_b, &up); } else { pass(&buf_b, &mut buf_a, &up); }
             src_is_a = !src_is_a;
         }
 
         if src_is_a { buf_a } else { buf_b }
     }
 
-    /// Blur an RGB f32 source buffer and additively blend onto self.pixels.
-    /// Uses Dual Kawase mip chain for multi-scale bloom.
-    fn blur_and_blend(&mut self, source: &[f32], intensity: f32, radius: usize) {
-        let w = self.width;
-        let h = self.height;
-        let n = w * h;
+    /// Planar RGB scratch buffer for bloom and glow: three zeroed planes of
+    /// `w·h` floats plus SIMD read slack; returns it with the plane length.
+    fn rgb_planes(&self) -> (Vec<f32>, usize) {
+        let plane = self.width * self.height + 8;
+        (vec![0.0f32; plane * 3], plane)
+    }
 
-        let blurred = Self::dual_kawase_blur(source, w, h, radius);
-
-        let total = n * 3;
-        let simd_end = (total / 4) * 4;
-        let intensity_v = f32x4_splat(intensity);
-        let max_v = f32x4_splat(255.0);
-        let pp = self.pixels.as_mut_ptr();
+    /// Blur a planar RGB source and additively blend it onto the pixels.
+    fn blur_and_blend(&mut self, source: Vec<f32>, plane: usize, intensity: f32, radius: usize) {
+        let blurred = Self::dual_kawase_blur(source, plane, self.width, self.height, radius);
         let bp = blurred.as_ptr();
-        unsafe {
-        let mut i = 0usize;
-        while i < simd_end {
-            let raw = v128_load32_zero(pp.add(i) as *const u32);
-            let u16v = u16x8_extend_low_u8x16(raw);
-            let u32v = u32x4_extend_low_u16x8(u16v);
-            let pf = f32x4_convert_u32x4(u32v);
-            let bv = f32x4_mul(v128_load(bp.add(i) as *const v128), intensity_v);
-            let result = f32x4_min(f32x4_add(pf, bv), max_v);
-            let i32v = i32x4_trunc_sat_f32x4(result);
-            let i16v = u16x8_narrow_i32x4(i32v, i32v);
-            let u8v = u8x16_narrow_i16x8(i16v, i16v);
-            *(pp.add(i) as *mut u32) = i32x4_extract_lane::<0>(u8v) as u32;
-            i += 4;
-        }
-        for i in simd_end..total {
-            let v = *pp.add(i) as f32 + *bp.add(i) * intensity;
-            *pp.add(i) = if v > 255.0 { 255 } else { v as u8 };
-        }
-        }
+        let iv = f32x4_splat(intensity);
+        self.map_rgb(
+            |_| false,
+            |i, rgb| {
+                let mut c = 0;
+                rgb.map(|v| {
+                    let b = unsafe { v128_load(bp.add(c * plane + i) as *const v128) };
+                    c += 1;
+                    f32x4_add(v, f32x4_mul(b, iv))
+                })
+            },
+            |i, rgb| {
+                let mut c = 0;
+                rgb.map(|v| {
+                    let b = blurred[c * plane + i];
+                    c += 1;
+                    v + b * intensity
+                })
+            },
+        );
     }
 
     /// Bloom: extract bright pixels by luminance threshold, blur, add back.
     pub fn apply_bloom(&mut self, threshold: f32, intensity: f32, radius: usize) {
         let n = self.width * self.height;
-        let mut buf = vec![0.0f32; n * 3 + 4];
+        let (mut buf, plane) = self.rgb_planes();
 
         let simd_end = if n >= 6 { ((n - 2) / 4) * 4 } else { 0 };
         let lum_r = f32x4_splat(0.2126);
@@ -491,8 +554,7 @@ impl PixelBuffer {
         unsafe {
         let mut i = 0usize;
         while i < simd_end {
-            let pi = i * 3;
-            let raw = v128_load(pp.add(pi) as *const v128);
+            let raw = v128_load(pp.add(i * 3) as *const v128);
             let rb = i8x16_shuffle::<0, 3, 6, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw);
             let gb = i8x16_shuffle::<1, 4, 7, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw);
             let bb = i8x16_shuffle::<2, 5, 8, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0>(raw, raw);
@@ -501,81 +563,84 @@ impl PixelBuffer {
             let bf = f32x4_convert_u32x4(u32x4_extend_low_u16x8(u16x8_extend_low_u8x16(bb)));
             let lum4 = f32x4_add(f32x4_add(f32x4_mul(lum_r, rf), f32x4_mul(lum_g, gf)), f32x4_mul(lum_b, bf));
             let above = f32x4_gt(lum4, thresh_v);
-            let mask = i32x4_bitmask(above);
-            if mask != 0 {
-                let factor = f32x4_min(f32x4_sub(f32x4_mul(lum4, inv255), thresh_s), one_v);
-                let factor = v128_and(factor, above);
-                let rout = f32x4_mul(rf, factor);
-                let gout = f32x4_mul(gf, factor);
-                let bout = f32x4_mul(bf, factor);
-                let bp = buf.as_mut_ptr().add(pi);
-                *bp       = f32x4_extract_lane::<0>(rout);
-                *bp.add(1) = f32x4_extract_lane::<0>(gout);
-                *bp.add(2) = f32x4_extract_lane::<0>(bout);
-                *bp.add(3) = f32x4_extract_lane::<1>(rout);
-                *bp.add(4) = f32x4_extract_lane::<1>(gout);
-                *bp.add(5) = f32x4_extract_lane::<1>(bout);
-                *bp.add(6) = f32x4_extract_lane::<2>(rout);
-                *bp.add(7) = f32x4_extract_lane::<2>(gout);
-                *bp.add(8) = f32x4_extract_lane::<2>(bout);
-                *bp.add(9) = f32x4_extract_lane::<3>(rout);
-                *bp.add(10) = f32x4_extract_lane::<3>(gout);
-                *bp.add(11) = f32x4_extract_lane::<3>(bout);
+            if i32x4_bitmask(above) != 0 {
+                let factor = v128_and(f32x4_min(f32x4_sub(f32x4_mul(lum4, inv255), thresh_s), one_v), above);
+                let bp = buf.as_mut_ptr().add(i);
+                v128_store(bp as *mut v128, f32x4_mul(rf, factor));
+                v128_store(bp.add(plane) as *mut v128, f32x4_mul(gf, factor));
+                v128_store(bp.add(2 * plane) as *mut v128, f32x4_mul(bf, factor));
             }
             i += 4;
         }
         for i in simd_end..n {
-            let pi = i * 3;
-            let p = pp.add(pi);
+            let p = pp.add(i * 3);
             let rf = *p as f32;
             let gf = *p.add(1) as f32;
             let bf = *p.add(2) as f32;
             let lum = 0.2126 * rf + 0.7152 * gf + 0.0722 * bf;
             if lum > threshold * 255.0 {
                 let factor = (lum / 255.0 - threshold).fmin(1.0);
-                *buf.get_unchecked_mut(pi) = rf * factor;
-                *buf.get_unchecked_mut(pi + 1) = gf * factor;
-                *buf.get_unchecked_mut(pi + 2) = bf * factor;
+                buf[i] = rf * factor;
+                buf[plane + i] = gf * factor;
+                buf[2 * plane + i] = bf * factor;
             }
         }
         }
-        self.blur_and_blend(&buf, intensity, radius);
+        self.blur_and_blend(buf, plane, intensity, radius);
     }
 
     /// Glow: extract all foreground pixels (model silhouette), blur, add back.
     /// Creates a light-emitting aura around the entire model.
     pub fn apply_glow(&mut self, color: (u8, u8, u8), intensity: f32, radius: usize) {
-        let n = self.width * self.height;
-        let cr = color.0 as f32;
-        let cg = color.1 as f32;
-        let cb = color.2 as f32;
-        let mut buf = vec![0.0f32; n * 3 + 4];
+        let (mut buf, plane) = self.rgb_planes();
+        let rgb = [color.0 as f32, color.1 as f32, color.2 as f32];
+        for (i, &z) in self.zbuf.iter().enumerate() {
+            if z != f32::NEG_INFINITY {
+                for (c, v) in rgb.iter().enumerate() { buf[c * plane + i] = *v; }
+            }
+        }
+        self.blur_and_blend(buf, plane, intensity, radius);
+    }
 
-        let simd_end = (n / 4) * 4;
-        let neg_inf_v = f32x4_splat(f32::NEG_INFINITY);
+    /// Depth cueing: blends each covered pixel toward the fog colour by
+    /// `smoothstep(near, far, −z)`, `z` being the view-space depth stored in
+    /// the depth buffer.
+    pub fn apply_fog(&mut self, fog: &crate::effects::Fog) {
+        let (near, span) = (fog.near, (fog.far - fog.near).fmax(1e-12));
+        let color = [fog.color.0 as f32, fog.color.1 as f32, fog.color.2 as f32];
+        let (near_v, span_v, zero, one, two, three, half) =
+            (f32x4_splat(near), f32x4_splat(span), f32x4_splat(0.0), f32x4_splat(1.0), f32x4_splat(2.0), f32x4_splat(3.0), f32x4_splat(0.5));
+        let color_v = [f32x4_splat(color[0]), f32x4_splat(color[1]), f32x4_splat(color[2])];
         let zp = self.zbuf.as_ptr();
-        unsafe {
-        let mut i = 0usize;
-        while i < simd_end {
-            let d4 = v128_load(zp.add(i) as *const v128);
-            let mask = i32x4_bitmask(f32x4_ne(d4, neg_inf_v));
-            if mask != 0 {
-                let bp = buf.as_mut_ptr().add(i * 3);
-                if mask & 1 != 0 { *bp = cr; *bp.add(1) = cg; *bp.add(2) = cb; }
-                if mask & 2 != 0 { *bp.add(3) = cr; *bp.add(4) = cg; *bp.add(5) = cb; }
-                if mask & 4 != 0 { *bp.add(6) = cr; *bp.add(7) = cg; *bp.add(8) = cb; }
-                if mask & 8 != 0 { *bp.add(9) = cr; *bp.add(10) = cg; *bp.add(11) = cb; }
-            }
-            i += 4;
-        }
-        for i in simd_end..n {
-            if *self.zbuf.get_unchecked(i) != f32::NEG_INFINITY {
-                let p = buf.as_mut_ptr().add(i * 3);
-                *p = cr; *p.add(1) = cg; *p.add(2) = cb;
-            }
-        }
-        }
-        self.blur_and_blend(&buf, intensity, radius);
+        let zbuf = std::mem::take(&mut self.zbuf);
+        let empty = f32x4_splat(f32::NEG_INFINITY);
+        self.map_rgb(
+            |i| i32x4_bitmask(f32x4_eq(unsafe { v128_load(zp.add(i) as *const v128) }, empty)) == 0xF,
+            |i, rgb| {
+                let z = unsafe { v128_load(zp.add(i) as *const v128) };
+                let t = f32x4_min(f32x4_max(f32x4_div(f32x4_sub(f32x4_neg(z), near_v), span_v), zero), one);
+                let f = v128_and(f32x4_mul(f32x4_mul(t, t), f32x4_sub(three, f32x4_mul(two, t))), f32x4_ne(z, f32x4_splat(f32::NEG_INFINITY)));
+                let mut c = 0;
+                rgb.map(|p| {
+                    let v = f32x4_add(f32x4_add(p, f32x4_mul(f32x4_sub(color_v[c], p), f)), half);
+                    c += 1;
+                    v
+                })
+            },
+            |i, rgb| {
+                let z = zbuf[i];
+                if z == f32::NEG_INFINITY { return rgb; }
+                let t = ((-z - near) / span).fmax(0.0).fmin(1.0);
+                let f = t * t * (3.0 - 2.0 * t);
+                let mut c = 0;
+                rgb.map(|p| {
+                    let v = p + (color[c] - p) * f + 0.5;
+                    c += 1;
+                    v
+                })
+            },
+        );
+        self.zbuf = zbuf;
     }
 
     /// Sharpen using a direct 3×3 kernel with ring buffer (3 rows instead of full clone).
@@ -587,6 +652,7 @@ impl PixelBuffer {
         let stride = w * 3;
         let neg = -strength * (1.0 / 9.0);
         let center = 1.0 + strength * (8.0 / 9.0);
+        let (neg_v, center_v, zero_v, max_v) = (f32x4_splat(neg), f32x4_splat(center), f32x4_splat(0.0), f32x4_splat(255.0));
 
         let mut ring = vec![0u8; stride * 3];
         ring[..stride].copy_from_slice(&self.pixels[..stride]);
@@ -602,9 +668,38 @@ impl PixelBuffer {
             let rn = ring_next;
             let dst = y * stride;
 
-            for x in 1..w - 1 {
+            let rb = ring.as_ptr();
+            let mut i = 3;
+            while i + 19 <= stride {
+                unsafe {
+                    let ld = |r: usize, d: usize| v128_load(rb.add(r + i + d - 3) as *const v128);
+                    let wide = |v: v128| (u16x8_extend_low_u8x16(v), u16x8_extend_high_u8x16(v));
+                    let add = |a: (v128, v128), b: (v128, v128)| (i16x8_add(a.0, b.0), i16x8_add(a.1, b.1));
+                    let mut sum = add(wide(ld(rp, 0)), wide(ld(rp, 3)));
+                    for v in [ld(rp, 6), ld(rc, 0), ld(rc, 6), ld(rn, 0), ld(rn, 3), ld(rn, 6)] {
+                        sum = add(sum, wide(v));
+                    }
+                    let c = wide(ld(rc, 3));
+                    let quarter = |c16: v128, s16: v128, high: bool| {
+                        let (c32, s32) = if high {
+                            (u32x4_extend_high_u16x8(c16), u32x4_extend_high_u16x8(s16))
+                        } else {
+                            (u32x4_extend_low_u16x8(c16), u32x4_extend_low_u16x8(s16))
+                        };
+                        let v = f32x4_add(f32x4_mul(center_v, f32x4_convert_u32x4(c32)), f32x4_mul(neg_v, f32x4_convert_u32x4(s32)));
+                        i32x4_trunc_sat_f32x4(f32x4_min(f32x4_max(v, zero_v), max_v))
+                    };
+                    let lo = u16x8_narrow_i32x4(quarter(c.0, sum.0, false), quarter(c.0, sum.0, true));
+                    let hi = u16x8_narrow_i32x4(quarter(c.1, sum.1, false), quarter(c.1, sum.1, true));
+                    v128_store(self.pixels.as_mut_ptr().add(dst + i) as *mut v128, u8x16_narrow_i16x8(lo, hi));
+                }
+                i += 16;
+            }
+
+            for x in i / 3..w - 1 {
                 let xo = x * 3;
                 for c in 0..3 {
+                    if xo + c < i { continue; }
                     let sum_neighbors =
                         ring[rp + xo - 3 + c] as f32
                         + ring[rp + xo + c] as f32
@@ -648,27 +743,36 @@ impl PixelBuffer {
         (self.width as u32, self.height as u32, rgba)
     }
 
-    /// Downsample + composite into straight (non-premultiplied) RGBA8 using the
-    /// z-buffer as model coverage. Background pixels (depth still −∞, never
-    /// rasterized) become fully transparent; covered pixels are opaque. With
-    /// supersampling (`factor` > 1) alpha is the covered fraction of the block and
-    /// colour is averaged over the covered subpixels only — so anti-aliased edges
-    /// fade out with no background-colour fringe. Returns `(width, height, rgba)`.
-    pub fn to_rgba8_transparent(&self, factor: usize) -> (u32, u32, Vec<u8>) {
+    /// Reduce a supersampled frame to output resolution, averaging each
+    /// `factor`×`factor` block. With `transparent`, the z-buffer (and
+    /// translucent coverage) acts as model coverage: colour is averaged over
+    /// the covered subpixels only, with the background removed, and the
+    /// covered fraction is returned as per-pixel alpha — so anti-aliased
+    /// edges fade out with no background fringe. With `with_depth`, each
+    /// output pixel keeps the nearest depth of its block.
+    pub fn resolve(&self, factor: usize, transparent: bool, with_depth: bool) -> (Self, Option<Vec<u8>>) {
+        if !transparent {
+            let out = if with_depth { self.downsample_with_depth(factor) } else { self.downsample(factor) };
+            return (out, None);
+        }
         let f = factor.max(1);
-        let nw = self.width / f;
-        let nh = self.height / f;
+        let (nw, nh) = (self.width / f, self.height / f);
         let count = (f * f) as f32;
         let [bgr, bgg, bgb] = self.bg;
-        let mut rgba = vec![0u8; nw * nh * 4];
+        let mut out = Self { width: nw, height: nh, pixels: vec![0u8; nw * nh * 3], ..Default::default() };
+        if with_depth { out.zbuf = vec![f32::NEG_INFINITY; nw * nh]; }
+        let mut alpha = vec![0u8; nw * nh];
         for ny in 0..nh {
             for nx in 0..nw {
                 let (mut pr, mut pg, mut pb, mut asum) = (0f32, 0f32, 0f32, 0f32);
+                let mut z = f32::NEG_INFINITY;
                 for sy in 0..f {
                     let row = (ny * f + sy) * self.width + nx * f;
                     for sx in 0..f {
                         let si = row + sx;
-                        let cov = if self.zbuf[si] != f32::NEG_INFINITY { 1.0 } else { self.tcov.get(si).copied().unwrap_or(0.0) };
+                        let sz = self.zbuf[si];
+                        if sz != f32::NEG_INFINITY && sz > z { z = sz; }
+                        let cov = if sz != f32::NEG_INFINITY { 1.0 } else { self.tcov.get(si).copied().unwrap_or(0.0) };
                         if cov > 0.0 {
                             let pi = si * 3;
                             let show = 1.0 - cov;
@@ -679,16 +783,40 @@ impl PixelBuffer {
                         }
                     }
                 }
-                let di = (ny * nw + nx) * 4;
+                let di = ny * nw + nx;
+                if with_depth { out.zbuf[di] = z; }
                 if asum > 0.0 {
-                    rgba[di] = (pr / asum).fround().clamp(0.0, 255.0) as u8;
-                    rgba[di + 1] = (pg / asum).fround().clamp(0.0, 255.0) as u8;
-                    rgba[di + 2] = (pb / asum).fround().clamp(0.0, 255.0) as u8;
-                    rgba[di + 3] = (asum / count * 255.0).fround().clamp(0.0, 255.0) as u8;
+                    out.pixels[di * 3] = (pr / asum).fround().clamp(0.0, 255.0) as u8;
+                    out.pixels[di * 3 + 1] = (pg / asum).fround().clamp(0.0, 255.0) as u8;
+                    out.pixels[di * 3 + 2] = (pb / asum).fround().clamp(0.0, 255.0) as u8;
+                    alpha[di] = (asum / count * 255.0).fround().clamp(0.0, 255.0) as u8;
                 }
             }
         }
-        (nw as u32, nh as u32, rgba)
+        (out, Some(alpha))
+    }
+
+    /// Straight RGBA8 with the given per-pixel alpha, or opaque without one.
+    pub fn to_rgba8_alpha(&self, alpha: Option<&[u8]>) -> (u32, u32, Vec<u8>) {
+        let Some(alpha) = alpha else { return self.to_rgba8() };
+        let mut rgba = vec![0u8; self.width * self.height * 4];
+        for (i, &a) in alpha.iter().enumerate() {
+            if a == 0 { continue; }
+            rgba[i * 4..i * 4 + 3].copy_from_slice(&self.pixels[i * 3..i * 3 + 3]);
+            rgba[i * 4 + 3] = a;
+        }
+        (self.width as u32, self.height as u32, rgba)
+    }
+
+    /// Apply `effects` to this output-resolution frame, in the order listed
+    /// on [`PostEffects`](crate::effects::PostEffects).
+    pub fn apply_post(&mut self, effects: &crate::effects::PostEffects) {
+        if let Some(ssao) = &effects.ssao { self.apply_ssao(ssao); }
+        if let Some(fog) = &effects.fog { self.apply_fog(fog); }
+        if let Some(b) = &effects.bloom { self.apply_bloom(b.threshold, b.intensity, b.radius); }
+        if let Some(g) = &effects.glow { self.apply_glow(g.color, g.intensity, g.radius); }
+        if let Some(strength) = effects.sharpen { self.apply_sharpen(strength); }
+        if effects.fxaa { crate::fxaa::apply_fxaa(&mut self.pixels, self.width, self.height); }
     }
 
     /// RGBA8 where pixels never touched by the rasterizer (zbuf = −∞) become
@@ -708,7 +836,7 @@ impl PixelBuffer {
     }
 }
 
-fn ssao_occlusion<K: NoiseKernel>(zbuf: &[f32], w: usize, h: usize, params: &crate::ssao::SSAOParams, y0: usize, y1: usize, ao_buffer: &mut Vec<f32>) {
+fn ssao_occlusion(zbuf: &[f32], w: usize, h: usize, params: &crate::ssao::SSAOParams, y0: usize, y1: usize, ao_buffer: &mut Vec<f32>) {
     if let Some(cam) = params.camera {
         ssao_occlusion_scene(zbuf, w, h, params, &cam, y0, y1, ao_buffer);
         return;
@@ -722,11 +850,11 @@ fn ssao_occlusion<K: NoiseKernel>(zbuf: &[f32], w: usize, h: usize, params: &cra
     let radius_px = (params.radius * w.min(h) as f64) as f32;
     let bias_scaled = params.bias as f32 * depth_range;
     let strength = params.strength as f32;
-    let offsets = K::offsets(params.samples, radius_px, bias_scaled);
+    let offsets = precompute_sample_offsets(params.samples, radius_px, bias_scaled);
 
     let num_samples = offsets[0].len();
     let batches = num_samples / 4;
-    let n_rot = K::ROTATIONS;
+    let n_rot = NOISE_ROTATIONS;
     let mut flat_offsets = FLAT_OFFSETS.with(|c| std::mem::take(&mut *c.borrow_mut()));
     let mut z_biases     = Z_BIASES    .with(|c| std::mem::take(&mut *c.borrow_mut()));
     flat_offsets.clear(); flat_offsets.resize(n_rot * num_samples, 0);
@@ -757,7 +885,7 @@ fn ssao_occlusion<K: NoiseKernel>(zbuf: &[f32], w: usize, h: usize, params: &cra
         ($x:expr, $y:expr, $idx:expr) => {
             let depth = unsafe { *zbuf.get_unchecked($idx) };
             if depth != f32::NEG_INFINITY {
-                let pattern = &offsets[K::index($x, $y)];
+                let pattern = &offsets[noise_index($x, $y)];
                 let mut occlusion = 0u32;
                 let mut valid = 0u32;
                 for s in pattern {
@@ -795,7 +923,7 @@ fn ssao_occlusion<K: NoiseKernel>(zbuf: &[f32], w: usize, h: usize, params: &cra
                 let idx = row + x as usize;
                 let depth = unsafe { *zbuf.get_unchecked(idx) };
                 if depth == f32::NEG_INFINITY { continue; }
-                let pi = K::index(x, y);
+                let pi = noise_index(x, y);
                 let offs = unsafe { flat_offsets.as_ptr().add(pi * num_samples) };
                 let zbs = unsafe { z_biases.as_ptr().add(pi * num_samples) };
                 let idx_i32 = idx as i32;
@@ -845,8 +973,8 @@ fn ssao_occlusion<K: NoiseKernel>(zbuf: &[f32], w: usize, h: usize, params: &cra
 
 #[allow(clippy::too_many_arguments)]
 fn ssao_occlusion_scene(zbuf: &[f32], w: usize, h: usize, params: &crate::ssao::SSAOParams, cam: &crate::ssao::DepthCamera, y0: usize, y1: usize, ao_buffer: &mut Vec<f32>) {
-    const NOISE: [f32; 16] = [0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0];
     let kernel = crate::ssao::hemisphere_kernel(params.samples);
+    let rotations: Vec<(f32, f32)> = (0..NOISE_ROTATIONS).map(noise_rotation).collect();
     let radius = params.radius.fmax(1e-9) as f32;
     let bias = params.bias as f32;
     let strength = 2.0 * params.strength as f32;
@@ -899,8 +1027,8 @@ fn ssao_occlusion_scene(zbuf: &[f32], w: usize, h: usize, params: &crate::ssao::
             if len < 1e-12 { n = [0.0, 0.0, 1.0]; } else { n = [n[0] / len, n[1] / len, n[2] / len]; }
             if n[0] * toward[0] + n[1] * toward[1] + n[2] * toward[2] < 0.0 { n = [-n[0], -n[1], -n[2]]; }
 
-            let angle = NOISE[((y & 3) * 4 + (x & 3)) as usize] * (std::f32::consts::TAU / 16.0);
-            let r = [angle.cos(), angle.sin(), 0.0];
+            let (cos_a, sin_a) = rotations[noise_index(x, y)];
+            let r = [cos_a, sin_a, 0.0];
             let rn = r[0] * n[0] + r[1] * n[1];
             let mut t = [r[0] - n[0] * rn, r[1] - n[1] * rn, -n[2] * rn];
             let tl = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt();

@@ -23,6 +23,7 @@
 
 pub mod bundle;
 pub mod color;
+pub mod effects;
 mod color_lut;
 pub mod fxaa;
 pub mod ibl;
@@ -34,3 +35,4 @@ pub mod shadow; #[cfg(not(target_arch = "wasm32"))] pub mod simd;
 pub mod ssao;
 pub mod texture;
 pub mod texture_decode;
+pub mod tonemap;

@@ -6,10 +6,10 @@ use crate::math::Vec3;
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
 
 #[derive(Clone, Copy, PartialEq)]
-pub(crate) enum ShadingMode { BlinnPhong, Gooch, Cel, Flat, Normal }
+pub(crate) enum ShadingMode { BlinnPhong, Gooch, Cel, Flat, Normal, Unlit }
 
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum ToneMapMethod { None, Reinhard, Aces }
+pub(crate) use maquette_core::tonemap::{tone_map, ToneMap};
+use maquette_core::tonemap::tone_map_4;
 
 pub(crate) struct ResolvedLight {
     pub(crate) kind: LightKind,
@@ -115,7 +115,7 @@ pub(crate) fn finalize_color(
     spec: (f32, f32, f32),
     rim: f32,
     gamma_correction: bool,
-    tm: ToneMapMethod,
+    tm: ToneMap,
     exposure: f32,
 ) -> (u8, u8, u8) {
     let (hr, hg, hb) = tone_map(
@@ -135,24 +135,6 @@ pub(crate) fn finalize_color(
     }
 }
 
-
-/// Helper: tone-map a single f32x4 channel (4 vertices' worth of one channel).
-#[inline(always)]
-fn tone_map_4(v: v128, method: ToneMapMethod, exp4: v128) -> v128 {
-    match method {
-        ToneMapMethod::None => v,
-        ToneMapMethod::Reinhard => {
-            let ve = f32x4_mul(v, exp4);
-            f32x4_div(ve, f32x4_add(f32x4_splat(1.0), ve))
-        }
-        _ => {
-            let ve = f32x4_mul(v, exp4);
-            let a = f32x4_mul(ve, f32x4_add(f32x4_mul(f32x4_splat(2.51), ve), f32x4_splat(0.03)));
-            let b = f32x4_add(f32x4_mul(ve, f32x4_add(f32x4_mul(f32x4_splat(2.43), ve), f32x4_splat(0.59))), f32x4_splat(0.14));
-            f32x4_min(f32x4_max(f32x4_div(a, b), f32x4_splat(0.0)), f32x4_splat(1.0))
-        }
-    }
-}
 
 /// Helper: extract 4 f32 lanes, look up in a 256-entry LUT (index = val * 255),
 /// return results as f32x4.
@@ -177,7 +159,7 @@ pub(crate) fn shade_batch_4(
     up_x: f32, up_y: f32, up_z: f32,
     one_minus_ambient: f32, specular: f32, fresnel: f32,
     gamma_correction: bool,
-    tm: ToneMapMethod, exposure: f32,
+    tm: ToneMap, exposure: f32,
     spec_lut: &[f32; 256], fresnel_lut: &[f32; 256],
     sss_intensity: f32, sss_distortion: f32, sss_lut: &[f32; 256],
     cel_bands: usize,
@@ -394,24 +376,6 @@ pub(crate) fn shade_batch_4(
 
 
 #[inline]
-pub(crate) fn tone_map(r: f32, g: f32, b: f32, method: ToneMapMethod, exposure: f32) -> (f32, f32, f32) {
-    if method == ToneMapMethod::None { return (r, g, b); }
-    let (r, g, b) = (r * exposure, g * exposure, b * exposure);
-    match method {
-        ToneMapMethod::Reinhard => (r / (1.0 + r), g / (1.0 + g), b / (1.0 + b)),
-        _ => {
-            #[inline]
-            fn aces(x: f32) -> f32 {
-                let a = x * (2.51 * x + 0.03);
-                let b = x * (2.43 * x + 0.59) + 0.14;
-                (a / b).fmax(0.0).fmin(1.0)
-            }
-            (aces(r), aces(g), aces(b))
-        }
-    }
-}
-
-#[inline]
 pub(crate) fn shade_point(
     normal: Vec3,
     world_pos: Vec3,
@@ -423,7 +387,7 @@ pub(crate) fn shade_point(
     specular: f32,
     fresnel: f32,
     gamma_correction: bool,
-    tone_map_method: ToneMapMethod,
+    tone_map_method: ToneMap,
     exposure: f32,
     shading: ShadingMode,
     gooch_warm: (f32, f32, f32),

@@ -23,6 +23,22 @@ pub struct SSAOParams {
     pub camera: Option<DepthCamera>,
 }
 
+impl SSAOParams {
+    /// Parameters as configured by a renderer. With `scene = Some((camera,
+    /// model_radius))`, sampling happens in scene space: `radius` defaults to
+    /// 10% of `model_radius` and `bias` is a fraction of the radius. Without
+    /// it, `radius` defaults to half the image's shorter side.
+    pub fn new(samples: usize, radius: Option<f64>, bias: f64, strength: f64, scene: Option<(DepthCamera, f64)>) -> Self {
+        match scene {
+            Some((camera, model_radius)) => {
+                let radius = radius.unwrap_or(0.1 * model_radius);
+                Self { samples, radius, bias: bias * radius, strength, camera: Some(camera) }
+            }
+            None => Self { samples, radius: radius.unwrap_or(0.5), bias, strength, camera: None },
+        }
+    }
+}
+
 impl Default for SSAOParams {
     fn default() -> Self {
         Self {
@@ -112,37 +128,6 @@ pub struct SampleOffset {
     pub z_bias: f32,
 }
 
-/// Per-pixel rotation of the SSAO sample kernel.
-pub trait NoiseKernel {
-    const ROTATIONS: usize;
-    fn index(x: i32, y: i32) -> usize;
-    fn offsets(samples: usize, radius_px: f32, bias_scaled: f32) -> Vec<Vec<SampleOffset>>;
-}
-
-/// 16 rotations tiled over 4×4 pixel blocks.
-pub struct Tiled16;
-
-impl NoiseKernel for Tiled16 {
-    const ROTATIONS: usize = 16;
-    #[inline(always)]
-    fn index(x: i32, y: i32) -> usize { ((y & 3) * 4 + (x & 3)) as usize }
-    fn offsets(samples: usize, radius_px: f32, bias_scaled: f32) -> Vec<Vec<SampleOffset>> {
-        precompute_tiled_sample_offsets(samples, radius_px, bias_scaled)
-    }
-}
-
-/// `NOISE_ROTATIONS` rotations picked by a per-pixel hash.
-pub struct Hashed256;
-
-impl NoiseKernel for Hashed256 {
-    const ROTATIONS: usize = NOISE_ROTATIONS;
-    #[inline(always)]
-    fn index(x: i32, y: i32) -> usize { noise_index(x, y) }
-    fn offsets(samples: usize, radius_px: f32, bias_scaled: f32) -> Vec<Vec<SampleOffset>> {
-        precompute_sample_offsets(samples, radius_px, bias_scaled)
-    }
-}
-
 /// Number of unique rotations in the pool. Indexed per pixel via
 /// `noise_index(x, y)`. 256 (vs. the old 16) survives SSAA 2× downsample:
 /// at hi-res the pattern period is much larger than the 4-pixel bilateral
@@ -167,6 +152,15 @@ pub fn noise_index(x: i32, y: i32) -> usize {
     (h as usize) & (NOISE_ROTATIONS - 1)
 }
 
+/// `(cos, sin)` of rotation `n` of the pool: bit-reversed so that nearby
+/// indices spread around the circle.
+pub fn noise_rotation(n: usize) -> (f32, f32) {
+    let br = (n as u32).reverse_bits() >> (32 - 8);
+    let angle = (br as f64 / NOISE_ROTATIONS as f64) * std::f64::consts::TAU;
+    let (sin_a, cos_a) = angle.sin_cos();
+    (cos_a as f32, sin_a as f32)
+}
+
 /// Pre-compute all sample offsets for `NOISE_ROTATIONS × samples` — the
 /// per-pixel loop then only does integer adds + depth compares.
 pub fn precompute_sample_offsets(
@@ -174,8 +168,6 @@ pub fn precompute_sample_offsets(
     radius_px: f32,
     bias_scaled: f32,
 ) -> Vec<Vec<SampleOffset>> {
-    use std::f64::consts::TAU;
-
     const GOLDEN_ANGLE: f64 = 2.399_963_229_728_653;
     let mut kernel = Vec::with_capacity(samples);
     for i in 0..samples {
@@ -190,11 +182,7 @@ pub fn precompute_sample_offsets(
 
     let mut offsets = Vec::with_capacity(NOISE_ROTATIONS);
     for n in 0..NOISE_ROTATIONS {
-        let br = (n as u32).reverse_bits() >> (32 - 8);
-        let angle = (br as f64 / NOISE_ROTATIONS as f64) * TAU;
-        let (sin_a, cos_a) = angle.sin_cos();
-        let cos_f = cos_a as f32;
-        let sin_f = sin_a as f32;
+        let (cos_f, sin_f) = noise_rotation(n);
 
         let mut pattern = Vec::with_capacity(samples);
         for &(kx, ky, kz) in &kernel {
@@ -475,50 +463,3 @@ pub fn bilateral_blur_in_range(
     v_buf
 }
 
-/// Pre-compute all sample offsets for 16 noise rotations x N kernel samples.
-/// Returns Vec of 16 Vecs, indexed by noise pattern `(y & 3) * 4 + (x & 3)`.
-/// Folds kernel generation, noise rotation, radius scaling, and int rounding
-/// into a single precomputation so the per-pixel loop needs only integer adds
-/// and a depth comparison.
-fn precompute_tiled_sample_offsets(
-    samples: usize,
-    radius_px: f32,
-    bias_scaled: f32,
-) -> Vec<Vec<SampleOffset>> {
-    use std::f64::consts::{PI, TAU};
-
-    let mut kernel = Vec::with_capacity(samples);
-    for i in 0..samples {
-        let u = (i as f64 + 0.5) / samples as f64;
-        let angle = 2.0 * PI * u;
-        let r = ((i + 1) as f64 / samples as f64).sqrt();
-        let x = angle.cos() * r;
-        let y = angle.sin() * r;
-        let z = (1.0 - x * x - y * y).fmax(0.0).sqrt();
-        let scale = (i as f64 / samples as f64).powi(2) * 0.9 + 0.1;
-        kernel.push(((x * scale) as f32, (y * scale) as f32, (z * scale) as f32));
-    }
-
-    const PERM: [usize; 16] = [0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15];
-
-    let mut offsets = Vec::with_capacity(16);
-    for n in 0..16 {
-        let angle = (PERM[n] as f64 / 16.0) * TAU;
-        let (sin_a, cos_a) = angle.sin_cos();
-        let cos_f = cos_a as f32;
-        let sin_f = sin_a as f32;
-
-        let mut pattern = Vec::with_capacity(samples);
-        for &(kx, ky, kz) in &kernel {
-            let rx = kx * cos_f - ky * sin_f;
-            let ry = kx * sin_f + ky * cos_f;
-            pattern.push(SampleOffset {
-                dx: (rx * radius_px + 0.5) as i32,
-                dy: (ry * radius_px + 0.5) as i32,
-                z_bias: kz * bias_scaled,
-            });
-        }
-        offsets.push(pattern);
-    }
-    offsets
-}

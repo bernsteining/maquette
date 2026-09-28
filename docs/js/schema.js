@@ -93,7 +93,7 @@ const SCHEMA = [
   ]},
 
   { s: "Shading model", fields: [
-    { k: "shading", label: "Model", help: "Shading model — Blinn-Phong, Gooch, Cel, Flat, or Normal-map.", t: "sel", def: "", opts: [["","Blinn–Phong"],["gooch","Gooch"],["cel","Cel"],["flat","Flat"],["normal","Normal map"]] },
+    { k: "shading", label: "Model", help: "Shading model — Blinn-Phong, Gooch, Cel, Flat, Normal-map, or Unlit (flat base colour, no lights or shadows).", t: "sel", def: "", opts: [["","Blinn–Phong"],["gooch","Gooch"],["cel","Cel"],["flat","Flat"],["normal","Normal map"],["unlit","Unlit"]] },
     { k: "gooch_warm", label: "Gooch warm", help: "Gooch warm-tone color.", t: "col", def: "#ffcc44", when: s => s.shading === "gooch" },
     { k: "gooch_cool", label: "Gooch cool", help: "Gooch cool-tone color.", t: "col", def: "#4466cc", when: s => s.shading === "gooch" },
     { k: "cel_bands", label: "Cel bands", help: "Number of cel-shading bands.", t: "num", def: 4, when: s => s.shading === "cel" },
@@ -191,6 +191,10 @@ const SCHEMA = [
       { k: "color", label: "Color", t: "col", def: "#ffffff" },
       { k: "intensity", label: "Intensity", t: "rng", def: 0.5, min: 0, max: 2, step: 0.05 },
       { k: "radius", label: "Radius", t: "num", def: 15 },
+    ]},
+    { k: "fog", label: "Depth fog", help: "Fade distant surfaces toward the background, as in Mol* (PNG only). Intensity 0–100 moves where the fade starts, from the back to the front of the model.", t: "grp", toggle: true, bool: true, def: { intensity: 50, color: "" }, fields: [
+      { k: "intensity", label: "Intensity", t: "rng", def: 50, min: 0, max: 100, step: 1 },
+      { k: "color", label: "Color (blank = background)", t: "col", def: "", allowBlank: true },
     ]},
     { k: "sharpen", label: "Sharpen", help: "Unsharp-mask edge sharpening (PNG only).", t: "grp", toggle: true, bool: true, def: { strength: 0.5 }, fields: [
       { k: "strength", label: "Strength", t: "rng", def: 0.5, min: 0, max: 2, step: 0.05 },
