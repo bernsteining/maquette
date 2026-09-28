@@ -5,6 +5,59 @@ async function compileModule(url) {
 
 const HANDLE_FNS = new Set(["render_obj", "render_obj_png", "render_stl", "render_stl_png", "render_ply", "render_ply_png", "get_obj_info", "get_stl_info", "get_ply_info", "render_gltf"]);
 
+const IS_HELPER = new URL(self.location.href).searchParams.has("helper");
+const BAND_PLUGIN = "maquette-gltf.wasm";
+const BAND_MIN_SAMPLES = 250000;
+const MAX_HELPERS = 3;
+const ENC = new TextEncoder();
+const DEC = new TextDecoder();
+
+function makeHelper(url) {
+  const w = new Worker(url);
+  const pending = new Map();
+  let seq = 0, bound = null, dead = false;
+  const fail = (err) => { dead = true; for (const p of pending.values()) p.reject(err); pending.clear(); };
+  w.onmessage = (e) => {
+    const p = pending.get(e.data.id);
+    if (!p) return;
+    pending.delete(e.data.id);
+    if (e.data.ok) p.resolve(e.data); else p.reject(new Error(e.data.error));
+  };
+  w.onerror = (e) => { e.preventDefault?.(); fail(new Error("band helper crashed")); };
+  const req = (msg) => new Promise((resolve, reject) => {
+    if (dead) return reject(new Error("band helper unavailable"));
+    const id = ++seq;
+    pending.set(id, { resolve, reject });
+    w.postMessage({ id, ...msg });
+  });
+  return {
+    get dead() { return dead; },
+    async bind(plugin, scope, bytes) {
+      if (bound === scope) return;
+      bound = null;
+      await req({ kind: "model", plugin, key: scope, bytes, activate: true });
+      bound = scope;
+    },
+    async call(plugin, fn, args) {
+      return (await req({ kind: "call", plugin, fn, args, withModel: true })).result;
+    },
+  };
+}
+
+let helpers = null;
+function helperPool() {
+  if (IS_HELPER) return [];
+  if (!helpers) {
+    const cores = self.navigator?.hardwareConcurrency || 2;
+    const mem = self.navigator?.deviceMemory ?? 8;
+    const n = mem < 4 ? 0 : cores >= 8 && mem >= 8 ? MAX_HELPERS : Math.max(0, Math.min(MAX_HELPERS - 1, cores - 2));
+    const url = new URL(self.location.href);
+    url.searchParams.set("helper", "1");
+    helpers = Array.from({ length: n }, () => makeHelper(url.href));
+  }
+  return helpers.filter((h) => !h.dead);
+}
+
 const FRAME_CACHE_BYTES = 96 * 1024 * 1024;
 const FRAME_CACHE_MAX_ARGS = 64 * 1024;
 const frames = new Map();
@@ -62,18 +115,68 @@ function makePlugin(url) {
       handle = null;
       handleMisses = 0;
       scope = `${url}#${++bindSeq}`;
+      if (url === BAND_PLUGIN) warmHelpers();
     },
-    call(fn, args, withModel) {
+    async call(fn, args, withModel) {
       if (!withModel) return invoke(fn, args);
       if (!active) throw new Error(`${url}: no model bound`);
       const fk = HANDLE_FNS.has(fn) ? frameKey(scope, fn, args) : null;
       const cached = fk && frameGet(fk);
       if (cached) return cached;
-      const out = callModel(fn, args);
+      const out = (await callBanded(fn, args)) || callModel(fn, args);
       if (fk) framePut(fk, out);
       return out;
     },
   };
+  function warmHelpers() {
+    const pool = helperPool();
+    if (!pool.length) return;
+    const [s, bytes] = [scope, active];
+    for (const h of pool) {
+      h.bind(URL_TO_ID[url], s, bytes)
+        .then(() => h.call(URL_TO_ID[url], "render_gltf", [ENC.encode(JSON.stringify({ width: 8, height: 8 }))]))
+        .catch(() => {});
+    }
+  }
+  async function callBanded(fn, args) {
+    if (url !== BAND_PLUGIN || fn !== "render_gltf" || args.length !== 1) return null;
+    const pool = helperPool();
+    if (!pool.length) return null;
+    let cfg;
+    try { cfg = JSON.parse(DEC.decode(args[0])); } catch { return null; }
+    if (!cfg || cfg.ssao || cfg.band) return null;
+    const w = Math.max(1, cfg.width | 0), h = Math.max(1, cfg.height | 0);
+    const aa = Math.min(4, Math.max(1, (cfg.antialias | 0) || 1));
+    if (w * h * aa * aa < BAND_MIN_SAMPLES) return null;
+    const nb = Math.min(h, pool.length + 1);
+    const cuts = Array.from({ length: nb + 1 }, (_, k) => Math.round((h * k) / nb));
+    const bandArgs = (k) => [ENC.encode(JSON.stringify({ ...cfg, band: [cuts[k], cuts[k + 1]] }))];
+    const queue = [...Array(nb).keys()];
+    const parts = new Array(nb);
+    const [s, bytes, id] = [scope, active, URL_TO_ID[url]];
+    const remote = pool.map(async (hp) => {
+      try { await hp.bind(id, s, bytes); } catch { return; }
+      while (queue.length) {
+        const k = queue.shift();
+        try { parts[k] = await hp.call(id, fn, bandArgs(k)); } catch { queue.push(k); return; }
+      }
+    });
+    while (queue.length) {
+      const k = queue.shift();
+      parts[k] = callModel(fn, bandArgs(k));
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    await Promise.all(remote);
+    for (let k = 0; k < nb; k++) if (!parts[k]) parts[k] = callModel(fn, bandArgs(k));
+    let len = 9;
+    for (const p of parts) len += p.length - 9;
+    const outBuf = new Uint8Array(len);
+    outBuf.set(parts[0].subarray(0, 9));
+    new DataView(outBuf.buffer).setUint32(5, h, true);
+    let o = 9;
+    for (const p of parts) { outBuf.set(p.subarray(9), o); o += p.length - 9; }
+    return outBuf;
+  }
   function callModel(fn, args) {
     const canHandle = HANDLE_FNS.has(fn) && handle !== false && "model_key" in inst.exports;
     if (canHandle && handle) {
@@ -112,6 +215,7 @@ const PLUGIN_URLS = {
   "maquette-gltf": "maquette-gltf.wasm",
   molfig: "molfig.wasm",
 };
+const URL_TO_ID = Object.fromEntries(Object.entries(PLUGIN_URLS).map(([k, v]) => [v, k]));
 const plugins = {};
 const pluginFor = (id) => PLUGIN_URLS[id] ? (plugins[id] ??= makePlugin(PLUGIN_URLS[id])) : null;
 
@@ -138,7 +242,7 @@ async function handle(msg) {
   if (kind === "model") { p.bind(key, bytes, activate); return {}; }
   if (kind !== "call") throw new Error(`unknown kind: ${kind}`);
   await p.ensure();
-  const result = p.call(fn, args, withModel);
+  const result = await p.call(fn, args, withModel);
   const painted = raster ? paint(result) : null;
   if (painted) return { painted: true, ...painted, transfer: painted.svg ? [painted.svg.buffer] : [] };
   return { result, transfer: [result.buffer] };
