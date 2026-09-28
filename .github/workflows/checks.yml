@@ -38,13 +38,20 @@ jobs:
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v7
+      - name: sccache (Manifold C++ compile cache)
+        uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: checks
       - name: make check (clippy -D warnings + tests)
         run: make check
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   # Webdemo JS module-graph lint — runs on the plain runner (has node), so it
   # catches a symbol used-but-not-imported (the class the module split can

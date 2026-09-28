@@ -81,11 +81,15 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
       BUILD_MAQUETTE: ${{ needs.changes.outputs.maquette }}
       BUILD_GLTF: ${{ needs.changes.outputs.gltf }}
       BUILD_SCAD: ${{ needs.changes.outputs.scad }}
     steps:
       - uses: actions/checkout@v7
+      - name: sccache (Rust + Manifold C++ compile cache)
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cargo & C++ build cache
         uses: Swatinem/rust-cache@v2

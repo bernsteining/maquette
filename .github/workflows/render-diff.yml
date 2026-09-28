@@ -27,10 +27,15 @@ jobs:
   render-diff:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 2
+      - name: sccache (Rust + Manifold C++ compile cache)
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: System deps (cmake for Manifold's C++)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake
