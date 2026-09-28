@@ -230,6 +230,11 @@ function scheduleRender(beforeRender) {
   });
 }
 
+async function renderFrame() {
+  markInteracting();
+  await safeRender();
+}
+
 const transferred = new WeakSet();
 function canvasForWorker() {
   let canvas = $("outc");
@@ -270,4 +275,4 @@ async function downloadRender() {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
-export { initRenderer, safeRender, scheduleRender, endInteraction, setStageBusy, showErr, downloadRender };
+export { initRenderer, safeRender, scheduleRender, renderFrame, endInteraction, setStageBusy, showErr, downloadRender };

@@ -8,7 +8,7 @@
 <!-- Start the demo's two heaviest first-load fetches during head parse instead
      of after the deferred module script runs. CI rewrites the modulepreload to
      the bundled JS; the wasm is the boot plugin (maquette), fetched by worker.js. -->
-<link rel="modulepreload" href="js/main.js?v=9">
+<link rel="modulepreload" href="js/main.js?v=10">
 <link rel="preload" as="fetch" type="application/wasm" href="maquette.wasm">
 <style>
   :root {
@@ -187,6 +187,10 @@
   }
   select:focus, input[type=text]:focus, input[type=number]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   input[type=range] { width: 100%; accent-color: var(--accent); height: 18px; }
+  .play-row { display: flex; align-items: center; gap: 6px; }
+  .play-row > input[type=range] { flex: 1; min-width: 0; }
+  .play-row > .play { flex: none; width: 28px; height: 24px; padding: 0; border-radius: 6px; border: 1px solid var(--line, #0003); background: var(--bg); color: var(--ink); cursor: pointer; font-size: 12px; line-height: 1; }
+  .play-row > .play:hover { border-color: var(--accent); }
   input[type=color] { width: 100%; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 7px; background: none; cursor: pointer; }
   input[type=color]::-webkit-color-swatch { border: none; border-radius: 6px; }
   input[type=color]::-webkit-color-swatch-wrapper { padding: 2px; }
@@ -582,6 +586,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/main.js?v=9"></script>
+  <script type="module" src="js/main.js?v=10"></script>
 </body>
 </html>

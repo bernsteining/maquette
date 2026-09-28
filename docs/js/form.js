@@ -53,14 +53,41 @@ function ctl(f, slot, local) {
     } else if (f.t === "rng") {
       const valEl = el("span", { className: "val" });
       labelEl.append(valEl);
-      input = el("input", { type: "range", min: f.min, max: f.max, step: f.step, attrs: { "aria-label": f.label } });
+      const range = el("input", { type: "range", min: f.min, max: f.max, step: f.step, attrs: { "aria-label": f.label } });
+      input = range;
       sync = (v) => {
         const t = (+v).toFixed(2);
-        input.value = v; valEl.textContent = t;
-        input.setAttribute("aria-valuetext", t);
+        range.value = v; valEl.textContent = t;
+        range.setAttribute("aria-valuetext", t);
       };
       sync(cur);
-      input.oninput = () => { sync(input.value); set(+input.value); };
+      const scrub = (v) => {
+        slot[f.k] = v;
+        if (f.onSet && f.onSet(v, state)) rebuildForm();
+        hooks.scrub();
+        if (f.recompile) hooks.recompile(f.recompile);
+      };
+      range.oninput = () => { sync(range.value); scrub(+range.value); };
+      if (f.play) {
+        let playing = false;
+        const btn = el("button", { type: "button", className: "play", textContent: "▶", attrs: { "aria-label": "Play animation" } });
+        const stop = () => { playing = false; btn.textContent = "▶"; btn.setAttribute("aria-label", "Play animation"); };
+        btn.onclick = async () => {
+          if (playing) return stop();
+          playing = true; btn.textContent = "⏸"; btn.setAttribute("aria-label", "Pause animation");
+          const lo = +f.min, span = +f.max - lo, step = +f.step || 0.01;
+          const start = performance.now() - (+range.value - lo) * 1000;
+          while (playing && btn.isConnected) {
+            const t = ((performance.now() - start) / 1000) % span;
+            const v = +(lo + Math.round(t / step) * step).toFixed(6);
+            sync(v); slot[f.k] = v;
+            await hooks.frame();
+            await new Promise((r) => requestAnimationFrame(r));
+          }
+          stop();
+        };
+        input = el("div", { className: "play-row" }, range, btn);
+      }
     } else if (f.t === "num") {
       const ni = el("input", { type: "number", value: cur, attrs: { "aria-label": f.label } });
       if (f.min != null) ni.min = f.min;

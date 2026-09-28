@@ -2,7 +2,7 @@ import { $, flashLabel } from "./dom.js";
 import { state, model, catalog, resetState, setOutputFormat, setRenderOverride, topFields } from "./state.js";
 import { buildTypst, renderCode, parseTypst, setCodeGuard, highlightCode, sizeCode } from "./config.js";
 import { buildForm, rebuildForm, refreshVisibility, filterForm, initTooltips } from "./form.js";
-import { initRenderer, safeRender, setStageBusy, showErr, downloadRender } from "./render.js";
+import { initRenderer, safeRender, scheduleRender, renderFrame, setStageBusy, showErr, downloadRender } from "./render.js";
 import { initOrbit } from "./camera.js";
 import { applyStateFromUrl, bestUrl, shareConfig, applyConfig } from "./share.js";
 import { initModelsUi, modelsReady, preloadDemoModels, loadFile, loadPresetByName, showModel, applyModelDefaults, syncGltfInfo, measure, triggerRecompile, enterScadMode, kindOf } from "./models.js";
@@ -32,7 +32,20 @@ function onChange() {
   clearTimeout(renderTimer); renderTimer = setTimeout(safeRender, RENDER_DEBOUNCE_MS);
   scheduleUrlSync();
 }
+function onScrub() {
+  renderCode();
+  clearTimeout(renderTimer);
+  scheduleRender();
+  scheduleUrlSync();
+}
+async function onFrame() {
+  renderCode();
+  clearTimeout(renderTimer);
+  await renderFrame();
+}
 hooks.change = onChange;
+hooks.scrub = onScrub;
+hooks.frame = onFrame;
 hooks.recompile = triggerRecompile;
 hooks.viewChanged = scheduleUrlSync;
 

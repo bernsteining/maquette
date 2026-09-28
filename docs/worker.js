@@ -5,8 +5,38 @@ async function compileModule(url) {
 
 const HANDLE_FNS = new Set(["render_obj", "render_obj_png", "render_stl", "render_stl_png", "render_ply", "render_ply_png", "get_obj_info", "get_stl_info", "get_ply_info", "render_gltf"]);
 
+const FRAME_CACHE_BYTES = 96 * 1024 * 1024;
+const FRAME_CACHE_MAX_ARGS = 64 * 1024;
+const frames = new Map();
+let frameBytes = 0;
+let bindSeq = 0;
+function frameKey(scope, fn, args) {
+  let n = 0;
+  for (const a of args) n += a.length;
+  if (n > FRAME_CACHE_MAX_ARGS) return null;
+  const dec = new TextDecoder();
+  return `${scope}\u0000${fn}\u0000${args.map((a) => dec.decode(a)).join("\u0001")}`;
+}
+function frameGet(key) {
+  const hit = frames.get(key);
+  if (!hit) return null;
+  frames.delete(key);
+  frames.set(key, hit);
+  return hit.slice();
+}
+function framePut(key, bytes) {
+  if (bytes.length > FRAME_CACHE_BYTES / 8) return;
+  frames.set(key, bytes.slice());
+  frameBytes += bytes.length;
+  for (const [k, v] of frames) {
+    if (frameBytes <= FRAME_CACHE_BYTES) break;
+    frames.delete(k);
+    frameBytes -= v.length;
+  }
+}
+
 function makePlugin(url) {
-  let argParts = [], result = new Uint8Array(), inst = null, compiled = null, ensuring = null, active = null, handle = null, handleMisses = 0;
+  let argParts = [], result = new Uint8Array(), inst = null, compiled = null, ensuring = null, active = null, handle = null, handleMisses = 0, scope = "";
   const models = new Map();
   const imports = { typst_env: {
     wasm_minimal_protocol_write_args_to_buffer: (ptr) => {
@@ -31,26 +61,36 @@ function makePlugin(url) {
       if (!active) throw new Error(`${url}: no cached model for key: ${key}`);
       handle = null;
       handleMisses = 0;
+      scope = `${url}#${++bindSeq}`;
     },
     call(fn, args, withModel) {
       if (!withModel) return invoke(fn, args);
       if (!active) throw new Error(`${url}: no model bound`);
-      const canHandle = HANDLE_FNS.has(fn) && handle !== false && "model_key" in inst.exports;
-      if (canHandle && handle) {
-        try {
-          const out = invoke(fn, [handle, ...args]);
-          handleMisses = 0;
-          return out;
-        } catch (e) {
-          if (e instanceof WebAssembly.RuntimeError) throw e;
-          if (++handleMisses >= 2) handle = false;
-        }
-      }
-      const out = invoke(fn, [active, ...args]);
-      if (canHandle && handle === null) handle = invoke("model_key", [active]);
+      const fk = HANDLE_FNS.has(fn) ? frameKey(scope, fn, args) : null;
+      const cached = fk && frameGet(fk);
+      if (cached) return cached;
+      const out = callModel(fn, args);
+      if (fk) framePut(fk, out);
       return out;
     },
   };
+  function callModel(fn, args) {
+    const canHandle = HANDLE_FNS.has(fn) && handle !== false && "model_key" in inst.exports;
+    if (canHandle && handle) {
+      try {
+        const out = invoke(fn, [handle, ...args]);
+        handleMisses = 0;
+        return out;
+      } catch (e) {
+        if (e instanceof WebAssembly.RuntimeError) throw e;
+        if (++handleMisses >= 2) handle = false;
+      }
+    }
+    const out = invoke(fn, [active, ...args]);
+    if (canHandle && handle === null) handle = invoke("model_key", [active]);
+    return out;
+  }
+
   function invoke(fn, args) {
     argParts = args;
     result = new Uint8Array();

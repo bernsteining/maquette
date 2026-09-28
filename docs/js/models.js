@@ -162,9 +162,9 @@ async function syncGltfInfo() {
     const maxT = +info.max_animation_time || 0;
     const f = GLTF_TIME_FIELD;
     if (maxT > 0) {
-      f.t = "rng"; f.min = 0; f.max = Math.ceil(maxT * 10) / 10; f.step = Math.max(0.02, maxT / 200);
+      f.t = "rng"; f.min = 0; f.max = Math.ceil(maxT * 10) / 10; f.step = Math.max(0.02, maxT / 200); f.play = true;
     } else {
-      f.t = "num"; delete f.min; delete f.max; delete f.step;
+      f.t = "num"; delete f.min; delete f.max; delete f.step; delete f.play;
     }
     if (typeof state.time === "number" && state.time > maxT) state.time = 0;
 
