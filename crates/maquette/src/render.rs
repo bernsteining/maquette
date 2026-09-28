@@ -1895,11 +1895,23 @@ fn render_grid_svg(
 /// The raw RGBA producer shared by both plain and overlay outputs: downsamples
 /// (opaque SSAA) or composites z-buffer coverage (transparent) into straight
 /// RGBA8 at output resolution. Returns `(width, height, rgba)`.
-fn raster_rgba(buf: &PixelBuffer, aa: usize, transparent: bool) -> (u32, u32, Vec<u8>) {
+pub(crate) fn antialias_mode(antialias: usize) -> (usize, bool) {
+    match antialias {
+        0 => (1, false),
+        1 => (1, true),
+        5 => (2, true),
+        6 => (4, true),
+        n => (n.next_power_of_two(), false),
+    }
+}
+
+fn raster_rgba(buf: &PixelBuffer, aa: usize, transparent: bool, fxaa: bool) -> (u32, u32, Vec<u8>) {
     if transparent {
         buf.to_rgba8_transparent(aa)
     } else if aa > 1 {
-        buf.downsample(aa).to_rgba8()
+        let mut out = buf.downsample(aa);
+        if fxaa { crate::fxaa::apply_fxaa(&mut out.pixels, out.width, out.height); }
+        out.to_rgba8()
     } else {
         buf.to_rgba8()
     }
@@ -1909,8 +1921,8 @@ fn raster_rgba(buf: &PixelBuffer, aa: usize, transparent: bool) -> (u32, u32, Ve
 /// 0x00 distinguishes it from SVG output ('<' = 0x3C) and a raster+overlay blob
 /// (0x02); the host slices the 9-byte header and embeds the pixels via
 /// `image(px, format: (encoding: "rgba8", width, height))`.
-fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool) -> Result<Vec<u8>, String> {
-    let (w, h, rgba) = raster_rgba(buf, aa, transparent);
+fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool, fxaa: bool) -> Result<Vec<u8>, String> {
+    let (w, h, rgba) = raster_rgba(buf, aa, transparent, fxaa);
     let mut out = Vec::with_capacity(9 + rgba.len());
     out.push(0x00);
     out.extend_from_slice(&w.to_le_bytes());
@@ -1924,8 +1936,8 @@ fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool) -> Result<Vec<
 /// lines, annotations, debug text) is layered on top by the host — no image
 /// encoding, so the plugin needs no PNG. The overlay's coordinates share the
 /// raster's pixel space (`viewBox = 0 0 w h`).
-fn pack_raster_overlay(buf: &PixelBuffer, aa: usize, transparent: bool, overlay: &str) -> Vec<u8> {
-    let (w, h, rgba) = raster_rgba(buf, aa, transparent);
+fn pack_raster_overlay(buf: &PixelBuffer, aa: usize, transparent: bool, fxaa: bool, overlay: &str) -> Vec<u8> {
+    let (w, h, rgba) = raster_rgba(buf, aa, transparent, fxaa);
     let mut out = Vec::with_capacity(9 + rgba.len() + overlay.len());
     out.push(0x02);
     out.extend_from_slice(&w.to_le_bytes());
@@ -1973,7 +1985,8 @@ fn triangle_texture_lod(pts: &[(f64, f64); 3], uvs: &[[f32; 2]; 3], tex: &maquet
 }
 
 pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>, textures: &[maquette_core::texture::Texture]) -> Result<Vec<u8>, String> {
-    let aa = config.antialias.max(1).next_power_of_two();
+    let (aa, fxaa) = antialias_mode(config.antialias);
+    let post_fxaa = fxaa && aa > 1;
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
     let vw = config.width * aa as f64;
@@ -1987,7 +2000,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     if triangles.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return finish_raster(&buf, 1, transparent);
+        return finish_raster(&buf, 1, transparent, false);
     }
 
     crate::prof::mark(10);
@@ -1996,7 +2009,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     crate::prof::mark(11);
     if tris.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return finish_raster(&buf, 1, transparent);
+        return finish_raster(&buf, 1, transparent, false);
     }
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
@@ -2011,9 +2024,9 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         let buf = render_grid_png_buf(&tris, config, &views, br, bmin.z, w, h, bg, group_styles);
         return if config.grid_labels {
             let overlay = overlay_grid_labels(config.width, config.height, &views);
-            Ok(pack_raster_overlay(&buf, aa, transparent, &overlay))
+            Ok(pack_raster_overlay(&buf, aa, transparent, false, &overlay))
         } else {
-            finish_raster(&buf, aa, transparent)
+            finish_raster(&buf, aa, transparent, false)
         };
     }
 
@@ -2023,9 +2036,9 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
             let buf = render_grid_png_buf(&tris, config, &resolved, br, bmin.z, w, h, bg, group_styles);
             return if config.grid_labels {
                 let overlay = overlay_grid_labels(config.width, config.height, &resolved);
-                Ok(pack_raster_overlay(&buf, aa, transparent, &overlay))
+                Ok(pack_raster_overlay(&buf, aa, transparent, false, &overlay))
             } else {
-                finish_raster(&buf, aa, transparent)
+                finish_raster(&buf, aa, transparent, false)
             };
         }
     }
@@ -2228,7 +2241,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     }
 
     crate::prof::mark(18);
-    if config.antialias == 1 && !transparent {
+    if fxaa && aa == 1 && !transparent {
         crate::fxaa::apply_fxaa(&mut buf.pixels, buf.width, buf.height);
     }
     crate::prof::mark(19);
@@ -2240,12 +2253,12 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
             .map(|(gid, (x, y))| (gid, (x * scale, y * scale)))
             .collect();
         let overlay = overlay_annotations(config.width, config.height, &centroids, group_styles, ann_cfg);
-        Ok(pack_raster_overlay(&buf, aa, transparent, &overlay))
+        Ok(pack_raster_overlay(&buf, aa, transparent, post_fxaa, &overlay))
     } else if config.debug {
         let overlay = overlay_debug(config.width, config.height, &tris, bmin, bmax, &view, config);
-        Ok(pack_raster_overlay(&buf, aa, transparent, &overlay))
+        Ok(pack_raster_overlay(&buf, aa, transparent, post_fxaa, &overlay))
     } else {
-        finish_raster(&buf, aa, transparent)
+        finish_raster(&buf, aa, transparent, post_fxaa)
     }
 }
 
