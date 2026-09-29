@@ -7,6 +7,13 @@ pub struct Annotation<'a> {
     pub anchor: (f64, f64),
     pub label_pos: (f64, f64),
     pub name: &'a str,
+    /// The label text runs rightwards from `label_pos` (else leftwards).
+    pub rightwards: bool,
+}
+
+/// Rough rendered width of `text` in a sans-serif font of `font_size`.
+fn text_width(text: &str, font_size: f64) -> f64 {
+    text.chars().count() as f64 * font_size * 0.6
 }
 
 pub fn compute_annotations<'a>(
@@ -44,6 +51,7 @@ pub fn compute_annotations<'a>(
             anchor: (cx, cy),
             label_pos: (lx, ly),
             name,
+            rightwards: lx >= cx,
         });
     }
 
@@ -60,7 +68,9 @@ pub fn compute_annotations<'a>(
 
     let margin = ann.font_size;
     for a in &mut anns {
-        a.label_pos.0 = a.label_pos.0.clamp(margin, w - margin);
+        let tw = text_width(a.name, ann.font_size);
+        let (lo, hi) = if a.rightwards { (margin, w - margin - tw) } else { (margin + tw, w - margin) };
+        a.label_pos.0 = if lo <= hi { a.label_pos.0.clamp(lo, hi) } else { a.label_pos.0.clamp(margin, w - margin) };
         a.label_pos.1 = a.label_pos.1.clamp(margin + ann.font_size, h - margin);
     }
 
@@ -78,7 +88,7 @@ pub fn write_annotations_svg(
     for a in annotations {
         let (ax, ay) = a.anchor;
         let (lx, ly) = a.label_pos;
-        let anchor = if lx >= ax { "start" } else { "end" };
+        let anchor = if a.rightwards { "start" } else { "end" };
 
         svg.push_str("<circle cx=\""); push_f1(svg, ax);
         svg.push_str("\" cy=\""); push_f1(svg, ay);
