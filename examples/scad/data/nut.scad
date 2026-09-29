@@ -10,4 +10,4 @@ module nut(af = 16, h = 8, hole = 8) {
     }
 }
 
-nut();
+nut(af = 22, h = 11, hole = 12);
