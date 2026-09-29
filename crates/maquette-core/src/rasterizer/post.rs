@@ -750,7 +750,10 @@ impl PixelBuffer {
     /// covered fraction is returned as per-pixel alpha — so anti-aliased
     /// edges fade out with no background fringe. With `with_depth`, each
     /// output pixel keeps the nearest depth of its block.
-    pub fn resolve(&self, factor: usize, transparent: bool, with_depth: bool) -> (Self, Option<Vec<u8>>) {
+    pub fn resolve(self, factor: usize, transparent: bool, with_depth: bool) -> (Self, Option<Vec<u8>>) {
+        if !transparent && factor <= 1 {
+            return (self, None);
+        }
         if !transparent {
             let out = if with_depth { self.downsample_with_depth(factor) } else { self.downsample(factor) };
             return (out, None);

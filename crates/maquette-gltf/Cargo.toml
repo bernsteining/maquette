@@ -12,7 +12,7 @@ crate-type = ["cdylib", "rlib"]
 name = "maquette_gltf"
 
 [features]
-prof = []
+prof = ["maquette-core/prof"]
 
 [dependencies]
 maquette-core = { path = "../maquette-core" }

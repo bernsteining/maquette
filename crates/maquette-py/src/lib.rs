@@ -27,35 +27,9 @@ fn config_json(py: Python<'_>, config: Option<&Bound<'_, PyAny>>) -> PyResult<Ve
     }
 }
 
-fn encode_png(raw: &[u8]) -> Result<Vec<u8>, String> {
-    let marker = *raw.first().ok_or("empty render output")?;
-    match marker {
-        0x00 | 0x02 => {
-            if raw.len() < 9 {
-                return Err("truncated raster header".into());
-            }
-            let w = u32::from_le_bytes(raw[1..5].try_into().unwrap());
-            let h = u32::from_le_bytes(raw[5..9].try_into().unwrap());
-            let n = (w as usize) * (h as usize) * 4;
-            let px = raw.get(9..9 + n).ok_or("truncated raster pixels")?;
-            let mut out = Vec::new();
-            {
-                let mut enc = png::Encoder::new(&mut out, w, h);
-                enc.set_color(png::ColorType::Rgba);
-                enc.set_depth(png::BitDepth::Eight);
-                let mut wr = enc.write_header().map_err(|e| e.to_string())?;
-                wr.write_image_data(px).map_err(|e| e.to_string())?;
-            }
-            Ok(out)
-        }
-        0x3C => Ok(raw.to_vec()),
-        m => Err(format!("unexpected render marker 0x{m:02x}")),
-    }
-}
-
 fn finish<'py>(py: Python<'py>, raw: Vec<u8>, fmt: &str) -> PyResult<Bound<'py, PyBytes>> {
     let out = match fmt {
-        "png" => encode_png(&raw).map_err(err)?,
+        "png" => maquette_core::effects::raw_raster_to_png(&raw).map_err(err)?,
         "svg" => raw,
         _ => return Err(err(format!("fmt must be 'png' or 'svg', got {fmt:?}"))),
     };

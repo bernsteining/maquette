@@ -156,35 +156,12 @@ fn run(cli: Cli) -> Result<(), String> {
 }
 
 fn encode_png(raw: &[u8]) -> Result<Vec<u8>, String> {
-    let marker = *raw.first().ok_or("empty render output")?;
-    match marker {
-        0x00 | 0x02 => {
-            if raw.len() < 9 {
-                return Err("truncated raster header".into());
-            }
-            let w = u32::from_le_bytes(raw[1..5].try_into().unwrap());
-            let h = u32::from_le_bytes(raw[5..9].try_into().unwrap());
-            let n = (w as usize) * (h as usize) * 4;
-            let px = raw.get(9..9 + n).ok_or("truncated raster pixels")?;
-            if marker == 0x02 {
-                eprintln!("warning: vector overlay dropped from PNG; use --format svg to keep annotations/grid");
-            }
-            let mut out = Vec::new();
-            {
-                let mut enc = png::Encoder::new(&mut out, w, h);
-                enc.set_color(png::ColorType::Rgba);
-                enc.set_depth(png::BitDepth::Eight);
-                let mut writer = enc.write_header().map_err(|e| format!("png: {e}"))?;
-                writer.write_image_data(px).map_err(|e| format!("png: {e}"))?;
-            }
-            Ok(out)
-        }
-        0x3C => {
-            eprintln!("warning: renderer returned SVG for a PNG target; writing SVG bytes");
-            Ok(raw.to_vec())
-        }
-        m => Err(format!("unexpected render marker 0x{m:02x}")),
+    match raw.first() {
+        Some(0x02) => eprintln!("warning: vector overlay dropped from PNG; use --format svg to keep annotations/grid"),
+        Some(b'<') => eprintln!("warning: renderer returned SVG for a PNG target; writing SVG bytes"),
+        _ => {}
     }
+    maquette_core::effects::raw_raster_to_png(raw)
 }
 
 fn format_of(p: &Path) -> Option<Format> {

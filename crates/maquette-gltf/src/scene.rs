@@ -12,7 +12,7 @@
 use maquette_core::math::FloatExt;
 use crate::gltf_loader::LoadedGltf;
 use maquette_core::math::{Mat4, Vec3};
-use maquette_core::texture::{build_mips, Filter, MipLevel, Texture, Wrap};
+use maquette_core::texture::{Filter, MipLevel, Texture, Wrap};
 use maquette_core::texture_decode;
 
 #[derive(Clone, Copy)]
@@ -436,24 +436,15 @@ impl Scene {
 
     #[inline]
     fn extend_bbox(&mut self, p: Vec3) {
-        if p.x < self.bbox_min.x { self.bbox_min.x = p.x; }
-        if p.y < self.bbox_min.y { self.bbox_min.y = p.y; }
-        if p.z < self.bbox_min.z { self.bbox_min.z = p.z; }
-        if p.x > self.bbox_max.x { self.bbox_max.x = p.x; }
-        if p.y > self.bbox_max.y { self.bbox_max.y = p.y; }
-        if p.z > self.bbox_max.z { self.bbox_max.z = p.z; }
+        maquette_core::math::bbox_extend(&mut self.bbox_min, &mut self.bbox_max, p);
     }
 
     pub fn bounds(&self) -> (Vec3, f64) {
         if self.triangles.is_empty() {
             return (Vec3::new(0.0, 0.0, 0.0), 0.0);
         }
-        let center = Vec3::new(
-            0.5 * (self.bbox_min.x + self.bbox_max.x),
-            0.5 * (self.bbox_min.y + self.bbox_max.y),
-            0.5 * (self.bbox_min.z + self.bbox_max.z),
-        );
-        let radius = 0.5 * (self.bbox_max - self.bbox_min).length();
+        let center = maquette_core::math::bbox_center(self.bbox_min, self.bbox_max);
+        let radius = maquette_core::math::bbox_radius(self.bbox_min, self.bbox_max);
         (center, radius.fmax(1e-6))
     }
 }
@@ -1297,16 +1288,13 @@ fn load_texture(loaded: &LoadedGltf, t: &gltf::Texture, opts: TextureLoadOpts) -
         }
     }
     let sampler = t.sampler();
-    let mips = build_mips(base);
-    let (bw, bh) = (mips[0].width, mips[0].height);
-    Ok(Texture {
-        mips,
-        wrap_s: map_wrap(sampler.wrap_s()),
-        wrap_t: map_wrap(sampler.wrap_t()),
-        mag_filter: sampler.mag_filter().map(map_mag).unwrap_or(Filter::Linear),
-        min_filter: sampler.min_filter().map(map_min).unwrap_or(Filter::Linear),
-        lod_bias: 0.5 * ((bw * bh) as f32).log2(),
-    })
+    Ok(Texture::from_base(
+        base,
+        map_wrap(sampler.wrap_s()),
+        map_wrap(sampler.wrap_t()),
+        sampler.mag_filter().map(map_mag).unwrap_or(Filter::Linear),
+        sampler.min_filter().map(map_min).unwrap_or(Filter::Linear),
+    ))
 }
 
 /// Leak a Vec of placeholder textures so `get_gltf_info` can return a

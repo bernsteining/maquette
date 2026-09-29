@@ -3,7 +3,7 @@ use crate::annotations;
 use crate::cache;
 use crate::clip;
 use crate::color_map;
-use crate::config::{GroupAppearance, LightKind, RenderConfig, ShadowConfig};
+use crate::config::{LightKind, RenderConfig, ShadowConfig, GroupStyles};
 use crate::decimate;
 use crate::explode;
 use crate::color::{linear_to_srgb, parse_hex_color, srgb_to_linear};
@@ -13,13 +13,21 @@ use crate::parser::Triangle;
 use maquette_core::effects::{raw_raster, Bloom, Fog, Glow, PostEffects};
 use maquette_core::rasterizer::PixelBuffer;
 use maquette_core::ssao::SSAOParams;
+use maquette_core::cache::{Global, KeyedCache};
+use maquette_core::math::FxHasher;
 use crate::smooth;
 use crate::projection::*;
 use crate::shading::*;
 use crate::svg::*;
 #[cfg(target_arch = "wasm32")] use std::arch::wasm32::*; #[cfg(not(target_arch = "wasm32"))] use maquette_core::simd::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+
+const NO_SOURCE: u32 = u32::MAX;
+
+/// Most supersampled samples a raster render fits in wasm32 memory (measured:
+/// 400 M renders, 484 M runs out).
+const MAX_RASTER_SAMPLES: u64 = 400_000_000;
 
 struct ProjectedTri {
     pts: [(f64, f64); 3],
@@ -34,59 +42,22 @@ struct ProjectedTri {
     group_id: Option<u32>,
     /// Opacity (0.0–1.0). 1.0 = fully opaque.
     opacity: f64,
-    /// Per-pixel shadow data (world vertex positions + face normal). Set only
-    /// when per-pixel shadows are active; the raster pass samples the maps here.
-    pp: Option<([Vec3; 3], Vec3)>,
-    /// Per-corner UVs for the textured raster path (OBJ `map_Kd`). Present only
-    /// alongside `tex`; the PNG pass samples the bound texture per pixel and
-    /// modulates it by the (white-albedo) lit `vertex_colors`. Ignored by SVG.
-    uvs: Option<[[f32; 2]; 3]>,
-    /// Index into the render's texture table. `None` = untextured.
-    tex: Option<u16>,
+    /// Index of the source triangle in the projected slice (for per-pixel
+    /// shadows and textures), or `NO_SOURCE` for synthetic geometry.
+    src: u32,
     splat: bool,
 }
 
 
-pub(crate) fn bbox_of(iter: impl Iterator<Item = Vec3>) -> (Vec3, Vec3) {
-    let mut min = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
-    let mut max = Vec3::new(f64::MIN, f64::MIN, f64::MIN);
-    for v in iter {
-        if v.x < min.x { min.x = v.x }
-        if v.y < min.y { min.y = v.y }
-        if v.z < min.z { min.z = v.z }
-        if v.x > max.x { max.x = v.x }
-        if v.y > max.y { max.y = v.y }
-        if v.z > max.z { max.z = v.z }
-    }
-    (min, max)
-}
+pub(crate) use maquette_core::math::{bbox_center, bbox_of, bbox_radius};
 
 fn compute_bbox(triangles: &[Triangle]) -> (Vec3, Vec3) {
     let mut min = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
     let mut max = Vec3::new(f64::MIN, f64::MIN, f64::MIN);
     for t in triangles {
-        for v in &t.vertices {
-            if v.x < min.x { min.x = v.x }
-            if v.y < min.y { min.y = v.y }
-            if v.z < min.z { min.z = v.z }
-            if v.x > max.x { max.x = v.x }
-            if v.y > max.y { max.y = v.y }
-            if v.z > max.z { max.z = v.z }
-        }
+        for &v in &t.vertices { maquette_core::math::bbox_extend(&mut min, &mut max, v); }
     }
     (min, max)
-}
-
-pub(crate) fn bbox_center(min: Vec3, max: Vec3) -> Vec3 {
-    Vec3::new(
-        (min.x + max.x) / 2.0,
-        (min.y + max.y) / 2.0,
-        (min.z + max.z) / 2.0,
-    )
-}
-
-pub(crate) fn bbox_radius(min: Vec3, max: Vec3) -> f64 {
-    Vec3::new(max.x - min.x, max.y - min.y, max.z - min.z).length() / 2.0
 }
 
 /// Everything the shade paths need to apply cast shadows. `maps` has one entry
@@ -130,12 +101,7 @@ impl ShadowData {
         let mut n = 0u32;
         for (li, map) in self.maps.iter().enumerate() {
             if let Some(m) = map {
-                let ls = self.light_sizes[li];
-                sum += if ls > 0.0 {
-                    m.lit_pcss(p, normal, &self.bias, self.softness, ls)
-                } else {
-                    m.lit(p, normal, &self.bias, self.softness)
-                };
+                sum += m.lit_sized(p, normal, &self.bias, self.softness, self.light_sizes[li]);
                 n += 1;
             }
         }
@@ -168,7 +134,7 @@ fn build_shadow_data(
     lights: &[ResolvedLight],
     smooth: Option<&smooth::SmoothData>,
     config: &RenderConfig,
-    group_styles: &HashMap<u32, GroupAppearance>,
+    group_styles: &GroupStyles,
     bc: Vec3,
     br: f64,
     allow_per_pixel: bool,
@@ -222,31 +188,25 @@ fn shadow_cache_key(
     has_smooth: bool,
     lights: &[ResolvedLight],
     config: &RenderConfig,
-    group_styles: &HashMap<u32, GroupAppearance>,
+    group_styles: &GroupStyles,
     allow_per_pixel: bool,
 ) -> Option<u64> {
-    #[inline]
-    fn m(h: u64, x: u64) -> u64 { (h ^ x).wrapping_mul(0x100000001b3) }
     let cfg = config.shadows.as_ref()?;
-    let mut h = m(prep_cache_key(prep_base, config), 0x5AD0);
-    h = m(h, has_smooth as u64 | (allow_per_pixel as u64) << 1);
+    let mut h = FxHasher::seeded(prep_cache_key(prep_base, config)).mix(0x5AD0).mix(has_smooth as u64 | (allow_per_pixel as u64) << 1);
     for l in lights {
-        h = m(h, l.kind as u64);
-        for v in [l.vector.x, l.vector.y, l.vector.z, l.size] { h = m(h, v.to_bits()); }
-        h = m(h, l.cast_shadow as u64);
+        h = h.mix(l.kind as u64);
+        for v in [l.vector.x, l.vector.y, l.vector.z, l.size] { h = h.mix_f64(v); }
+        h = h.mix(l.cast_shadow as u64);
     }
     for v in [cfg.bias, cfg.normal_bias, cfg.slope_bias, cfg.strength, cfg.light_size, config.opacity, config.ambient.intensity] {
-        h = m(h, v.to_bits());
+        h = h.mix_f64(v);
     }
-    for &u in &config.up { h = m(h, u.to_bits()); }
-    h = m(h, cfg.resolution as u64);
-    h = m(h, cfg.softness as u64);
-    h = m(h, cfg.per_pixel as u64 | (cfg.omni as u64) << 1);
-    for &b in cfg.color.as_bytes() { h = m(h, b as u64); }
+    for &u in &config.up { h = h.mix_f64(u); }
+    h = h.mix(cfg.resolution as u64).mix(cfg.softness as u64).mix(cfg.per_pixel as u64 | (cfg.omni as u64) << 1).mix_str(&cfg.color);
     let groups = group_styles.iter().fold(0u64, |acc, (gid, g)| {
-        acc ^ m(m(0xcbf2_9ce4_8422_2325, *gid as u64), g.opacity.map_or(u64::MAX, f64::to_bits))
+        acc ^ FxHasher::seeded(0xcbf2_9ce4_8422_2325).mix(*gid as u64).mix(g.opacity.map_or(u64::MAX, f64::to_bits)).key()
     });
-    Some(m(h, groups))
+    Some(h.mix(groups).key())
 }
 
 fn shadow_data_for<'a>(
@@ -256,12 +216,12 @@ fn shadow_data_for<'a>(
     lights: &[ResolvedLight],
     smooth: Option<&smooth::SmoothData>,
     config: &RenderConfig,
-    group_styles: &HashMap<u32, GroupAppearance>,
+    group_styles: &GroupStyles,
     bc: Vec3,
     br: f64,
     allow_per_pixel: bool,
 ) -> Option<&'a ShadowData> {
-    static mut CACHE: Vec<(u64, Option<ShadowData>)> = Vec::new();
+    static CACHE: Global<KeyedCache<Option<ShadowData>>> = Global::new(KeyedCache::new(2));
     if config.shading == "unlit" {
         return None;
     }
@@ -270,29 +230,19 @@ fn shadow_data_for<'a>(
         *owned = build();
         return owned.as_ref();
     };
-    let cache = unsafe { &mut *std::ptr::addr_of_mut!(CACHE) };
-    if let Some(i) = cache.iter().position(|(k, _)| *k == key) {
-        return cache[i].1.as_ref();
-    }
-    if cache.len() >= 2 { cache.remove(0); }
-    cache.push((key, build()));
-    cache.last().unwrap().1.as_ref()
+    CACHE.get().get_or_insert_with(key, build).as_ref()
 }
 
 /// `[(i / 255)^p for i in 0..256]`, memoized per exponent across calls: each
 /// table costs 256 software `powf`, and a document re-renders with the same
 /// shininess / fresnel / SSS exponents over and over.
 fn pow_lut(p: f32) -> [f32; 256] {
-    static mut CACHE: Vec<(u32, [f32; 256])> = Vec::new();
-    let cache = unsafe { &mut *std::ptr::addr_of_mut!(CACHE) };
-    if let Some((_, lut)) = cache.iter().find(|(k, _)| *k == p.to_bits()) {
-        return *lut;
-    }
-    let mut lut = [0.0f32; 256];
-    for i in 0..256 { lut[i] = (i as f32 / 255.0).powf(p); }
-    if cache.len() >= 32 { cache.clear(); }
-    cache.push((p.to_bits(), lut));
-    lut
+    static CACHE: Global<KeyedCache<[f32; 256]>> = Global::new(KeyedCache::new(32));
+    *CACHE.get().get_or_insert_with(p.to_bits() as u64, || {
+        let mut lut = [0.0f32; 256];
+        for i in 0..256 { lut[i] = (i as f32 / 255.0).powf(p); }
+        lut
+    })
 }
 
 fn project_triangles(
@@ -304,7 +254,7 @@ fn project_triangles(
     vh: f64,
     br: f64,
     force_ortho: bool,
-    group_styles: &HashMap<u32, GroupAppearance>,
+    group_styles: &GroupStyles,
     lights: &[ResolvedLight],
     shadow: Option<&ShadowData>,
 ) -> Vec<ProjectedTri> {
@@ -341,8 +291,9 @@ fn project_triangles(
         "flat" => ShadingMode::Flat, "normal" => ShadingMode::Normal, "unlit" => ShadingMode::Unlit, _ => ShadingMode::BlinnPhong,
     };
     let (gooch_warm, gooch_cool) = if shading == ShadingMode::Gooch {
-        let w = { let (r, g, b) = parse_hex_color(&config.gooch_warm); (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b)) };
-        let c = { let (r, g, b) = parse_hex_color(&config.gooch_cool); (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b)) };
+        let [wr, wg, wb] = maquette_core::color::hex_to_linear(&config.gooch_warm);
+        let [cr, cg, cb] = maquette_core::color::hex_to_linear(&config.gooch_cool);
+        let (w, c) = ((wr, wg, wb), (cr, cg, cb));
         (w, c)
     } else {
         ((0.0f32, 0.0f32, 0.0f32), (0.0f32, 0.0f32, 0.0f32))
@@ -737,13 +688,7 @@ fn project_triangles(
         let pts = apply_projection(&proj_setup, &cam);
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
-        let pp = if shading != ShadingMode::Unlit && shadow.map_or(false, |s| s.per_pixel) {
-            let n = if tri.splat { tri.vertex_normals.map_or(tri.normal, |v| v[0]) } else { tri.normal };
-            Some((tri.vertices, n))
-        } else {
-            None
-        };
-        projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity, pp, uvs: tri.uvs, tex: tri.tex, splat: tri.splat });
+        projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity, src: ti as u32, splat: tri.splat });
     }
 
     projected
@@ -869,7 +814,7 @@ fn project_shadow(
         let pts = apply_projection(&proj_setup, &cam);
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
-        projected.push(ProjectedTri { pts, depths, depth, r: sr, g: sg, b: sb, vertex_colors: None, group_id: None, opacity: 1.0, pp: None, uvs: None, tex: None, splat: false });
+        projected.push(ProjectedTri { pts, depths, depth, r: sr, g: sg, b: sb, vertex_colors: None, group_id: None, opacity: 1.0, src: NO_SOURCE, splat: false });
     }
 
     projected
@@ -945,7 +890,7 @@ fn push_hatch_defs(svg: &mut String, hc: &crate::config::HatchConfig) {
     svg.push_str("</pattern></defs>");
 }
 
-fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Option<(&str, f64)>, group_styles: &HashMap<u32, GroupAppearance>, hatch: bool) {
+fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Option<(&str, f64)>, group_styles: &GroupStyles, hatch: bool) {
     svg.push_str("<polygon points=\"");
     push_tri_points(svg, &tri.pts);
     svg.push_str("\" fill=\"");
@@ -1164,39 +1109,24 @@ fn preprocess(triangles: &[Triangle], config: &RenderConfig) -> (Vec<Triangle>, 
 /// depends on the view, so the camera parameters are folded in for that source.
 fn clip_key(h: u64, config: &RenderConfig) -> u64 {
     use crate::config::ClipSource;
-    #[inline]
-    fn m(h: u64, x: u64) -> u64 { (h ^ x).wrapping_mul(0x100000001b3) }
-    let c = match &config.clip { None => return m(h, 0x2), Some(c) => c };
-    let mut h = m(h, 0x1);
+    let c = match &config.clip { None => return FxHasher::seeded(h).mix(0x2).key(), Some(c) => c };
+    let mut h = FxHasher::seeded(h).mix(0x1);
     match &c.source {
-        ClipSource::Plane(p) => { h = m(h, 10); for &v in p { h = m(h, v.to_bits()); } }
+        ClipSource::Plane(p) => { h = h.mix(10); for &v in p { h = h.mix_f64(v); } }
         ClipSource::Camera => {
-            h = m(h, 11);
-            match config.camera { Some(cam) => for v in cam { h = m(h, v.to_bits()); }, None => h = m(h, 0x9E) }
-            h = m(h, config.azimuth.to_bits());
-            h = m(h, config.elevation.to_bits());
-            h = m(h, config.distance.unwrap_or(0.0).to_bits());
-            for &b in config.projection.as_bytes() { h = m(h, b as u64); }
-            for &u in &config.up { h = m(h, u.to_bits()); }
+            h = h.mix(11);
+            match config.camera { Some(cam) => for v in cam { h = h.mix_f64(v); }, None => h = h.mix(0x9E) }
+            h = h.mix_f64(config.azimuth).mix_f64(config.elevation).mix_f64(config.distance.unwrap_or(0.0)).mix_str(&config.projection);
+            for &u in &config.up { h = h.mix_f64(u); }
         }
-        ClipSource::Axis(a) => { h = m(h, 12); h = m(h, *a as u64); }
-        ClipSource::Normal(n) => { h = m(h, 13); for &v in n { h = m(h, v.to_bits()); } }
+        ClipSource::Axis(a) => { h = h.mix(12).mix(*a as u64); }
+        ClipSource::Normal(n) => { h = h.mix(13); for &v in n { h = h.mix_f64(v); } }
     }
-    h = m(h, c.depth.to_bits());
-    h = m(h, c.distance.map(|d| d.to_bits()).unwrap_or(0xDEAD));
-    h = m(h, c.keep_far as u64);
-    m(h, c.cap as u64)
+    h.mix_f64(c.depth).mix(c.distance.map(|d| d.to_bits()).unwrap_or(0xDEAD)).mix(c.keep_far as u64).mix(c.cap as u64).key()
 }
 
 fn smooth_geom_key(data_key: u64, config: &RenderConfig) -> u64 {
-    #[inline]
-    fn mix(h: u64, x: f64) -> u64 {
-        (h ^ x.to_bits()).wrapping_mul(0x100000001b3)
-    }
-    let mut h = mix(data_key, config.decimate);
-    h = mix(h, config.explode);
-    h = mix(h, config.point_size);
-    clip_key(h, config)
+    clip_key(FxHasher::seeded(data_key).mix_f64(config.decimate).mix_f64(config.explode).mix_f64(config.point_size).key(), config)
 }
 
 /// Look up (or compute and cache) the smooth vertex normals for `tris`.
@@ -1205,42 +1135,20 @@ fn cached_smooth<'a>(
     config: &RenderConfig,
     tris: &[Triangle],
 ) -> &'a smooth::SmoothData {
-    let key = smooth_geom_key(data_key, config);
-    if let Some(s) = cache::get_smooth(key) {
-        return s;
-    }
-    cache::put_smooth(key, smooth::compute_vertex_normals(tris));
-    cache::get_smooth(key).unwrap()
+    cache::smooth(smooth_geom_key(data_key, config), || smooth::compute_vertex_normals(tris))
 }
 
 /// Cache key for the preprocessed mesh: the model-data hash mixed with EVERY
 /// config field that `preprocess` reads, so a hit can only occur for inputs that
 /// produce an identical mesh. Must be kept in lock-step with `preprocess`.
 fn prep_cache_key(base: u64, config: &RenderConfig) -> u64 {
-    #[inline]
-    fn m(h: u64, x: u64) -> u64 {
-        (h ^ x).wrapping_mul(0x100000001b3)
-    }
-    let mut h = base;
-    for &b in config.color_map.as_bytes() { h = m(h, b as u64); }
-    h = m(h, 0xF1);
-    for s in &config.color_map_palette {
-        for &b in s.as_bytes() { h = m(h, b as u64); }
-        h = m(h, 0xF2);
-    }
-    for &b in config.scalar_function.as_bytes() { h = m(h, b as u64); }
-    h = m(h, 0xF3);
-    h = m(h, config.overhang_angle.to_bits());
-    h = m(h, config.vertex_smoothing as u64);
-    for &u in &config.up { h = m(h, u.to_bits()); }
-    h = clip_key(h, config);
-    if config.clip.is_some() {
-        for &b in config.color.as_bytes() { h = m(h, b as u64); }
-        h = m(h, 0xF4);
-    }
-    h = m(h, config.explode.to_bits());
-    h = m(h, config.decimate.to_bits());
-    h
+    let mut h = FxHasher::seeded(base).mix_str(&config.color_map);
+    for s in &config.color_map_palette { h = h.mix_str(s); }
+    h = h.mix_str(&config.scalar_function).mix_f64(config.overhang_angle).mix(config.vertex_smoothing as u64);
+    for &u in &config.up { h = h.mix_f64(u); }
+    let mut h = FxHasher::seeded(clip_key(h.key(), config));
+    if config.clip.is_some() { h = h.mix_str(&config.color); }
+    h.mix_f64(config.explode).mix_f64(config.decimate).key()
 }
 
 /// Run `preprocess` or reuse a cached result. When `prep_key` is None (PLY, or
@@ -1253,12 +1161,7 @@ fn cached_preprocess<'a>(
     owned: &'a mut Option<(Vec<Triangle>, Vec3, Vec3)>,
 ) -> (&'a [Triangle], Vec3, Vec3) {
     if let Some(base) = prep_key {
-        let key = prep_cache_key(base, config);
-        if let Some(e) = cache::get_prep(key) {
-            return (&e.0, e.1, e.2);
-        }
-        cache::put_prep(key, preprocess(triangles, config));
-        let e = cache::get_prep(key).unwrap();
+        let e = cache::prep(prep_cache_key(base, config), || preprocess(triangles, config));
         return (&e.0, e.1, e.2);
     }
     *owned = Some(preprocess(triangles, config));
@@ -1286,7 +1189,7 @@ fn make_point_projector(
 }
 
 
-pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>) -> String {
+pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &GroupStyles, data_key: Option<u64>, prep_key: Option<u64>) -> String {
     if triangles.is_empty() {
         return build_empty_svg(config);
     }
@@ -1386,7 +1289,7 @@ fn build_single_svg_full(
     orig_tris: &[Triangle],
     bmin: Vec3,
     bmax: Vec3,
-    group_styles: &HashMap<u32, GroupAppearance>,
+    group_styles: &GroupStyles,
 ) -> String {
     let estimated = tris.len() * 200 + shadow_tris.len() * 120 + outline_edges.len() * 80 + 512;
     let mut svg = String::with_capacity(estimated);
@@ -1565,9 +1468,7 @@ fn make_debug_light_tris(
                     vertex_colors: None,
                     group_id: Some(DEBUG_DISK_GID),
                     opacity: 0.85,
-                    pp: None,
-                    uvs: None,
-                    tex: None,
+                    src: NO_SOURCE,
                 });
             }
             continue;
@@ -1599,9 +1500,7 @@ fn make_debug_light_tris(
                 vertex_colors: None,
                 group_id: Some(u32::MAX),
                 opacity: 0.85,
-                pp: None,
-                uvs: None,
-                tex: None,
+                src: NO_SOURCE,
             });
         }
     }
@@ -1755,7 +1654,7 @@ fn overlay_annotations(
     w: f64,
     h: f64,
     centroids: &FxHashMap<u32, (f64, f64)>,
-    group_styles: &HashMap<u32, GroupAppearance>,
+    group_styles: &GroupStyles,
     ann_cfg: &crate::config::AnnotationConfig,
 ) -> String {
     let mut svg = svg_overlay_open(w, h);
@@ -1837,7 +1736,7 @@ fn render_grid_svg(
     views: &[(ViewParams, String)],
     br: f64,
     ground_z: f64,
-    group_styles: &HashMap<u32, GroupAppearance>,
+    group_styles: &GroupStyles,
 ) -> String {
     let (cols, rows) = grid_layout(views.len());
     let cell_w = config.width / cols as f64;
@@ -1941,7 +1840,7 @@ fn encode_raster(out: &PixelBuffer, alpha: Option<&[u8]>, overlay: Option<&str>)
 }
 
 /// Resolve a supersampled buffer with no post effects and encode it.
-fn finish_raster(buf: &PixelBuffer, aa: usize, transparent: bool, overlay: Option<&str>) -> Result<Vec<u8>, String> {
+fn finish_raster(buf: PixelBuffer, aa: usize, transparent: bool, overlay: Option<&str>) -> Result<Vec<u8>, String> {
     let (out, alpha) = buf.resolve(aa, transparent, false);
     Ok(encode_raster(&out, alpha.as_deref(), overlay))
 }
@@ -2003,8 +1902,9 @@ fn triangle_texture_lod(pts: &[(f64, f64); 3], uvs: &[[f32; 2]; 3], tex: &maquet
     tex.lod_bias + 0.5 * (uv_area / screen_area).log2()
 }
 
-pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &HashMap<u32, GroupAppearance>, data_key: Option<u64>, prep_key: Option<u64>, textures: &[maquette_core::texture::Texture]) -> Result<Vec<u8>, String> {
+pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &GroupStyles, data_key: Option<u64>, prep_key: Option<u64>, textures: &[maquette_core::texture::Texture]) -> Result<Vec<u8>, String> {
     let (aa, fxaa) = antialias_mode(config.antialias);
+    maquette_core::effects::check_raster_size(config.width as usize, config.height as usize, aa, MAX_RASTER_SAMPLES)?;
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
     let vw = config.width * aa as f64;
@@ -2018,7 +1918,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     if triangles.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return finish_raster(&buf, 1, transparent, None);
+        return finish_raster(buf, 1, transparent, None);
     }
 
     crate::prof::mark(10);
@@ -2027,7 +1927,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     crate::prof::mark(11);
     if tris.is_empty() {
         let buf = PixelBuffer::new(config.width as usize, config.height as usize, bg);
-        return finish_raster(&buf, 1, transparent, None);
+        return finish_raster(buf, 1, transparent, None);
     }
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
@@ -2042,9 +1942,9 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         let buf = render_grid_png_buf(&tris, config, &views, br, bmin.z, w, h, bg, group_styles);
         return if config.grid_labels {
             let overlay = overlay_grid_labels(config.width, config.height, &views);
-            finish_raster(&buf, aa, transparent, Some(&overlay))
+            finish_raster(buf, aa, transparent, Some(&overlay))
         } else {
-            finish_raster(&buf, aa, transparent, None)
+            finish_raster(buf, aa, transparent, None)
         };
     }
 
@@ -2054,9 +1954,9 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
             let buf = render_grid_png_buf(&tris, config, &resolved, br, bmin.z, w, h, bg, group_styles);
             return if config.grid_labels {
                 let overlay = overlay_grid_labels(config.width, config.height, &resolved);
-                finish_raster(&buf, aa, transparent, Some(&overlay))
+                finish_raster(buf, aa, transparent, Some(&overlay))
             } else {
-                finish_raster(&buf, aa, transparent, None)
+                finish_raster(buf, aa, transparent, None)
             };
         }
     }
@@ -2108,11 +2008,19 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     }
 
     if !is_wireframe {
+        let pp_shadow = shadow_data.filter(|s| s.per_pixel);
+        let source = |i: u32| (i != NO_SOURCE).then(|| &tris[i as usize]);
+        let pp_of = |t: &Triangle| {
+            let n = if t.splat { t.vertex_normals.map_or(t.normal, |v| v[0]) } else { t.normal };
+            (t.vertices, n)
+        };
         for tri in &projected {
             if tri.opacity >= 1.0 {
+                let src = source(tri.src);
+                let pp = pp_shadow.zip(src).map(|(sd, t)| (sd, pp_of(t)));
                 if tri.splat {
                     let mut c = tri.vertex_colors.map_or((tri.r, tri.g, tri.b), |c| c[0]);
-                    if let (Some(sd), Some((wp, normal))) = (shadow_data, tri.pp) {
+                    if let Some((sd, (wp, normal))) = pp {
                         c = sd.pp_shade(c, wp[0], normal);
                     }
                     buf.rasterize_splat(&tri.pts, &tri.depths, c.0, c.1, c.2);
@@ -2120,7 +2028,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
                 }
                 let max_d = tri.depths[0].fmax(tri.depths[1]).fmax(tri.depths[2]) as f32;
                 if buf.hiz_can_skip(&tri.pts, max_d) { continue; }
-                if let (Some(ti), Some(uvs)) = (tri.tex, tri.uvs) {
+                if let Some((ti, uvs)) = src.and_then(|t| t.tex.zip(t.uvs)) {
                     if let Some(tex) = textures.get(ti as usize) {
                         let light = tri.vertex_colors.unwrap_or([(tri.r, tri.g, tri.b); 3]);
                         let lod = triangle_texture_lod(&tri.pts, &uvs, tex);
@@ -2128,8 +2036,8 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
                         continue;
                     }
                 }
-                match (shadow_data, tri.pp) {
-                    (Some(sd), Some((wp, normal))) => {
+                match pp {
+                    Some((sd, (wp, normal))) => {
                         let cols = tri.vertex_colors.unwrap_or([(tri.r, tri.g, tri.b); 3]);
                         let world = [[wp[0].x, wp[0].y, wp[0].z], [wp[1].x, wp[1].y, wp[1].z], [wp[2].x, wp[2].y, wp[2].z]];
                         buf.rasterize_triangle_shadowed(&tri.pts, &tri.depths, &cols, &world, |c, p| {
@@ -2182,7 +2090,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
             for tri in &projected {
                 buf.draw_triangle_edges(&tri.pts, sr, sg, sb);
             }
-        } else if global_has_stroke || !group_styles.is_empty() {
+        } else if global_has_stroke || group_styles.values().any(|a| a.stroke.as_deref().is_some_and(|s| s != "none")) {
             let global_color = if global_has_stroke { Some(parse_hex_color(&config.stroke.color)) } else { None };
             let default_stroke_width = config.stroke.width;
             for tri in &projected {
@@ -2261,7 +2169,7 @@ fn render_grid_png_buf(
     w: usize,
     h: usize,
     bg: (u8, u8, u8),
-    group_styles: &HashMap<u32, GroupAppearance>,
+    group_styles: &GroupStyles,
 ) -> PixelBuffer {
     let (cols, rows) = grid_layout(views.len());
     let cell_w = w / cols;

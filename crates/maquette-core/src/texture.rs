@@ -41,6 +41,12 @@ pub struct Texture {
 }
 
 impl Texture {
+    /// Mipmapped texture over `base`, with its LOD bias precomputed.
+    pub fn from_base(base: MipLevel, wrap_s: Wrap, wrap_t: Wrap, mag_filter: Filter, min_filter: Filter) -> Self {
+        let lod_bias = 0.5 * ((base.width * base.height) as f32).log2();
+        Texture { mips: build_mips(base), wrap_s, wrap_t, mag_filter, min_filter, lod_bias }
+    }
+
     /// Sample the texture. `lod` is a floating LOD value where 0 = mip 0
     /// (highest res). Picks `mag_filter` when the texture is being magnified
     /// (lod ≤ 0, i.e. one texel maps to ≥ 1 pixel) and `min_filter` when

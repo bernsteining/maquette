@@ -17,15 +17,7 @@ pub(crate) enum Projection {
 
 
 pub(crate) fn resolve_config_view(config: &RenderConfig, bc: Vec3, br: f64) -> ViewParams {
-    let center = if config.auto_center
-        && config.center[0] == 0.0
-        && config.center[1] == 0.0
-        && config.center[2] == 0.0
-    {
-        bc
-    } else {
-        Vec3::from(config.center)
-    };
+    let center = maquette_core::math::orbit_pivot(config.auto_center, config.center, bc);
 
     let up = Vec3::from(config.up);
 
@@ -35,18 +27,9 @@ pub(crate) fn resolve_config_view(config: &RenderConfig, bc: Vec3, br: f64) -> V
         let dist = if dist < 1e-6 { br * 3.0 } else { dist };
         axonometric_camera(center, dist, &config.projection).unwrap_or(raw_camera)
     } else {
-        let az = config.azimuth.to_radians();
-        let el = config.elevation.to_radians();
         let dist = config.distance.filter(|&d| d > 0.0).unwrap_or(br * 3.0);
-        axonometric_camera(center, dist, &config.projection).unwrap_or_else(|| {
-            let arbitrary = if up.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
-            let right = up.cross(arbitrary).normalized();
-            let forward = right.cross(up).normalized();
-            let offset = right.scale(el.cos() * az.cos())
-                .add(forward.scale(el.cos() * az.sin()))
-                .add(up.scale(el.sin()));
-            center.add(offset.scale(dist))
-        })
+        axonometric_camera(center, dist, &config.projection)
+            .unwrap_or_else(|| maquette_core::math::orbit_position(center, up, config.azimuth, config.elevation, dist))
     };
 
     ViewParams { camera, center, up }

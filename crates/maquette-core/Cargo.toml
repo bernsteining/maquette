@@ -19,9 +19,16 @@ image-webp = "0.2"
 
 # Native-only SIMD backing for the `simd` shim (never pulled into wasm, which
 # keeps `std::arch::wasm32`).
+# PNG encoding of raw raster blobs, for native front ends (CLI, bindings).
+png = { version = "0.18", optional = true }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wide = "1"
 bytemuck = "1"
+
+[features]
+prof = []
+png = ["dep:png"]
 
 [lints]
 workspace = true

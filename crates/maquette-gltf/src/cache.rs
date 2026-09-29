@@ -2,8 +2,7 @@
 //!
 //! Typst instantiates a plugin once per document and reuses the wasm instance
 //! across function calls, so static state is preserved between calls inside
-//! a single compilation. Single-threaded inside the wasm sandbox, so we can
-//! `static mut` + `transmute` freely.
+//! a single compilation (see `maquette_core::cache`).
 //!
 //! Caches:
 //! * **Parse cache** — the parsed glTF for the most recent asset, so an
@@ -26,36 +25,29 @@ use maquette_core::shadow::LightShadow;
 use maquette_core::math::Vec3;
 use crate::scene::{NodeEmit, Scene, SceneOpts, TextureLoadOpts};
 use maquette_core::texture::Texture;
+use maquette_core::cache::{Global, KeyedCache};
 
 static mut SCENE_CACHE: Option<(u64, Scene)> = None;
 static mut LOADED_CACHE: Option<(u64, LoadedGltf)> = None;
 static mut EMIT_CACHE: Option<(u64, Vec<NodeEmit>)> = None;
-static mut SHADOW_CACHE: Vec<(u64, Vec<Option<LightShadow>>)> = Vec::new();
+static SHADOW_CACHE: Global<KeyedCache<Vec<Option<LightShadow>>>> = Global::new(KeyedCache::new(2));
 static mut STATIC_SHADOW_CACHE: Option<(u64, Vec<Option<LightShadow>>)> = None;
-static mut STATIC_PASS_CACHE: Vec<(u64, StaticPass)> = Vec::new();
+static STATIC_PASS_CACHE: Global<KeyedCache<StaticPass>> = Global::new(KeyedCache::new(3));
 static mut WORK_SHADOWS: Option<WorkShadows> = None;
-static mut PASS_REQUESTS: Vec<u64> = Vec::new();
-/// Leaky Vec of texture-bundle cache entries. Each entry lives forever, so
-/// references into it are safely `'static`.
-static mut TEXTURE_CACHE: Vec<(u64, Vec<Texture>)> = Vec::new();
-/// Leaky IBL env-map cache. Env bake is ~3-5 ms per call and the same
+static PASS_REQUESTS: Global<KeyedCache<()>> = Global::new(KeyedCache::new(8));
+/// Texture-bundle cache, never evicted: bounded by the number of unique
+/// assets, small in practice.
+static TEXTURE_CACHE: Global<KeyedCache<Vec<Texture>>> = Global::new(KeyedCache::new(0));
+/// IBL env-map cache, never evicted. Env bake is ~3-5 ms per call and the same
 /// sky/ground/sun params get reused across every render call in a document.
-static mut IBL_CACHE: Vec<(u64, IblEnvironment)> = Vec::new();
+static IBL_CACHE: Global<KeyedCache<IblEnvironment>> = Global::new(KeyedCache::new(0));
 
 /// Get-or-bake a procedural IBL env map for the given parameters. The
 /// per-render-call bake is ~5 ms so caching pays off even for single-page
 /// docs when multiple render calls share `ibl`.
 pub fn ibl_for(sky: [f32; 3], ground: [f32; 3], intensity: f32, sun_dir: Vec3) -> &'static IblEnvironment {
     let key = ibl_hash_procedural(sky, ground, intensity, sun_dir);
-    unsafe {
-        for (k, e) in IBL_CACHE.iter() {
-            if *k == key { return std::mem::transmute::<&IblEnvironment, &'static IblEnvironment>(e); }
-        }
-        let env = IblEnvironment::build(sky, ground, intensity, sun_dir);
-        IBL_CACHE.push((key, env));
-        let (_, e) = IBL_CACHE.last().unwrap();
-        std::mem::transmute::<&IblEnvironment, &'static IblEnvironment>(e)
-    }
+    IBL_CACHE.get().get_or_insert_with(key, || IblEnvironment::build(sky, ground, intensity, sun_dir))
 }
 
 /// Get-or-bake an HDR-photograph IBL env map. Keyed on `(bytes hash, intensity,
@@ -63,16 +55,10 @@ pub fn ibl_for(sky: [f32; 3], ground: [f32; 3], intensity: f32, sun_dir: Vec3) -
 /// render calls in a doc makes it effectively free after the first.
 pub fn ibl_for_hdr(hdr_bytes: &[u8], intensity: f32, rotation: f32) -> Result<&'static IblEnvironment, String> {
     let key = ibl_hash_hdr(hdr_bytes, intensity, rotation);
-    unsafe {
-        for (k, e) in IBL_CACHE.iter() {
-            if *k == key { return Ok(std::mem::transmute::<&IblEnvironment, &'static IblEnvironment>(e)); }
-        }
+    IBL_CACHE.get().get_or_try_insert_with(key, || {
         let (rgb, w, h) = maquette_core::rgbe::parse(hdr_bytes)?;
-        let env = IblEnvironment::build_from_equirect(&rgb, w, h, intensity, rotation);
-        IBL_CACHE.push((key, env));
-        let (_, e) = IBL_CACHE.last().unwrap();
-        Ok(std::mem::transmute::<&IblEnvironment, &'static IblEnvironment>(e))
-    }
+        Ok(IblEnvironment::build_from_equirect(&rgb, w, h, intensity, rotation))
+    })
 }
 
 fn ibl_hash_procedural(sky: [f32; 3], ground: [f32; 3], intensity: f32, sun_dir: Vec3) -> u64 {
@@ -105,17 +91,7 @@ pub fn textures_for(
     opts: TextureLoadOpts,
 ) -> &'static [Texture] {
     let key = tex_hash(asset_key, opts);
-    unsafe {
-        for (k, v) in TEXTURE_CACHE.iter() {
-            if *k == key {
-                return std::mem::transmute::<&[Texture], &'static [Texture]>(v.as_slice());
-            }
-        }
-        let textures = crate::scene::collect_textures_pub(loaded, opts);
-        TEXTURE_CACHE.push((key, textures));
-        let (_, v) = TEXTURE_CACHE.last().unwrap();
-        std::mem::transmute::<&[Texture], &'static [Texture]>(v.as_slice())
-    }
+    TEXTURE_CACHE.get().get_or_insert_with(key, || crate::scene::collect_textures_pub(loaded, opts))
 }
 
 /// Get-or-compute the flattened scene and its cache key. `load` (the glTF
@@ -169,15 +145,7 @@ pub fn scene_for(
 /// resolution). Shadows don't depend on the camera, so orbiting reuses them.
 /// Keeps the two most recent entries, as the maps are large.
 pub fn shadows_for(key: u64, build: impl FnOnce() -> Vec<Option<LightShadow>>) -> &'static [Option<LightShadow>] {
-    unsafe {
-        let cache = &mut *std::ptr::addr_of_mut!(SHADOW_CACHE);
-        if let Some((_, maps)) = cache.iter().find(|(k, _)| *k == key) {
-            return std::mem::transmute::<&[Option<LightShadow>], &'static [Option<LightShadow>]>(maps.as_slice());
-        }
-        if cache.len() >= 2 { cache.remove(0); }
-        cache.push((key, build()));
-        std::mem::transmute::<&[Option<LightShadow>], &'static [Option<LightShadow>]>(cache.last().unwrap().1.as_slice())
-    }
+    SHADOW_CACHE.get().get_or_insert_with(key, build)
 }
 
 /// Get-or-build the shadow maps of a scene's static casters (see
@@ -235,23 +203,17 @@ pub struct StaticPass {
 }
 
 pub fn static_pass(key: u64) -> Option<&'static StaticPass> {
-    unsafe {
-        let cache = &*std::ptr::addr_of!(STATIC_PASS_CACHE);
-        cache.iter().find(|(k, _)| *k == key).map(|(_, p)| std::mem::transmute::<&StaticPass, &'static StaticPass>(p))
-    }
+    STATIC_PASS_CACHE.get().get(key)
 }
 
 /// Records a request for the static pass `key` and reports whether it was
 /// already requested recently: the pass is only worth building when the same
 /// camera and settings come back (scrubbing an animation), not for a one-off.
 pub fn static_pass_requested(key: u64) -> bool {
-    unsafe {
-        let seen = &mut *std::ptr::addr_of_mut!(PASS_REQUESTS);
-        if seen.contains(&key) { return true; }
-        if seen.len() >= 8 { seen.remove(0); }
-        seen.push(key);
-        false
-    }
+    let seen = PASS_REQUESTS.get();
+    if seen.contains(key) { return true; }
+    seen.insert(key, ());
+    false
 }
 
 const STATIC_PASS_BUDGET: usize = 256 << 20;
@@ -263,14 +225,9 @@ impl StaticPass {
 }
 
 pub fn put_static_pass(key: u64, pass: StaticPass) {
-    unsafe {
-        let cache = &mut *std::ptr::addr_of_mut!(STATIC_PASS_CACHE);
-        let incoming = pass.bytes();
-        while !cache.is_empty() && (cache.len() >= 3 || cache.iter().map(|(_, p)| p.bytes()).sum::<usize>() + incoming > STATIC_PASS_BUDGET) {
-            cache.remove(0);
-        }
-        cache.push((key, pass));
-    }
+    let cache = STATIC_PASS_CACHE.get();
+    cache.make_room(pass.bytes(), STATIC_PASS_BUDGET, StaticPass::bytes);
+    cache.insert(key, pass);
 }
 
 /// What identifies a render's asset: a key over the glTF bytes (plus any
@@ -285,16 +242,14 @@ const HANDLE_MAGIC: &[u8; 8] = b"\0MQGLTF\x01";
 
 impl<'a> SceneInput<'a> {
     pub fn new(gltf: &'a [u8], sidecars: &[u8]) -> Self {
-        if gltf.len() == 16 && gltf[..8] == HANDLE_MAGIC[..] {
-            return Self { key: u64::from_le_bytes(gltf[8..].try_into().unwrap()), bytes: None };
+        match maquette_core::cache::handle_key(HANDLE_MAGIC, gltf) {
+            Some(key) if gltf.len() == 16 => Self { key, bytes: None },
+            _ => Self { key: bytes_key(gltf, sidecars), bytes: Some(gltf) },
         }
-        Self { key: bytes_key(gltf, sidecars), bytes: Some(gltf) }
     }
 
     pub fn handle(&self) -> Vec<u8> {
-        let mut out = HANDLE_MAGIC.to_vec();
-        out.extend_from_slice(&self.key.to_le_bytes());
-        out
+        maquette_core::cache::handle(HANDLE_MAGIC, self.key)
     }
 }
 

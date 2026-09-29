@@ -18,6 +18,25 @@ impl Default for FxHasher {
     fn default() -> Self { Self(0) }
 }
 
+impl FxHasher {
+    /// Hasher seeded with `seed`, for chaining cache-key inputs with the
+    /// `mix*` methods.
+    pub fn seeded(seed: u64) -> Self { Self(seed) }
+
+    #[inline]
+    pub fn mix(mut self, x: u64) -> Self { self.write_u64(x); self }
+
+    #[inline]
+    pub fn mix_f64(self, x: f64) -> Self { self.mix(x.to_bits()) }
+
+    /// Mix a string followed by a terminator, so adjacent strings cannot
+    /// run together.
+    #[inline]
+    pub fn mix_str(mut self, s: &str) -> Self { self.write(s.as_bytes()); self.mix(0xFF) }
+
+    pub fn key(&self) -> u64 { self.0 }
+}
+
 impl Hasher for FxHasher {
     #[inline]
     fn finish(&self) -> u64 { self.0 }
@@ -239,6 +258,20 @@ impl Mat4 {
         ])
     }
 
+    /// Inverse of [`transform_point`](Self::transform_point) for a rigid
+    /// transform (rotation + translation, such as a view matrix): transposed
+    /// rotation applied after removing the translation.
+    #[inline]
+    pub fn rigid_inverse_point(self, v: Vec3) -> Vec3 {
+        let m = self.0;
+        let p = Vec3::new(v.x - m[0][3], v.y - m[1][3], v.z - m[2][3]);
+        Vec3::new(
+            m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z,
+            m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z,
+            m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z,
+        )
+    }
+
     #[inline(always)]
     pub fn transform_point(self, p: Vec3) -> Vec3 {
         let m = self.0;
@@ -330,4 +363,51 @@ impl Mat4 {
             [0.0, 0.0, 0.0, 1.0],
         ])
     }
+}
+
+/// Grow the box `(min, max)` to include `p`.
+#[inline]
+pub fn bbox_extend(min: &mut Vec3, max: &mut Vec3, p: Vec3) {
+    if p.x < min.x { min.x = p.x }
+    if p.y < min.y { min.y = p.y }
+    if p.z < min.z { min.z = p.z }
+    if p.x > max.x { max.x = p.x }
+    if p.y > max.y { max.y = p.y }
+    if p.z > max.z { max.z = p.z }
+}
+
+/// Bounding box of `points`; inverted (`min > max`) when there are none.
+pub fn bbox_of(points: impl Iterator<Item = Vec3>) -> (Vec3, Vec3) {
+    let mut min = Vec3::new(f64::MAX, f64::MAX, f64::MAX);
+    let mut max = Vec3::new(f64::MIN, f64::MIN, f64::MIN);
+    for p in points { bbox_extend(&mut min, &mut max, p); }
+    (min, max)
+}
+
+pub fn bbox_center(min: Vec3, max: Vec3) -> Vec3 {
+    Vec3::new((min.x + max.x) / 2.0, (min.y + max.y) / 2.0, (min.z + max.z) / 2.0)
+}
+
+/// Radius of the box's bounding sphere: half its diagonal.
+pub fn bbox_radius(min: Vec3, max: Vec3) -> f64 {
+    Vec3::new(max.x - min.x, max.y - min.y, max.z - min.z).length() / 2.0
+}
+
+/// Point a camera orbits and looks at: `center`, unless that is the origin
+/// while `auto_center` is set, in which case the bounding-box centre `bc`.
+pub fn orbit_pivot(auto_center: bool, center: [f64; 3], bc: Vec3) -> Vec3 {
+    if auto_center && center == [0.0, 0.0, 0.0] { bc } else { Vec3::from(center) }
+}
+
+/// Camera position `distance` away from `pivot`, turned `azimuth_deg` around
+/// `up` and raised `elevation_deg` above the plane normal to it.
+pub fn orbit_position(pivot: Vec3, up: Vec3, azimuth_deg: f64, elevation_deg: f64, distance: f64) -> Vec3 {
+    let (az, el) = (azimuth_deg.to_radians(), elevation_deg.to_radians());
+    let arbitrary = if up.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+    let right = up.cross(arbitrary).normalized();
+    let forward = right.cross(up).normalized();
+    let offset = right.scale(el.cos() * az.cos())
+        .add(forward.scale(el.cos() * az.sin()))
+        .add(up.scale(el.sin()));
+    pivot.add(offset.scale(distance))
 }

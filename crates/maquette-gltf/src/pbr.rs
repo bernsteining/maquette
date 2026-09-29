@@ -202,13 +202,7 @@ impl PbrContext {
             let n_dot_l = dot3(n, l).fmax(0.0);
             if n_dot_l <= 0.0 || n_dot_v <= 0.0 { continue; }
             let shadow = self.shadows.get(light_idx).and_then(|s| s.as_ref())
-                .map(|sh| {
-                    if self.shadow_pcss_light_size > 0.0 {
-                        sh.lit_pcss(world_pos, normal, &self.shadow_bias, self.shadow_softness, self.shadow_pcss_light_size as f64)
-                    } else {
-                        sh.lit(world_pos, normal, &self.shadow_bias, self.shadow_softness)
-                    }
-                })
+                .map(|sh| sh.lit_sized(world_pos, normal, &self.shadow_bias, self.shadow_softness, self.shadow_pcss_light_size as f64))
                 .unwrap_or(1.0);
             let atten = [atten[0] * shadow, atten[1] * shadow, atten[2] * shadow];
 
@@ -1296,11 +1290,7 @@ where v128: Sized,
         f32x4_extract_lane::<L>(in_.n_y) as f64,
         f32x4_extract_lane::<L>(in_.n_z) as f64,
     );
-    if pcss_light_size > 0.0 {
-        shadow.lit_pcss(pos, normal, &bias, softness, pcss_light_size)
-    } else {
-        shadow.lit(pos, normal, &bias, softness)
-    }
+    shadow.lit_sized(pos, normal, &bias, softness, pcss_light_size)
 }
 
 /// Clearcoat's tangent-space normal, in world space. Uses geometric N when

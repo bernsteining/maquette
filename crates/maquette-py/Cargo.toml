@@ -18,9 +18,9 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.24", features = ["extension-module", "abi3-py38"] }
 maquette = { path = "../maquette" }
+maquette-core = { path = "../maquette-core", features = ["png"] }
 maquette-gltf = { path = "../maquette-gltf" }
 maquette-scad = { path = "../maquette-scad" }
-png = "0.18"
 
 [profile.release]
 opt-level = 3

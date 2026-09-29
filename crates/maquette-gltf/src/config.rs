@@ -370,12 +370,10 @@ fn parse_ibl(v: &Value) -> Option<IblCfg> {
         Value::Object(o) => {
             let mut c = IblCfg::default();
             if let Some(s) = o.get("sky").and_then(|x| x.as_str()) {
-                let (r, g, b) = maquette_core::color::parse_hex_color(s);
-                c.sky = [maquette_core::color::srgb_to_linear(r), maquette_core::color::srgb_to_linear(g), maquette_core::color::srgb_to_linear(b)];
+                c.sky = maquette_core::color::hex_to_linear(s);
             }
             if let Some(s) = o.get("ground").and_then(|x| x.as_str()) {
-                let (r, g, b) = maquette_core::color::parse_hex_color(s);
-                c.ground = [maquette_core::color::srgb_to_linear(r), maquette_core::color::srgb_to_linear(g), maquette_core::color::srgb_to_linear(b)];
+                c.ground = maquette_core::color::hex_to_linear(s);
             }
             if let Some(f) = o.get("intensity").and_then(|x| x.as_f64()) {
                 c.intensity = (f as f32).fmax(0.0);
@@ -407,12 +405,7 @@ fn parse_ground(v: &Value) -> Option<GroundCfg> {
         Value::Object(o) => {
             let mut c = GroundCfg::default();
             if let Some(s) = o.get("color").and_then(|x| x.as_str()) {
-                let (r, g, b) = maquette_core::color::parse_hex_color(s);
-                c.color = [
-                    maquette_core::color::srgb_to_linear(r),
-                    maquette_core::color::srgb_to_linear(g),
-                    maquette_core::color::srgb_to_linear(b),
-                ];
+                c.color = maquette_core::color::hex_to_linear(s);
             }
             if let Some(f) = o.get("size_scale").and_then(|x| x.as_f64()) {
                 c.size_scale = (f as f32).clamp(0.5, 20.0);
@@ -444,7 +437,7 @@ fn parse_shadows(v: &Value) -> Option<ShadowCfg> {
             if let Some(f) = o.get("bias").and_then(|x| x.as_f64()) { c.bias = f as f32; }
             if let Some(f) = o.get("normal_bias").and_then(|x| x.as_f64()) { c.normal_bias = f as f32; }
             if let Some(f) = o.get("slope_bias").and_then(|x| x.as_f64()) { c.slope_bias = f as f32; }
-            if let Some(f) = o.get("pcss_light_size").and_then(|x| x.as_f64()) { c.pcss_light_size = f as f32; }
+            if let Some(f) = o.get("pcss_light_size").or_else(|| o.get("light_size")).and_then(|x| x.as_f64()) { c.pcss_light_size = f as f32; }
             Some(c)
         }
         _ => None,
@@ -458,10 +451,10 @@ fn parse_ssao(v: &Value) -> Option<SsaoCfg> {
         Value::Object(o) => {
             let mut c = SsaoCfg::default();
             c.scene_space = o.get("space").and_then(|x| x.as_str()) != Some("screen");
-            if let Some(n) = o.get("samples").and_then(|x| x.as_u64()) { c.samples = (n as usize).clamp(4, 64); }
-            if let Some(f) = o.get("radius").and_then(|x| x.as_f64())  { c.radius = Some(if c.scene_space { f.fmax(1e-9) } else { f.clamp(0.01, 2.0) }); }
-            if let Some(f) = o.get("bias").and_then(|x| x.as_f64())    { c.bias = f.fmax(0.0); }
-            if let Some(f) = o.get("strength").and_then(|x| x.as_f64()) { c.strength = f.clamp(0.0, 2.0); }
+            if let Some(n) = o.get("samples").and_then(|x| x.as_u64()) { c.samples = n as usize; }
+            if let Some(f) = o.get("radius").and_then(|x| x.as_f64())  { c.radius = Some(f); }
+            if let Some(f) = o.get("bias").and_then(|x| x.as_f64())    { c.bias = f; }
+            if let Some(f) = o.get("strength").and_then(|x| x.as_f64()) { c.strength = f; }
             Some(c)
         }
         _ => None,

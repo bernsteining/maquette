@@ -33,37 +33,11 @@ unsafe fn cfg(config: *const c_char) -> Vec<u8> {
     }
 }
 
-fn encode_png(raw: &[u8]) -> Result<Vec<u8>, String> {
-    let marker = *raw.first().ok_or("empty render output")?;
-    match marker {
-        0x00 | 0x02 => {
-            if raw.len() < 9 {
-                return Err("truncated raster header".into());
-            }
-            let w = u32::from_le_bytes(raw[1..5].try_into().unwrap());
-            let h = u32::from_le_bytes(raw[5..9].try_into().unwrap());
-            let n = (w as usize) * (h as usize) * 4;
-            let px = raw.get(9..9 + n).ok_or("truncated raster pixels")?;
-            let mut out = Vec::new();
-            {
-                let mut enc = png::Encoder::new(&mut out, w, h);
-                enc.set_color(png::ColorType::Rgba);
-                enc.set_depth(png::BitDepth::Eight);
-                let mut wr = enc.write_header().map_err(|e| e.to_string())?;
-                wr.write_image_data(px).map_err(|e| e.to_string())?;
-            }
-            Ok(out)
-        }
-        0x3C => Ok(raw.to_vec()),
-        m => Err(format!("unexpected render marker 0x{m:02x}")),
-    }
-}
-
 macro_rules! render_fn {
     ($name:ident, $inner:path, png) => {
         #[no_mangle]
         pub unsafe extern "C" fn $name(data: *const u8, len: usize, config: *const c_char, out: *mut *mut u8, out_len: *mut usize) -> i32 {
-            let res = $inner(slice::from_raw_parts(data, len), &cfg(config)).and_then(|r| encode_png(&r));
+            let res = $inner(slice::from_raw_parts(data, len), &cfg(config)).and_then(|r| maquette_core::effects::raw_raster_to_png(&r));
             deliver(res, out, out_len)
         }
     };
@@ -107,7 +81,7 @@ pub unsafe extern "C" fn maquette_compile_scad(src: *const c_char, facets: usize
 pub unsafe extern "C" fn maquette_render_scad_png(src: *const c_char, config: *const c_char, facets: usize, out: *mut *mut u8, out_len: *mut usize) -> i32 {
     let res = scad_ply(src, facets)
         .and_then(|ply| maquette::native::render_ply_png(&ply, &cfg(config)))
-        .and_then(|raw| encode_png(&raw));
+        .and_then(|raw| maquette_core::effects::raw_raster_to_png(&raw));
     deliver(res, out, out_len)
 }
 

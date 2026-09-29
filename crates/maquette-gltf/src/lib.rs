@@ -12,38 +12,17 @@ mod cache;
 mod config;
 mod gltf_loader;
 mod pbr;
-mod prof;
+use maquette_core::prof;
 mod render;
 mod scene;
 
-use std::cell::RefCell;
-use std::sync::Once;
-thread_local! {
-    static LAST_PANIC: RefCell<String> = const { RefCell::new(String::new()) };
-}
-static PANIC_HOOK: Once = Once::new();
-fn install_panic_hook() {
-    PANIC_HOOK.call_once(|| {
-        std::panic::set_hook(Box::new(|info| {
-            let loc = info.location()
-                .map(|l| format!("{}:{}", l.file(), l.line()))
-                .unwrap_or_else(|| "?".into());
-            let msg = if let Some(s) = info.payload().downcast_ref::<&str>() { (*s).to_string() }
-                else if let Some(s) = info.payload().downcast_ref::<String>() { s.clone() }
-                else { "(non-string panic payload)".into() };
-            LAST_PANIC.with(|p| *p.borrow_mut() = format!("panic at {}: {}", loc, msg));
-        }));
-    });
-}
+maquette_core::panic_export!();
 
-/// Fetch the last panic message captured by our hook. Empty string when the
-/// hook never fired. Callers use this after a trap to figure out what blew up.
-#[wasm_func]
-fn get_last_panic() -> Vec<u8> {
-    install_panic_hook();
-    LAST_PANIC.with(|p| p.borrow().clone().into_bytes())
-}
-
+/// Most supersampled samples a plain render fits in wasm32 memory with the
+/// deferred shading buffers (measured: 125 M renders, 134 M runs out; shadows
+/// and SSAO lower the real ceiling somewhat).
+const MAX_RASTER_SAMPLES: u64 = 125_000_000;
+use maquette_core::panic::install_hook as install_panic_hook;
 
 /// 16-byte handle for a GLB/glTF file. Once a render has cached its scene,
 /// `render_gltf` accepts the handle in place of the file, skipping the copy and
@@ -91,6 +70,7 @@ fn render_gltf_split(gltf_data: &[u8], config_json: &[u8], sidecars_bundle: &[u8
 fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_bundle: &[u8]) -> Result<Vec<u8>, String> {
     install_panic_hook();
     let mut config = config::parse(config_json)?;
+    maquette_core::effects::check_raster_size(config.width.max(1), config.height.max(1), config.antialias.clamp(1, 4), MAX_RASTER_SAMPLES)?;
     if !hdr_data.is_empty() {
         use std::hash::Hasher;
         let mut h = maquette_core::math::FxHasher::default();
@@ -192,42 +172,7 @@ fn max_animation_endpoint(loaded: &gltf_loader::LoadedGltf) -> f32 {
     max_t
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-unsafe fn __write_args_to_buffer(_ptr: *mut u8) {}
-#[cfg(not(target_arch = "wasm32"))]
-unsafe fn __send_result_to_host(_ptr: *const u8, _len: usize) {}
-#[cfg(not(target_arch = "wasm32"))]
-trait __ToResult {
-    type Ok: ::core::convert::AsRef<[u8]>;
-    type Err: ::core::fmt::Display;
-    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err>;
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl __ToResult for Vec<u8> {
-    type Ok = Self;
-    type Err = ::core::convert::Infallible;
-    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl __ToResult for Box<[u8]> {
-    type Ok = Self;
-    type Err = ::core::convert::Infallible;
-    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<'a> __ToResult for &'a [u8] {
-    type Ok = Self;
-    type Err = ::core::convert::Infallible;
-    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: ::core::convert::AsRef<[u8]>, E: ::core::fmt::Display> __ToResult
-    for ::core::result::Result<T, E>
-{
-    type Ok = T;
-    type Err = E;
-    fn to_result(self) -> Self { self }
-}
+maquette_core::native_protocol!();
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native {

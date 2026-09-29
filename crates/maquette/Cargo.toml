@@ -13,7 +13,7 @@ wasm-minimal-protocol = { git = "https://github.com/astrale-sharp/wasm-minimal-p
 maquette-core = { path = "../maquette-core" }
 
 [features]
-prof = []
+prof = ["maquette-core/prof"]
 
 [lints]
 workspace = true

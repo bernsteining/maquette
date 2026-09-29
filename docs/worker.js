@@ -220,9 +220,20 @@ function makePlugin(url) {
       if (rc !== 0) throw new Error(new TextDecoder().decode(result) || `${url}: ${fn} failed`);
       return result;
     } catch (e) {
-      if (e instanceof WebAssembly.RuntimeError) { inst = null; ensuring = null; handle = null; }
+      if (e instanceof WebAssembly.RuntimeError) {
+        const detail = lastPanic();
+        inst = null; ensuring = null; handle = null;
+        if (detail) throw new WebAssembly.RuntimeError(`${e.message} — ${detail}`);
+      }
       throw e;
     } finally { argParts = []; }
+  }
+
+  function lastPanic() {
+    if (!inst?.exports.get_last_panic) return "";
+    argParts = [];
+    result = new Uint8Array();
+    try { inst.exports.get_last_panic(); return new TextDecoder().decode(result); } catch { return ""; }
   }
   return plugin;
 }

@@ -17,7 +17,7 @@ mod parser;
 mod ply_parser;
 mod pointcloud;
 mod prepared;
-mod prof;
+use maquette_core::prof;
 mod projection;
 mod render;
 mod shading;
@@ -26,11 +26,13 @@ mod smooth;
 mod svg;
 
 use maquette_core::color;
-use maquette_core::texture::{build_mips, Filter, MipLevel, Texture, Wrap};
+use maquette_core::math::FxHasher;
+use maquette_core::texture::{Filter, MipLevel, Texture, Wrap};
 use config::RenderConfig;
 use std::collections::HashMap;
 
 fn parse_config(config_json: &[u8]) -> Result<RenderConfig, String> {
+    maquette_core::panic::install_hook();
     let s = std::str::from_utf8(config_json)
         .map_err(|_| "config: invalid UTF-8")?;
     config::parse_config_json(s)
@@ -101,8 +103,8 @@ fn cached_obj(
 }
 
 enum CachedObj {
-    Ref(&'static (Vec<parser::Triangle>, HashMap<u32, config::GroupAppearance>)),
-    Owned(Vec<parser::Triangle>, HashMap<u32, config::GroupAppearance>),
+    Ref(&'static (Vec<parser::Triangle>, config::GroupStyles)),
+    Owned(Vec<parser::Triangle>, config::GroupStyles),
 }
 
 impl CachedObj {
@@ -112,7 +114,7 @@ impl CachedObj {
             CachedObj::Owned(t, _) => t,
         }
     }
-    fn group_styles(&self) -> &HashMap<u32, config::GroupAppearance> {
+    fn group_styles(&self) -> &config::GroupStyles {
         match self {
             CachedObj::Ref(r) => &r.1,
             CachedObj::Owned(_, g) => g,
@@ -152,15 +154,7 @@ fn build_obj_textures(
                 let decoded = maquette_core::texture_decode::decode_obj_texture(file, bytes)
                     .map_err(|e| format!("texture '{}': {}", file, e))?;
                 let base = MipLevel { width: decoded.width, height: decoded.height, rgba: decoded.rgba };
-                let (bw, bh) = (base.width, base.height);
-                let tex = Texture {
-                    mips: build_mips(base),
-                    wrap_s: Wrap::Repeat,
-                    wrap_t: Wrap::Repeat,
-                    mag_filter: Filter::Linear,
-                    min_filter: Filter::Linear,
-                    lod_bias: 0.5 * ((bw * bh) as f32).log2(),
-                };
+                let tex = Texture::from_base(base, Wrap::Repeat, Wrap::Repeat, Filter::Linear, Filter::Linear);
                 let i = textures.len() as u16;
                 textures.push(tex);
                 by_file.insert(file.clone(), i);
@@ -242,28 +236,18 @@ fn cloud_to_triangles(cloud: &ply_parser::PointCloud, config: &RenderConfig, ras
 }
 
 fn cloud_key(key: u64, cloud: &ply_parser::PointCloud, config: &RenderConfig, raster: bool) -> u64 {
-    let m = |h: u64, x: u64| (h ^ x).wrapping_mul(0x100000001b3);
-    let mut h = m(key, 0xC10D);
-    h = m(h, config.point_splat as u64);
-    h = m(h, config.point_size.to_bits());
-    if config.point_splat {
-        h = m(h, splat_native(config, raster) as u64);
-        h = m(h, config.shading.is_empty() as u64);
+    let mut h = FxHasher::seeded(key).mix(0xC10D).mix(config.point_splat as u64).mix_f64(config.point_size);
+    h = if config.point_splat {
+        h.mix(splat_native(config, raster) as u64).mix(config.shading.is_empty() as u64)
     } else {
-        h = m(h, config.point_neighbors as u64);
-        h = m(h, config.point_boundary.to_bits());
-        h = m(h, config.point_denoise as u64);
-    }
+        h.mix(config.point_neighbors as u64).mix_f64(config.point_boundary).mix(config.point_denoise as u64)
+    };
     if config.point_splat || cloud.normals.len() != cloud.positions.len() {
         let (bmin, bmax) = render::bbox_of(cloud.positions.iter().copied());
         let view = projection::resolve_config_view(config, render::bbox_center(bmin, bmax), render::bbox_radius(bmin, bmax));
-        for v in [view.camera, view.center] {
-            h = m(h, v.x.to_bits());
-            h = m(h, v.y.to_bits());
-            h = m(h, v.z.to_bits());
-        }
+        for v in [view.camera, view.center] { h = h.mix_f64(v.x).mix_f64(v.y).mix_f64(v.z); }
     }
-    h
+    h.key()
 }
 
 /// Colored point clouds are usually scans whose colors already bake in real
@@ -293,7 +277,7 @@ fn obj_prep_key(key: u64, config: &RenderConfig) -> Option<u64> {
 fn render_stl(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
     let (key, triangles) = load_stl(stl_data)?;
-    let empty = HashMap::new();
+    let empty = config::GroupStyles::default();
     let svg = render::render(triangles, &config, &empty, Some(key), Some(key));
     Ok(svg.into_bytes())
 }
@@ -312,7 +296,7 @@ fn render_obj(obj_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
 fn render_stl_png(stl_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let config = parse_config(config_json)?;
     let (key, triangles) = load_stl(stl_data)?;
-    let empty = HashMap::new();
+    let empty = config::GroupStyles::default();
     render::render_raster(triangles, &config, &empty, Some(key), Some(key), &[])
 }
 
@@ -355,11 +339,12 @@ fn render_obj_png_tex(obj_data: &[u8], config_json: &[u8], tex_bundle: &[u8]) ->
 /// accepts in place of the file (see `prepared`). Idempotent on a blob.
 #[wasm_func]
 fn prepare_stl(stl_data: &[u8]) -> Result<Vec<u8>, String> {
+    maquette_core::panic::install_hook();
     if prepared::key_of(stl_data).is_some() {
         return Ok(stl_data.to_vec());
     }
     let triangles = parser::parse_stl(stl_data)?;
-    Ok(prepared::encode(cache::hash(stl_data), &triangles, &HashMap::new()))
+    Ok(prepared::encode(cache::hash(stl_data), &triangles, &config::GroupStyles::default()))
 }
 
 /// Parse OBJ text once into a prepared blob that every other OBJ entry point
@@ -368,6 +353,7 @@ fn prepare_stl(stl_data: &[u8]) -> Result<Vec<u8>, String> {
 /// a blob.
 #[wasm_func]
 fn prepare_obj(obj_data: &[u8]) -> Result<Vec<u8>, String> {
+    maquette_core::panic::install_hook();
     if prepared::key_of(obj_data).is_some() {
         return Ok(obj_data.to_vec());
     }
@@ -407,7 +393,7 @@ fn render_ply(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> {
     let mut config = parse_config(config_json)?;
     let (key, tris) = cached_ply(ply_data, &config, false)?;
     apply_pointcloud_matte(key, &mut config);
-    let empty = HashMap::new();
+    let empty = config::GroupStyles::default();
     Ok(render::render(tris.triangles(), &config, &empty, tris.mesh_key(), tris.mesh_key()).into_bytes())
 }
 
@@ -417,7 +403,7 @@ fn render_ply_png(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String
     let mut config = parse_config(config_json)?;
     let (key, tris) = cached_ply(ply_data, &config, true)?;
     apply_pointcloud_matte(key, &mut config);
-    let empty = HashMap::new();
+    let empty = config::GroupStyles::default();
     render::render_raster(tris.triangles(), &config, &empty, tris.mesh_key(), tris.mesh_key(), &[])
 }
 
@@ -429,42 +415,8 @@ fn get_ply_info(ply_data: &[u8], config_json: &[u8]) -> Result<Vec<u8>, String> 
     Ok(render::get_info(tris.triangles(), &config).into_bytes())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-unsafe fn __write_args_to_buffer(_ptr: *mut u8) {}
-#[cfg(not(target_arch = "wasm32"))]
-unsafe fn __send_result_to_host(_ptr: *const u8, _len: usize) {}
-#[cfg(not(target_arch = "wasm32"))]
-trait __ToResult {
-    type Ok: ::core::convert::AsRef<[u8]>;
-    type Err: ::core::fmt::Display;
-    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err>;
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl __ToResult for Vec<u8> {
-    type Ok = Self;
-    type Err = ::core::convert::Infallible;
-    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl __ToResult for Box<[u8]> {
-    type Ok = Self;
-    type Err = ::core::convert::Infallible;
-    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<'a> __ToResult for &'a [u8] {
-    type Ok = Self;
-    type Err = ::core::convert::Infallible;
-    fn to_result(self) -> ::core::result::Result<Self::Ok, Self::Err> { Ok(self) }
-}
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: ::core::convert::AsRef<[u8]>, E: ::core::fmt::Display> __ToResult
-    for ::core::result::Result<T, E>
-{
-    type Ok = T;
-    type Err = E;
-    fn to_result(self) -> Self { self }
-}
+maquette_core::native_protocol!();
+maquette_core::panic_export!();
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native {

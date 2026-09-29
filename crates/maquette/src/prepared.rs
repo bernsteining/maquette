@@ -10,10 +10,9 @@
 //! triangle a `u16` presence mask and its fields, then group count `u32` and
 //! per group its id `u32` and name (`u32` length, `u32::MAX` = none, bytes).
 
-use crate::config::GroupAppearance;
+use crate::config::{GroupAppearance, GroupStyles};
 use crate::math::Vec3;
 use crate::parser::Triangle;
-use std::collections::HashMap;
 
 const MAGIC: &[u8; 8] = b"\0MQMESH\x01";
 
@@ -29,26 +28,19 @@ const TEX: u16 = 1 << 8;
 
 /// The raw file's cache key if `data` is a prepared blob.
 pub fn key_of(data: &[u8]) -> Option<u64> {
-    if data.len() >= 16 && data[..8] == MAGIC[..] {
-        Some(u64::from_le_bytes(data[8..16].try_into().unwrap()))
-    } else {
-        None
-    }
+    maquette_core::cache::handle_key(MAGIC, data)
 }
 
 /// Header-only blob for `key`: accepted wherever a prepared blob is, and served
 /// from the per-instance model cache when that key is already parsed there
 /// (otherwise decoding it fails as truncated).
 pub fn header(key: u64) -> Vec<u8> {
-    let mut out = MAGIC.to_vec();
-    out.extend_from_slice(&key.to_le_bytes());
-    out
+    maquette_core::cache::handle(MAGIC, key)
 }
 
-pub fn encode(key: u64, triangles: &[Triangle], groups: &HashMap<u32, GroupAppearance>) -> Vec<u8> {
-    let mut out = Vec::with_capacity(20 + triangles.len() * 104);
-    out.extend_from_slice(MAGIC);
-    out.extend_from_slice(&key.to_le_bytes());
+pub fn encode(key: u64, triangles: &[Triangle], groups: &GroupStyles) -> Vec<u8> {
+    let mut out = header(key);
+    out.reserve(4 + triangles.len() * 104);
     out.extend_from_slice(&(triangles.len() as u32).to_le_bytes());
     let f64s = |out: &mut Vec<u8>, v: &[f64]| v.iter().for_each(|x| out.extend_from_slice(&x.to_le_bytes()));
     let vec3 = |out: &mut Vec<u8>, v: Vec3| f64s(out, &[v.x, v.y, v.z]);
@@ -121,7 +113,7 @@ impl<'a> Reader<'a> {
     }
 }
 
-pub fn decode(data: &[u8]) -> Result<(Vec<Triangle>, HashMap<u32, GroupAppearance>), String> {
+pub fn decode(data: &[u8]) -> Result<(Vec<Triangle>, GroupStyles), String> {
     key_of(data).ok_or("prepared mesh: bad header")?;
     let mut r = Reader { b: data, pos: 16 };
     let n = r.u32()? as usize;
@@ -150,7 +142,7 @@ pub fn decode(data: &[u8]) -> Result<(Vec<Triangle>, HashMap<u32, GroupAppearanc
         });
     }
     let ng = r.u32()? as usize;
-    let mut groups = HashMap::with_capacity(ng.min(data.len()));
+    let mut groups = crate::math::fx_hashmap_cap(ng.min(data.len()));
     for _ in 0..ng {
         let id = r.u32()?;
         let len = r.u32()?;

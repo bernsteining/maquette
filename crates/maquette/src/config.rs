@@ -1,4 +1,3 @@
-use crate::color::{parse_hex_color, srgb_to_linear};
 use crate::math::parse_f64_fast;
 use std::collections::HashMap;
 
@@ -614,6 +613,9 @@ impl Default for ToneMappingConfig {
     }
 }
 
+/// Per-group appearance overrides, keyed by group id.
+pub type GroupStyles = crate::math::FxHashMap<u32, GroupAppearance>;
+
 /// Per-group appearance overrides for OBJ group highlighting.
 #[derive(Clone, Default)]
 pub struct GroupAppearance {
@@ -993,8 +995,8 @@ fn parse_light_def(p: &mut JsonParser) -> Result<LightDef, String> {
                 "size" => light.size = p.parse_f64()?,
                 "color" => {
                     let hex = p.parse_str()?;
-                    let (r, g, b) = parse_hex_color(hex);
-                    light.color = (srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b));
+                    let [r, g, b] = crate::color::hex_to_linear(hex);
+                    light.color = (r, g, b);
                 }
                 "intensity" => light.intensity = p.parse_f64()?,
                 "cast_shadow" => light.cast_shadow = p.parse_bool()?,
@@ -1217,6 +1219,7 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                     "per_pixel" => per_pixel = parse_bool,
                     "color" => color = parse_string,
                     "light_size" => light_size = parse_f64,
+                    "pcss_light_size" => light_size = parse_f64,
                     "omni" => omni = parse_bool,
                 }),
                 _ => { p.skip_value()?; }
@@ -1234,5 +1237,5 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
 /// Entry point: parse a JSON config string into a RenderConfig.
 pub fn parse_config_json(s: &str) -> Result<RenderConfig, String> {
     let mut p = JsonParser::new(s);
-    parse_render_config(&mut p)
+    parse_render_config(&mut p).map_err(|e| format!("config JSON: {e} at byte {}", p.pos))
 }

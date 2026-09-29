@@ -187,8 +187,15 @@ fn strip_block_comments(src: &str) -> String {
 
 /// Parse `.scad` source, working around the `openscad-rs` block-comment bug.
 fn parse_scad(src: &str) -> Result<openscad_rs::ast::SourceFile, String> {
+    use openscad_rs::ParseError as E;
     let cleaned = strip_block_comments(src);
-    openscad_rs::parse(&cleaned).map_err(|e| format!("{e}"))
+    openscad_rs::parse(&cleaned).map_err(|e| {
+        let offset = match &e {
+            E::UnexpectedToken { span, .. } | E::UnexpectedEof { span, .. } | E::Custom { span, .. } | E::InvalidToken { span } => span.offset(),
+        };
+        let line = cleaned.as_bytes()[..offset.min(cleaned.len())].iter().filter(|&&b| b == b'\n').count() + 1;
+        format!("{e} (line {line})")
+    })
 }
 
 /// Parse + evaluate `.scad` source into a single DSL tree (union of all
@@ -728,6 +735,7 @@ fn instantiate(
         other => {
             if let Some((params, body)) = env.modules.get(other).cloned() {
                 let child_nodes = eval_body(children, env)?;
+                let _depth = CallDepth::enter(other)?;
                 return instantiate_user(&params, &body, &a, env, child_nodes);
             }
             return Err(format!("scad: unsupported module \"{other}\""));
@@ -997,6 +1005,38 @@ fn eval_expr(expr: &Expr, env: &Env) -> Result<Value, String> {
 }
 
 /// Call a function *value* (from a literal or a variable) with call-site args.
+/// Deepest nesting of user function/module calls: Typst runs the plugin
+/// under wasmi, whose call stack overflows a little past 320 levels of
+/// typical recursion, which would surface as an opaque trap.
+const MAX_CALL_DEPTH: usize = 300;
+
+thread_local! {
+    static CALL_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// One level of user-call nesting, released when dropped.
+struct CallDepth;
+
+impl CallDepth {
+    fn enter(name: &str) -> Result<Self, String> {
+        CALL_DEPTH.with(|d| {
+            if d.get() >= MAX_CALL_DEPTH {
+                return Err(format!(
+                    "scad: recursion too deep calling \"{name}\" (more than {MAX_CALL_DEPTH} nested calls; Typst's plugin sandbox limits the call stack)"
+                ));
+            }
+            d.set(d.get() + 1);
+            Ok(CallDepth)
+        })
+    }
+}
+
+impl Drop for CallDepth {
+    fn drop(&mut self) {
+        CALL_DEPTH.with(|d| d.set(d.get() - 1));
+    }
+}
+
 fn call_value(f: Value, args: &[Argument], caller_env: &Env) -> Result<Value, String> {
     match f {
         Value::Func(rc) => {
@@ -1004,6 +1044,7 @@ fn call_value(f: Value, args: &[Argument], caller_env: &Env) -> Result<Value, St
             let a = eval_args(args, caller_env)?;
             let mut local = captured.clone();
             bind_params(params, &a, &mut local)?;
+            let _depth = CallDepth::enter("function literal")?;
             eval_expr(body, &local)
         }
         _ => Err("scad: attempt to call a non-function value".into()),
@@ -1345,6 +1386,7 @@ fn eval_call(callee: &Expr, args: &[Argument], env: &Env) -> Result<Value, Strin
                 let a = eval_args(args, env)?;
                 let mut local = env.clone();
                 bind_params(params, &a, &mut local)?;
+                let _depth = CallDepth::enter(other)?;
                 return eval_expr(body, &local);
             }
             if let Some(f @ Value::Func(_)) = env.vars.get(other) {

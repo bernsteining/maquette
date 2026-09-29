@@ -37,6 +37,12 @@ pub fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
     }
 }
 
+/// Hex colour → linear f32 RGB, as [`parse_hex_color`] then [`srgb_to_linear`].
+pub fn hex_to_linear(hex: &str) -> [f32; 3] {
+    let (r, g, b) = parse_hex_color(hex);
+    [srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b)]
+}
+
 /// linear f32 [0,1] triple → sRGB u8 triple.
 #[inline]
 pub fn linear_rgb_to_srgb(r: f32, g: f32, b: f32) -> (u8, u8, u8) {

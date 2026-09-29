@@ -1,7 +1,6 @@
 
-use crate::math::FloatExt;
 use crate::config::{LightKind, ShadowMapConfig};
-use crate::math::{Mat4, Vec3};
+use crate::math::Vec3;
 use crate::parser::Triangle;
 use crate::shading::ResolvedLight;
 
@@ -33,6 +32,10 @@ pub fn build_shadow_maps(
     is_occluder: &dyn Fn(&Triangle) -> bool,
 ) -> Vec<Option<LightShadow>> {
     let res = cfg.resolution.clamp(64, 4096);
+    let mut casters: Vec<[Vec3; 3]> = Vec::new();
+    for tri in triangles.iter().filter(|t| is_occluder(t)) {
+        casters.extend(caster_tris(tri));
+    }
     lights
         .iter()
         .map(|light| {
@@ -41,71 +44,13 @@ pub fn build_shadow_maps(
             }
             let mut ls = if cfg.omni && light.kind != LightKind::Directional {
                 LightShadow::Cube(build_cube(light.vector, br, res))
+            } else if light.kind == LightKind::Directional {
+                LightShadow::Single(ShadowMap::directional(light.vector.normalized().scale(-1.0), bc, br, up, res))
             } else {
-                LightShadow::Single(build_one(light, bc, br, up, res))
+                LightShadow::Single(ShadowMap::perspective(light.vector, bc, (bc - light.vector).normalized(), None, bc, br, up, res))
             };
-            match &mut ls {
-                LightShadow::Single(m) => {
-                    for tri in triangles {
-                        if is_occluder(tri) {
-                            for v in caster_tris(tri) { m.splat_tri(v); }
-                        }
-                    }
-                }
-                LightShadow::Cube(faces) => faces.iter_mut().for_each(|m| {
-                    for tri in triangles {
-                        if is_occluder(tri) {
-                            for v in caster_tris(tri) { m.splat_tri(v); }
-                        }
-                    }
-                }),
-            }
+            ls.add_casters(&casters);
             Some(ls)
         })
         .collect()
-}
-
-fn build_one(light: &ResolvedLight, bc: Vec3, br: f64, up: Vec3, res: usize) -> ShadowMap {
-    let forward = if light.kind == LightKind::Directional {
-        light.vector.normalized().scale(-1.0)
-    } else {
-        (bc - light.vector).normalized()
-    };
-    let up_aux = if forward.cross(up).length() > 1e-3 {
-        up
-    } else {
-        Vec3::new(1.0, 0.0, 0.0)
-    };
-
-    if light.kind == LightKind::Directional {
-        let eye = bc - forward.scale(br * 2.0);
-        let view = Mat4::look_at(eye, bc, up_aux);
-        let eye_dist = br * 2.0;
-        ShadowMap::new(
-            view,
-            true,
-            br * 1.05,
-            0.0,
-            (eye_dist - br * 1.2).fmax(1e-4),
-            eye_dist + br * 1.2,
-            res,
-            forward,
-            eye,
-        )
-    } else {
-        let eye = light.vector;
-        let dist = (bc - eye).length().fmax(br * 0.1);
-        let view = Mat4::look_at(eye, bc, up_aux);
-        ShadowMap::new(
-            view,
-            false,
-            0.0,
-            (br * 1.1 / dist).clamp(0.05, 10.0),
-            (dist - br * 1.2).fmax(dist * 0.01),
-            dist + br * 1.2,
-            res,
-            forward,
-            eye,
-        )
-    }
 }

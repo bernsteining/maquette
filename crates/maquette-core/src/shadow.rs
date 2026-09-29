@@ -355,6 +355,13 @@ impl LightShadow {
             LightShadow::Cube(f) => f[cube_face(p, f[0].eye)].lit_pcss(p, normal, b, softness, light_size),
         }
     }
+    /// Light reaching `p`: soft PCSS shadows for a light of positive
+    /// `light_size`, plain PCF otherwise.
+    #[inline]
+    pub fn lit_sized(&self, p: Vec3, normal: Vec3, b: &BiasParams, softness: usize, light_size: f64) -> f32 {
+        if light_size > 0.0 { self.lit_pcss(p, normal, b, softness, light_size) } else { self.lit(p, normal, b, softness) }
+    }
+
     /// The single frustum, or `None` for an omnidirectional cube.
     pub fn single(&self) -> Option<&ShadowMap> {
         match self {
@@ -449,51 +456,60 @@ pub fn build_shadow_maps(
 
 fn build_single(light: &PunctualLight, bc: Vec3, br: f64, up: Vec3, res: usize) -> ShadowMap {
     let forward = light.direction.normalized();
-    let up_aux = if forward.cross(up).length() > 1e-3 {
-        up
-    } else {
-        Vec3::new(1.0, 0.0, 0.0)
-    };
-
     match light.kind {
-        LightKind::Directional => {
-            let eye = bc.sub(forward.scale(br * 2.0));
-            let eye_dist = br * 2.0;
-            ShadowMap {
-                view: Mat4::look_at(eye, bc, up_aux),
-                ortho: true,
-                half_extent: br * 1.05,
-                tan_half_fov: 0.0,
-                near: (eye_dist - br * 1.2).fmax(1e-4),
-                far: eye_dist + br * 1.2,
-                res,
-                depth: vec![EMPTY; res * res],
-                forward,
-                eye,
-            }
-        }
+        LightKind::Directional => ShadowMap::directional(forward, bc, br, up, res),
         _ => {
-            let eye = light.position;
-            let dist = (bc - eye).length().fmax(br * 0.1);
-            let tan_half_fov: f64 = if light.kind == LightKind::Spot {
+            let tan_half_fov = (light.kind == LightKind::Spot).then(|| {
                 let outer = light.outer_cone_cos.acos();
                 ((outer * 1.05).tan() as f64).fmax(0.05)
-            } else {
-                (br * 1.1 / dist).clamp(0.05, 10.0)
-            };
-            ShadowMap {
-                view: Mat4::look_at(eye, eye.add(forward), up_aux),
-                ortho: false,
-                half_extent: 0.0,
-                tan_half_fov,
-                near: (dist - br * 1.2).fmax(dist * 0.01),
-                far: dist + br * 1.2,
-                res,
-                depth: vec![EMPTY; res * res],
-                forward,
-                eye,
-            }
+            });
+            ShadowMap::perspective(light.position, light.position.add(forward), forward, tan_half_fov, bc, br, up, res)
         }
+    }
+}
+
+/// `up`, or the x axis when `up` is (nearly) parallel to `forward`.
+fn view_up(forward: Vec3, up: Vec3) -> Vec3 {
+    if forward.cross(up).length() > 1e-3 { up } else { Vec3::new(1.0, 0.0, 0.0) }
+}
+
+impl ShadowMap {
+    /// Orthographic map looking along the unit vector `forward`, framing the
+    /// scene's bounding sphere (`bc`, `br`).
+    pub fn directional(forward: Vec3, bc: Vec3, br: f64, up: Vec3, res: usize) -> Self {
+        let eye = bc.sub(forward.scale(br * 2.0));
+        let eye_dist = br * 2.0;
+        ShadowMap::new(
+            Mat4::look_at(eye, bc, view_up(forward, up)),
+            true,
+            br * 1.05,
+            0.0,
+            (eye_dist - br * 1.2).fmax(1e-4),
+            eye_dist + br * 1.2,
+            res,
+            forward,
+            eye,
+        )
+    }
+
+    /// Perspective map from `eye` looking at `target` (`forward` is the unit
+    /// view direction), with depth range fitted to the scene's bounding
+    /// sphere (`bc`, `br`). `tan_half_fov` defaults to a cone that just
+    /// covers the sphere.
+    #[allow(clippy::too_many_arguments)]
+    pub fn perspective(eye: Vec3, target: Vec3, forward: Vec3, tan_half_fov: Option<f64>, bc: Vec3, br: f64, up: Vec3, res: usize) -> Self {
+        let dist = (bc - eye).length().fmax(br * 0.1);
+        ShadowMap::new(
+            Mat4::look_at(eye, target, view_up(forward, up)),
+            false,
+            0.0,
+            tan_half_fov.unwrap_or_else(|| (br * 1.1 / dist).clamp(0.05, 10.0)),
+            (dist - br * 1.2).fmax(dist * 0.01),
+            dist + br * 1.2,
+            res,
+            forward,
+            eye,
+        )
     }
 }
 

@@ -27,14 +27,16 @@ impl SSAOParams {
     /// Parameters as configured by a renderer. With `scene = Some((camera,
     /// model_radius))`, sampling happens in scene space: `radius` defaults to
     /// 10% of `model_radius` and `bias` is a fraction of the radius. Without
-    /// it, `radius` defaults to half the image's shorter side.
+    /// it, `radius` defaults to half the image's shorter side (clamped to
+    /// 0.01–2). Samples are clamped to 4–64; bias and strength to ≥ 0.
     pub fn new(samples: usize, radius: Option<f64>, bias: f64, strength: f64, scene: Option<(DepthCamera, f64)>) -> Self {
+        let (samples, bias, strength) = (samples.clamp(4, 64), bias.fmax(0.0), strength.fmax(0.0));
         match scene {
             Some((camera, model_radius)) => {
-                let radius = radius.unwrap_or(0.1 * model_radius);
+                let radius = radius.unwrap_or(0.1 * model_radius).fmax(1e-9);
                 Self { samples, radius, bias: bias * radius, strength, camera: Some(camera) }
             }
-            None => Self { samples, radius: radius.unwrap_or(0.5), bias, strength, camera: None },
+            None => Self { samples, radius: radius.unwrap_or(0.5).clamp(0.01, 2.0), bias, strength, camera: None },
         }
     }
 }

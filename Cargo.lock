@@ -605,9 +605,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "maquette",
+ "maquette-core",
  "maquette-gltf",
  "maquette-scad",
- "png",
  "serde_json",
 ]
 
@@ -617,6 +617,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "image-webp",
+ "png",
  "wide",
  "zune-jpeg",
  "zune-png",

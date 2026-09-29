@@ -2,7 +2,7 @@ use crate::math::FloatExt;
 use crate::color::parse_hex_color;
 use crate::math::{find_newline, parse_f64_from, parse_i64_bytes, AsciiTokens, Vec3};
 use crate::parser::Triangle;
-use crate::config::{GroupAppearance, GroupStyle};
+use crate::config::{GroupAppearance, GroupStyle, GroupStyles};
 use std::collections::HashMap;
 
 /// Parse one or more concatenated Wavefront `.mtl` files. Returns a map of
@@ -110,12 +110,12 @@ pub fn parse_obj(
     materials: &HashMap<String, String>,
     highlight: &HashMap<String, GroupStyle>,
     tex_index: &HashMap<String, u16>,
-) -> Result<(Vec<Triangle>, HashMap<u32, GroupAppearance>), String> {
+) -> Result<(Vec<Triangle>, GroupStyles), String> {
     let mut vertices: Vec<Vec3> = Vec::new();
     let mut normals: Vec<Vec3> = Vec::new();
     let mut texcoords: Vec<[f32; 2]> = Vec::new();
     let mut triangles: Vec<Triangle> = Vec::new();
-    let mut group_styles: HashMap<u32, GroupAppearance> = HashMap::new();
+    let mut group_styles: GroupStyles = crate::math::fx_hashmap();
     let mut current_color: Option<(u8, u8, u8)> = None;
     let mut current_highlight: Option<(u8, u8, u8)> = None;
     let mut current_tex: Option<u16> = None;

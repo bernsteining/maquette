@@ -190,8 +190,9 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         };
         (sc.position, view, proj, sc.znear.unwrap_or(1e-4), sc.zfar)
     } else {
-        let pos = camera_position(config, center, radius);
-        let view = build_view_matrix(config, center, radius, pos);
+        let pivot = maquette_core::math::orbit_pivot(config.auto_center, config.center, center);
+        let pos = camera_position(config, pivot, radius);
+        let view = Mat4::look_at(pos, pivot, Vec3::from(config.up));
         (pos, view, Projection::Perspective { fov_deg: config.fov }, 1e-4, None)
     };
 
@@ -414,7 +415,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
                                 Vec3::new((sx - half_w) / half_w * ow, (half_h - sy) / half_h * oh, -k)
                             }
                         };
-                        let world = rigid_inverse_apply(&view, vp);
+                        let world = view.rigid_inverse_point(vp);
                         for (m, map) in maps.iter().enumerate() {
                             texels[i * maps.len() + m] = match map {
                                 None => TEXEL_NONE,
@@ -795,16 +796,6 @@ const TEXEL_NONE: u32 = u32::MAX;
 const TEXEL_ALWAYS: u32 = u32::MAX - 1;
 const TEXEL_LIMIT: i64 = 0xFFFF;
 
-fn rigid_inverse_apply(view: &Mat4, v: Vec3) -> Vec3 {
-    let m = view.0;
-    let p = Vec3::new(v.x - m[0][3], v.y - m[1][3], v.z - m[2][3]);
-    Vec3::new(
-        m[0][0] * p.x + m[1][0] * p.y + m[2][0] * p.z,
-        m[0][1] * p.x + m[1][1] * p.y + m[2][1] * p.z,
-        m[0][2] * p.x + m[1][2] * p.y + m[2][2] * p.z,
-    )
-}
-
 fn depth_pass_tri<'a>(i: usize, tris: &Tris<'a>, cam: &Cam, pbr: &PbrContext, buffer: &mut PixelBuffer, out: &mut DepthPassOut<'a>) {
     let tri = tris.tri(i);
     let material = tris.material(tri);
@@ -1000,28 +991,13 @@ fn project_ortho(v: Vec3, half_w: f64, half_h: f64, width: f64, height: f64) -> 
     )
 }
 
-fn camera_position(config: &RenderConfig, center: Vec3, radius: f64) -> Vec3 {
+fn camera_position(config: &RenderConfig, pivot: Vec3, radius: f64) -> Vec3 {
     if let Some(cam) = config.camera {
         return Vec3::from(cam);
     }
     let dist = config.distance.filter(|&d| d > 0.0)
         .unwrap_or_else(|| default_distance(config.fov, radius));
-    let up = Vec3::from(config.up);
-    let az = config.azimuth.to_radians();
-    let el = config.elevation.to_radians();
-
-    let arbitrary = if up.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
-    let right   = up.cross(arbitrary).normalized();
-    let forward = right.cross(up).normalized();
-    let offset  = right.scale(el.cos() * az.cos())
-        .add(forward.scale(el.cos() * az.sin()))
-        .add(up.scale(el.sin()));
-    center.add(offset.scale(dist))
-}
-
-fn build_view_matrix(config: &RenderConfig, center: Vec3, _radius: f64, camera: Vec3) -> Mat4 {
-    let look_center = if config.auto_center { center } else { Vec3::from(config.center) };
-    Mat4::look_at(camera, look_center, Vec3::from(config.up))
+    maquette_core::math::orbit_position(pivot, Vec3::from(config.up), config.azimuth, config.elevation, dist)
 }
 
 fn default_distance(fov_deg: f64, radius: f64) -> f64 {

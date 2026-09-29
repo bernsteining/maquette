@@ -254,7 +254,7 @@ fn seg_i32(node: &Json, d: &Defaults) -> i32 {
 fn frags(node: &Json, d: &Defaults, r: f64) -> i32 {
     if let Some(f) = num(node, "fn") {
         if f >= 3.0 {
-            return f as i32;
+            return f.min(i32::MAX as f64) as i32;
         }
     }
     let fa = num(node, "fa").filter(|x| *x > 0.0).unwrap_or(12.0);
@@ -268,6 +268,17 @@ fn frags(node: &Json, d: &Defaults, r: f64) -> i32 {
     let n = (360.0 / fa).min(r * 2.0 * std::f64::consts::PI / fs);
     (n.ceil().max(5.0) as i32).max(3)
 }
+/// [`frags`], rejecting counts above `max` (beyond which the kernel runs out
+/// of memory inside the plugin sandbox) with an error naming the primitive.
+fn frags_max(node: &Json, d: &Defaults, r: f64, max: i32, what: &str) -> Result<i32, String> {
+    let n = frags(node, d, r);
+    if n > max {
+        return Err(format!("{what}: {n} fragments is too many (at most {max}); lower $fn or raise $fa/$fs"));
+    }
+    Ok(n)
+}
+const SPHERE_MAX_FRAGS: i32 = 2048;
+const MAX_FRAGS: i32 = 1_000_000;
 fn children(node: &Json) -> Result<&[Json], String> {
     node.get("children")
         .and_then(Json::as_arr)
@@ -410,7 +421,7 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             if r < 1e-9 {
                 return Ok(Geo::D3(Manifold::empty()));
             }
-            Ok(Geo::D3(register(Manifold::sphere(r, frags(node, d, r)), &color)))
+            Ok(Geo::D3(register(Manifold::sphere(r, frags_max(node, d, r, SPHERE_MAX_FRAGS, "sphere")?), &color)))
         }
         "cylinder" => {
             let h = req(node, "h", "cylinder")?;
@@ -427,7 +438,7 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             if r1 + r2 < 1e-9 {
                 return Ok(Geo::D3(Manifold::empty()));
             }
-            let seg = frags(node, d, r1.max(r2));
+            let seg = frags_max(node, d, r1.max(r2), MAX_FRAGS, "cylinder")?;
             let m = Manifold::cylinder(ah, r1, r2, seg, false);
             let centered = node.get("center").and_then(Json::as_bool).unwrap_or(false);
             let m = if centered {
@@ -479,7 +490,7 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             if r < 1e-9 {
                 return Ok(Geo::D2(CrossSection::empty(), color));
             }
-            Ok(Geo::D2(CrossSection::circle(r, frags(node, d, r)), color))
+            Ok(Geo::D2(CrossSection::circle(r, frags_max(node, d, r, MAX_FRAGS, "circle")?), color))
         }
         "ellipse" => {
             let w = req_pos(node, "w", "ellipse")?;
@@ -638,7 +649,7 @@ fn build_uncached(node: &Json, color: Rgb, d: &Defaults) -> Result<Geo, String> 
             }
             let cs = build_revolve_profile(child_of(node)?, color.clone(), d)?;
             let radius = cs.bounds().max()[0].abs();
-            let seg = frags(node, d, radius);
+            let seg = frags_max(node, d, radius, MAX_FRAGS, "rotate_extrude")?;
             let m = Manifold::revolve(&cs, seg, angle);
             Ok(Geo::D3(register(m, &color)))
         }

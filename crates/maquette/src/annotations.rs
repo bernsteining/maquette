@@ -1,8 +1,7 @@
 use crate::math::FloatExt;
-use crate::config::{AnnotationConfig, GroupAppearance};
+use crate::config::{AnnotationConfig, GroupStyles};
 use crate::math::FxHashMap;
 use crate::svg::{push_f1, push_f2};
-use std::collections::HashMap;
 
 pub struct Annotation<'a> {
     pub anchor: (f64, f64),
@@ -12,7 +11,7 @@ pub struct Annotation<'a> {
 
 pub fn compute_annotations<'a>(
     centroids: &FxHashMap<u32, (f64, f64)>,
-    group_styles: &'a HashMap<u32, GroupAppearance>,
+    group_styles: &'a GroupStyles,
     ann: &AnnotationConfig,
     view_center: (f64, f64),
     w: f64,
