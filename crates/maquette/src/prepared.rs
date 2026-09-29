@@ -193,13 +193,13 @@ mod tests {
         for p in models("stl") {
             let data = std::fs::read(&p).unwrap();
             let Ok(tris) = crate::parser::parse_stl(&data) else { continue };
-            let blob = encode(9, &tris, &HashMap::new());
+            let blob = encode(9, &tris, &crate::config::GroupStyles::default());
             let (t2, g2) = decode(&blob).unwrap();
             assert!(g2.is_empty());
             assert_eq!(encode(9, &t2, &g2), blob, "{}", p.display());
             checked += 1;
         }
         assert!(checked > 5);
-        assert!(decode(&encode(1, &[], &HashMap::new())[..15]).is_err());
+        assert!(decode(&encode(1, &[], &crate::config::GroupStyles::default())[..15]).is_err());
     }
 }

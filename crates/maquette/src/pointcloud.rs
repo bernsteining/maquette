@@ -448,26 +448,31 @@ pub(crate) fn reconstruct(cloud: &PointCloud, config: &RenderConfig) -> Vec<Tria
     triangles
 }
 
+/// Close small holes: cycles of at most `max_len` edges among the edges used
+/// by exactly one triangle, each filled with a fan. Orientation is ignored
+/// (neighbouring triangles across a crease may disagree); callers orient the
+/// new triangles afterwards.
 fn fill_small_holes(tris: &mut Vec<(u32, u32, u32)>, max_len: usize) {
-    let mut directed: HashMap<(u32, u32), u8, FxBuildHasher> =
+    let key = |u: u32, v: u32| (u.min(v), u.max(v));
+    let mut uses: HashMap<(u32, u32), u8, FxBuildHasher> =
         HashMap::with_capacity_and_hasher(tris.len() * 3, FxBuildHasher::default());
     for &(a, b, c) in tris.iter() {
-        for e in [(a, b), (b, c), (c, a)] { *directed.entry(e).or_insert(0) += 1; }
+        for (u, v) in [(a, b), (b, c), (c, a)] { *uses.entry(key(u, v)).or_insert(0) += 1; }
     }
-    let mut hole: Vec<(u32, u32)> = directed
-        .iter()
-        .filter(|(&(u, v), &cnt)| cnt == 1 && !directed.contains_key(&(v, u)))
-        .map(|(&(u, v), _)| (v, u))
-        .collect();
-    hole.sort_unstable();
-    let mut out: HashMap<u32, Vec<u32>, FxBuildHasher> = HashMap::with_hasher(FxBuildHasher::default());
-    for &(u, v) in &hole { out.entry(u).or_default().push(v); }
+    let mut border: Vec<(u32, u32)> = uses.iter().filter(|(_, &n)| n == 1).map(|(&e, _)| e).collect();
+    border.sort_unstable();
+    let mut adj: HashMap<u32, Vec<u32>, FxBuildHasher> = HashMap::with_hasher(FxBuildHasher::default());
+    for &(u, v) in &border {
+        adj.entry(u).or_default().push(v);
+        adj.entry(v).or_default().push(u);
+    }
+    for vs in adj.values_mut() { vs.sort_unstable(); }
     let mut used: HashMap<(u32, u32), (), FxBuildHasher> = HashMap::with_hasher(FxBuildHasher::default());
     let mut parent: HashMap<u32, u32, FxBuildHasher> = HashMap::with_hasher(FxBuildHasher::default());
     let mut frontier: Vec<u32> = Vec::new();
     let mut next_frontier: Vec<u32> = Vec::new();
     let mut lp: Vec<u32> = Vec::with_capacity(max_len);
-    for &(a, b) in &hole {
+    for &(a, b) in &border {
         if used.contains_key(&(a, b)) { continue; }
         parent.clear();
         parent.insert(b, a);
@@ -477,10 +482,10 @@ fn fill_small_holes(tris: &mut Vec<(u32, u32, u32)>, max_len: usize) {
         for _ in 1..max_len {
             next_frontier.clear();
             for &u in &frontier {
-                let Some(vs) = out.get(&u) else { continue };
-                for &v in vs {
-                    if used.contains_key(&(u, v)) || parent.contains_key(&v) && v != a { continue; }
+                for &v in &adj[&u] {
+                    if (u == b && v == a) || used.contains_key(&key(u, v)) { continue; }
                     if v == a { parent.insert(a, u); found = true; break; }
+                    if parent.contains_key(&v) { continue; }
                     parent.insert(v, u);
                     next_frontier.push(v);
                 }
@@ -498,10 +503,9 @@ fn fill_small_holes(tris: &mut Vec<(u32, u32, u32)>, max_len: usize) {
             if p == a { break; }
             cur = p;
         }
-        lp.reverse();
         if lp.len() < 3 { continue; }
         for w in 0..lp.len() {
-            used.insert((lp[w], lp[(w + 1) % lp.len()]), ());
+            used.insert(key(lp[w], lp[(w + 1) % lp.len()]), ());
         }
         for w in 1..lp.len() - 1 {
             tris.push((lp[0], lp[w], lp[w + 1]));
