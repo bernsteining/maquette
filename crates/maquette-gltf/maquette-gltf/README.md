@@ -25,6 +25,7 @@ See the [documentation](https://github.com/bernsteining/maquette/blob/master/doc
   elevation: 15,
   ibl: (environment: "studio", intensity: 1.2),
   tone_mapping: "aces",
+  ssao: true,
   width: 480)
 ```
 
