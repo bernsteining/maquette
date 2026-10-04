@@ -43,25 +43,36 @@ impl PixelBuffer {
             raw_dot * raw_dot < 0.36 * len1_sq * len2_sq
         }
 
-        let n = (w * h) as usize;
-        let mut edge_mask = vec![false; n];
+        let px = self.pixels.as_mut_ptr();
+        let paint = |i: usize| unsafe {
+            let p = px.add(i * 3);
+            *p = color.0; *p.add(1) = color.1; *p.add(2) = color.2;
+        };
         let neg_inf_v = f32x4_splat(f32::NEG_INFINITY);
 
+        let su = step as usize;
+        let sw = su * wu;
+        let zp = self.zbuf.as_ptr();
+        let ld = |i: usize| unsafe { *zp.add(i) };
         for y in 0..h {
+            let y_inner = y >= 2 * step && y < h - 2 * step;
             for x in 0..w {
                 let idx = y as usize * wu + x as usize;
-                let center = unsafe { *self.zbuf.get_unchecked(idx) };
+                let center = ld(idx);
                 if center == f32::NEG_INFINITY { continue; }
+                let inner = y_inner && x >= 2 * step && x < w - 2 * step;
 
-                let dr = depth_raw(x + step, y, &self.zbuf, w, h);
-                let dl = depth_raw(x - step, y, &self.zbuf, w, h);
-                let dd = depth_raw(x, y + step, &self.zbuf, w, h);
-                let du = depth_raw(x, y - step, &self.zbuf, w, h);
+                let (dr, dl, dd, du) = if inner {
+                    (ld(idx + su), ld(idx - su), ld(idx + sw), ld(idx - sw))
+                } else {
+                    (depth_raw(x + step, y, &self.zbuf, w, h), depth_raw(x - step, y, &self.zbuf, w, h),
+                     depth_raw(x, y + step, &self.zbuf, w, h), depth_raw(x, y - step, &self.zbuf, w, h))
+                };
                 let depths = f32x4(dr, dl, dd, du);
 
                 let valid = f32x4_ne(depths, neg_inf_v);
                 if i32x4_bitmask(valid) != 0xF {
-                    edge_mask[idx] = true;
+                    paint(idx);
                     continue;
                 }
 
@@ -76,10 +87,22 @@ impl PixelBuffer {
                 let abs_diff = f32x4_abs(f32x4_sub(depths, center_v));
                 let within = f32x4_le(abs_diff, f32x4_splat(threshold));
                 if i32x4_bitmask(within) != 0xF {
-                    edge_mask[idx] = true;
+                    paint(idx);
                     continue;
                 }
 
+                let (sr, sl, sd, su_) = (dr * slope, dl * slope, dd * slope, du * slope);
+                if inner {
+                    for (q, nd) in [(idx + su, dr), (idx - su, dl), (idx + sw, dd), (idx - sw, du)] {
+                        let sub = |v: f32| if v == f32::NEG_INFINITY { nd } else { v };
+                        let (nr, nl, ndd, nu) = (sub(ld(q + su)), sub(ld(q - su)), sub(ld(q + sw)), sub(ld(q - sw)));
+                        if is_normal_edge(sr, sl, sd, su_, nr * slope, nl * slope, ndd * slope, nu * slope) {
+                            paint(idx);
+                            break;
+                        }
+                    }
+                    continue;
+                }
                 for &(nx, ny, nd) in &[
                     (x + step, y, dr),
                     (x - step, y, dl),
@@ -95,21 +118,12 @@ impl PixelBuffer {
                     let ndd = if ndd == f32::NEG_INFINITY { nd } else { ndd };
                     let nu = if nu == f32::NEG_INFINITY { nd } else { nu };
 
-                    if is_normal_edge(dr * slope, dl * slope, dd * slope, du * slope, nr * slope, nl * slope, ndd * slope, nu * slope) {
-                        edge_mask[idx] = true;
+                    if is_normal_edge(sr, sl, sd, su_, nr * slope, nl * slope, ndd * slope, nu * slope) {
+                        paint(idx);
                         break;
                     }
                 }
             }
-        }
-
-        unsafe {
-        for i in 0..n {
-            if *edge_mask.get_unchecked(i) {
-                let p = self.pixels.as_mut_ptr().add(i * 3);
-                *p = color.0; *p.add(1) = color.1; *p.add(2) = color.2;
-            }
-        }
         }
     }
 

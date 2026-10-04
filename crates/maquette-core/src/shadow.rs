@@ -525,6 +525,7 @@ fn rasterize_depth(depth: &mut [f32], res: usize, p: &[(f64, f64, f64); 3]) {
     let max_x = (x0.fmax(x1).fmax(x2).ceil() as i64).clamp(0, res as i64) as usize;
     let min_y = y0.fmin(y1).fmin(y2).floor().fmax(0.0) as usize;
     let max_y = (y0.fmax(y1).fmax(y2).ceil() as i64).clamp(0, res as i64) as usize;
+    if min_x >= max_x || min_y >= max_y { return; }
     let edges = edge_crossings(p, inv_area);
     for y in min_y..max_y {
         let py = y as f64 + 0.5;
