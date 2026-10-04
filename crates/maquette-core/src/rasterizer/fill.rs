@@ -558,15 +558,16 @@ impl PixelBuffer {
     }
 
     /// Draw triangle edges with depth testing against the z-buffer.
-    pub fn draw_triangle_edges_z(&mut self, pts: &[(f64, f64); 3], depths: &[f64; 3], r: u8, g: u8, b: u8) {
+    pub fn draw_triangle_edges_z(&mut self, pts: &[(f64, f64); 3], depths: &[f64; 3], bias: f32, r: u8, g: u8, b: u8) {
         for e in 0..3 {
             let n = (e + 1) % 3;
-            self.draw_line_z(pts[e].0, pts[e].1, depths[e] as f32, pts[n].0, pts[n].1, depths[n] as f32, r, g, b);
+            self.draw_line_z(pts[e].0, pts[e].1, depths[e] as f32, pts[n].0, pts[n].1, depths[n] as f32, bias, r, g, b);
         }
     }
 
-    /// Draw a line with depth interpolation and z-buffer testing.
-    fn draw_line_z(&mut self, x0: f64, y0: f64, z0: f32, x1: f64, y1: f64, z1: f32, r: u8, g: u8, b: u8) {
+    /// Draw a line with depth interpolation and z-buffer testing; `bias` lets a
+    /// line lying on a surface win against that surface's own depth.
+    pub fn draw_line_z(&mut self, x0: f64, y0: f64, z0: f32, x1: f64, y1: f64, z1: f32, bias: f32, r: u8, g: u8, b: u8) {
         let w = self.width as i64;
         let h = self.height as i64;
         let mut ix = x0.fround() as i64;
@@ -588,7 +589,7 @@ impl PixelBuffer {
                 let t = step * inv_steps;
                 let z = z0 + (z1 - z0) * t;
                 let idx = iy as usize * self.width + ix as usize;
-                if z >= self.zbuf[idx] {
+                if z + bias >= self.zbuf[idx] {
                     unsafe {
                         let p = self.pixels.as_mut_ptr().add(idx * 3);
                         *p = r; *p.add(1) = g; *p.add(2) = b;

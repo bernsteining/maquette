@@ -1408,16 +1408,12 @@ fn build_single_svg_full(
         let global_stroke = if config.stroke.color != "none" && config.stroke.width > 0.0 {
             Some((config.stroke.color.as_str(), config.stroke.width))
         } else { None };
+        let wire = is_solid_wireframe.then(|| (resolve_wireframe_color(config, true), config.wireframe.width));
         for tri in tris {
             write_solid_polygon(&mut svg, tri, global_stroke, group_styles, hatch.is_some(), mask_of(tri));
-        }
-    }
-
-    if is_solid_wireframe {
-        let wire_color = resolve_wireframe_color(config, true);
-        let wire_width = config.wireframe.width;
-        for tri in tris {
-            write_wireframe_polygon(&mut svg, tri, wire_color, wire_width, mask_of(tri));
+            if let Some((wire_color, wire_width)) = wire {
+                write_wireframe_polygon(&mut svg, tri, wire_color, wire_width, mask_of(tri));
+            }
         }
     }
 
@@ -1880,8 +1876,12 @@ fn render_grid_svg(
             let global_stroke = if config.stroke.color != "none" && config.stroke.width > 0.0 {
                 Some((config.stroke.color.as_str(), config.stroke.width))
             } else { None };
+            let wire = (config.mode == "solid+wireframe").then(|| (resolve_wireframe_color(config, true), config.wireframe.width));
             for tri in &projected {
                 write_solid_polygon(&mut svg, tri, global_stroke, group_styles, hatch.is_some(), crate::tessellate::ALL_EDGES);
+                if let Some((wire_color, wire_width)) = wire {
+                    write_wireframe_polygon(&mut svg, tri, wire_color, wire_width, crate::tessellate::ALL_EDGES);
+                }
             }
         }
 
@@ -2062,7 +2062,6 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     crate::prof::mark(12);
     let is_wireframe = config.mode == "wireframe";
-    let is_solid_wireframe = config.mode == "solid+wireframe";
 
     let lights = resolve_lights(config, bc, br);
     let mut shadow_owned = None;
@@ -2162,63 +2161,17 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
-    if !is_wireframe {
-        let global_has_stroke = config.stroke.color != "none" && config.stroke.width > 0.0;
-        if global_has_stroke && group_styles.is_empty() {
-            let (sr, sg, sb) = parse_hex_color(&config.stroke.color);
-            for tri in &projected {
-                buf.draw_triangle_edges(&tri.pts, sr, sg, sb);
-            }
-        } else if global_has_stroke || group_styles.values().any(|a| a.stroke.as_deref().is_some_and(|s| s != "none")) {
-            let global_color = if global_has_stroke { Some(parse_hex_color(&config.stroke.color)) } else { None };
-            let default_stroke_width = config.stroke.width;
-            for tri in &projected {
-                let ga = tri.group_id.and_then(|gid| group_styles.get(&gid));
-                if let Some(a) = ga {
-                    let sw = a.stroke_width.unwrap_or(default_stroke_width);
-                    if sw > 0.0 {
-                        if let Some(s) = a.stroke.as_deref() {
-                            if s != "none" {
-                                let (sr, sg, sb) = parse_hex_color(s);
-                                buf.draw_triangle_edges(&tri.pts, sr, sg, sb);
-                                continue;
-                            }
-                        } else if let Some((sr, sg, sb)) = global_color {
-                            buf.draw_triangle_edges(&tri.pts, sr, sg, sb);
-                            continue;
-                        }
-                    }
-                } else if let Some((sr, sg, sb)) = global_color {
-                    buf.draw_triangle_edges(&tri.pts, sr, sg, sb);
-                }
-            }
-        }
-    }
+    draw_edges(&mut buf, &projected, config, group_styles, edge_masks, br, (0.0, 0.0), EdgePass::Strokes);
 
     if config.debug {
         for tri in &projected {
             if tri.group_id == Some(u32::MAX) {
-                buf.draw_triangle_edges_z(&tri.pts, &tri.depths, 0x33, 0x33, 0x33);
+                buf.draw_triangle_edges_z(&tri.pts, &tri.depths, 0.0, 0x33, 0x33, 0x33);
             }
         }
     }
 
-    if is_solid_wireframe || is_wireframe {
-        let (wr, wg, wb) = parse_hex_color(resolve_wireframe_color(config, is_solid_wireframe));
-        for tri in &projected {
-            match edge_masks.and_then(|m| m.get(tri.src as usize)).copied() {
-                Some(mask) if mask != crate::tessellate::ALL_EDGES => {
-                    for e in 0..3 {
-                        if (mask >> e) & 1 == 1 {
-                            let ((x0, y0), (x1, y1)) = (tri.pts[e], tri.pts[(e + 1) % 3]);
-                            buf.draw_line(x0, y0, x1, y1, wr, wg, wb);
-                        }
-                    }
-                }
-                _ => buf.draw_triangle_edges(&tri.pts, wr, wg, wb),
-            }
-        }
-    }
+    draw_edges(&mut buf, &projected, config, group_styles, edge_masks, br, (0.0, 0.0), EdgePass::Wire);
 
     if let Some(ref outline) = config.outline {
         if !is_wireframe {
@@ -2250,6 +2203,63 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         None
     };
     Ok(encode_raster(&out, alpha.as_deref(), overlay.as_deref()))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum EdgePass { Strokes, Wire }
+
+#[allow(clippy::too_many_arguments)]
+fn draw_edges(buf: &mut PixelBuffer, projected: &[ProjectedTri], config: &RenderConfig, group_styles: &GroupStyles,
+              edge_masks: Option<&[u8]>, br: f64, off: (f64, f64), pass: EdgePass) {
+    let is_wireframe = config.mode == "wireframe";
+    let is_solid_wireframe = config.mode == "solid+wireframe";
+    let bias = (br * 0.005) as f32;
+    let edges = |buf: &mut PixelBuffer, tri: &ProjectedTri, (r, g, b): (u8, u8, u8), depth: bool| {
+        let mask = edge_masks.and_then(|m| m.get(tri.src as usize)).copied().unwrap_or(crate::tessellate::ALL_EDGES);
+        if !depth && mask == crate::tessellate::ALL_EDGES && off == (0.0, 0.0) {
+            buf.draw_triangle_edges(&tri.pts, r, g, b);
+            return;
+        }
+        for e in 0..3 {
+            if (mask >> e) & 1 == 0 { continue; }
+            let n = (e + 1) % 3;
+            let (x0, y0, x1, y1) = (tri.pts[e].0 + off.0, tri.pts[e].1 + off.1, tri.pts[n].0 + off.0, tri.pts[n].1 + off.1);
+            if depth {
+                buf.draw_line_z(x0, y0, tri.depths[e] as f32, x1, y1, tri.depths[n] as f32, bias, r, g, b);
+            } else {
+                buf.draw_line(x0, y0, x1, y1, r, g, b);
+            }
+        }
+    };
+    match pass {
+        EdgePass::Wire if is_wireframe || is_solid_wireframe => {
+            let color = parse_hex_color(resolve_wireframe_color(config, is_solid_wireframe));
+            for tri in projected {
+                edges(buf, tri, color, is_solid_wireframe);
+            }
+        }
+        EdgePass::Strokes if !is_wireframe => {
+            let global = (config.stroke.color != "none" && config.stroke.width > 0.0).then(|| parse_hex_color(&config.stroke.color));
+            if global.is_none() && !group_styles.values().any(|a| a.stroke.as_deref().is_some_and(|s| s != "none")) {
+                return;
+            }
+            for tri in projected {
+                let color = match tri.group_id.and_then(|gid| group_styles.get(&gid)) {
+                    Some(a) if a.stroke_width.unwrap_or(config.stroke.width) <= 0.0 => None,
+                    Some(a) => match a.stroke.as_deref() {
+                        Some("none") => None,
+                        Some(s) => Some(parse_hex_color(s)),
+                        None => global,
+                    },
+                    None => global,
+                };
+                if let Some(c) = color {
+                    edges(buf, tri, c, true);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn render_grid_png_buf(
@@ -2332,6 +2342,8 @@ fn render_grid_png_buf(
                 }
             }
         }
+        draw_edges(&mut buf, &projected, config, group_styles, None, br, (ox, oy), EdgePass::Strokes);
+        draw_edges(&mut buf, &projected, config, group_styles, None, br, (ox, oy), EdgePass::Wire);
     }
 
     buf
