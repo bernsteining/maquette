@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>maquette — 25s motion piece</title>
+<style>
+@font-face { font-family: "Bricolage"; src: url("node_modules/@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-standard-normal.woff2") format("woff2"); font-weight: 200 800; font-stretch: 75% 100%; }
+@font-face { font-family: "JBM"; src: url("node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; }
+@font-face { font-family: "JBM"; src: url("node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2") format("woff2"); font-weight: 500; }
+@font-face { font-family: "JBM"; src: url("node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2") format("woff2"); font-weight: 700; }
+:root {
+  --ink: #0e0f13; --panel: #16181e; --code: #121319; --line: #262932; --text: #e8e9ec; --soft: #b9bdc7; --muted: #828a99;
+  --teal: #239DAD; --teal-hi: #4fd0e0; --indigo: #818cf8; --indigo-deep: #4f46e5; --paper: #f6f7f9; --yellow: #f9d72c;
+  --s-dir: #c792ea; --s-str: #9ece6a; --s-num: #ff9e64; --s-key: #7aa2f7; --s-kw: #f7768e; --s-punct: #6b7594;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--ink); }
+#stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; font-family: "Bricolage", sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; }
+.scene { position: absolute; inset: 0; display: none; overflow: hidden; }
+.abs { position: absolute; will-change: transform, opacity; }
+.mono { font-family: "JBM", monospace; }
+.grid { position: absolute; inset: -96px; background-image: radial-gradient(circle, #2b2f3a 1.6px, transparent 1.8px); background-size: 48px 48px; }
+.glow { position: absolute; inset: 0; background: radial-gradient(ellipse 60% 55% at 50% 45%, rgba(35,157,173,.20), transparent 70%); }
+.vig { position: absolute; inset: 0; background: radial-gradient(ellipse 90% 80% at 50% 50%, transparent 55%, rgba(0,0,0,.45)); pointer-events: none; }
+
+.word { font-weight: 800; font-stretch: 88%; letter-spacing: -0.008em; line-height: 1; white-space: nowrap; }
+.word .ch { display: inline-block; overflow: hidden; padding: 0.06em 0 0.2em; margin: -0.06em 0 -0.2em; vertical-align: top; }
+.word .ch i { display: inline-block; font-style: normal; }
+.logo svg { width: 100%; height: 100%; display: block; }
+.logo path { stroke-dasharray: 1; }
+
+.editor { background: var(--code); border: 1.5px solid var(--line); border-radius: 20px; box-shadow: 0 40px 90px -30px rgba(0,0,0,.8); overflow: hidden; }
+.editor .bar { height: 58px; display: flex; align-items: center; gap: 10px; padding: 0 24px; border-bottom: 1.5px solid var(--line); background: #171920; }
+.editor .bar b { width: 14px; height: 14px; border-radius: 50%; background: #2f3340; }
+.editor .bar span { margin-left: 14px; font: 500 21px "JBM", monospace; color: var(--muted); }
+.editor .code { padding: 26px 34px; font: 400 25px/41px "JBM", monospace; white-space: pre; color: var(--text); }
+.editor .foot { position: absolute; left: 0; right: 0; bottom: 0; height: 54px; display: flex; align-items: center; justify-content: space-between; padding: 0 26px; border-top: 1.5px solid var(--line); background: #171920; font: 500 20px "JBM", monospace; color: var(--muted); }
+.ln { height: 41px; overflow: hidden; border-radius: 6px; margin: 0 -12px; padding: 0 12px; }
+.t-d { color: var(--s-dir); } .t-s { color: var(--s-str); } .t-n { color: var(--s-num); } .t-k { color: var(--s-key); } .t-w { color: var(--s-kw); } .t-p { color: var(--s-punct); }
+.caret { display: inline-block; width: 13px; height: 29px; background: var(--teal-hi); vertical-align: -5px; margin-left: 1px; }
+.val { border-radius: 7px; padding: 1px 7px; margin: 0 -7px; }
+.val.hot { background: var(--teal); color: #fff; box-shadow: 0 0 0 3px rgba(79,208,224,.35); }
+.ok { color: var(--teal-hi); }
+
+#page { background: #fff; border-radius: 6px; box-shadow: 0 50px 120px -30px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.06); color: #1a1c22; padding: 62px 64px; transform-origin: 50% 40%; }
+#page h4 { font: 700 40px "Latin Modern Roman", serif; margin-bottom: 26px; }
+.sk { height: 13px; border-radius: 7px; background: #dfe1e7; margin-bottom: 15px; }
+#fig { position: relative; width: 632px; height: 566px; margin: 30px 0 18px; border-radius: 5px; background: var(--ink); overflow: hidden; }
+#fig img { position: absolute; left: 36px; top: 3px; width: 560px; height: 560px; }
+#figph { position: absolute; inset: 18px; border: 2px dashed #3a3f4d; border-radius: 4px; display: flex; align-items: center; justify-content: center; font: 500 22px "JBM", monospace; color: #5b6275; }
+#figflash { position: absolute; inset: 0; background: #fff; }
+#page .cap { font: 400 25px "Latin Modern Roman", serif; color: #40434d; text-align: center; margin-bottom: 30px; }
+
+.h { font-weight: 750; font-stretch: 90%; letter-spacing: -0.012em; line-height: 1.02; }
+.chip { display: inline-flex; align-items: center; gap: 11px; padding: 12px 20px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--panel); font: 500 22px "JBM", monospace; color: var(--soft); white-space: nowrap; }
+.chip i { width: 10px; height: 10px; border-radius: 50%; background: var(--teal-hi); }
+.tag { display: inline-block; padding: 9px 20px; border-radius: 10px; font: 700 26px "JBM", monospace; color: var(--teal-hi); background: rgba(35,157,173,.16); border: 1.5px solid rgba(79,208,224,.45); }
+
+#s3label { font-weight: 800; font-stretch: 86%; font-size: 166px; line-height: .94; letter-spacing: 0.004em; white-space: nowrap; }
+#s3code { font: 500 37px "JBM", monospace; padding: 16px 28px; border-radius: 14px; white-space: nowrap; }
+#s3ticks { display: flex; gap: 10px; }
+#s3ticks b { width: 62px; height: 8px; border-radius: 4px; }
+
+.wipe { position: absolute; top: -40px; height: 1160px; left: -400px; width: 2720px; display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <div class="scene" id="s1">
+    <div class="grid" id="g1"></div><div class="glow"></div>
+    <div class="abs" id="s1in" style="inset:0">
+      <div class="abs" style="left:0;right:0;top:318px;display:flex;justify-content:center;align-items:center;gap:60px">
+        <div class="logo" id="logo1" style="width:236px;height:236px"></div>
+        <div class="word" id="word1" style="font-size:236px"></div>
+      </div>
+      <div class="abs h" id="tag1" style="left:0;right:0;top:640px;text-align:center;font-size:64px;font-weight:600">Render 3D models in <span style="color:var(--teal-hi)">Typst</span>.</div>
+      <div class="abs mono" id="sub1" style="left:0;right:0;top:768px;text-align:center;font-size:30px;font-weight:500;color:var(--muted);letter-spacing:.08em">STL · OBJ · PLY · glTF · OpenSCAD</div>
+    </div>
+    <div class="vig"></div>
+  </div>
+
+  <div class="scene" id="s2">
+    <div class="grid" id="g2"></div>
+    <div class="abs h" id="h2a" style="left:120px;top:118px;font-size:84px">3D figures, written<br>in your <span style="color:var(--teal-hi)">.typ</span> file.</div>
+    <div class="abs h" id="h2b" style="left:120px;top:118px;font-size:84px">Change a parameter.</div>
+    <div class="abs h" id="h2c" style="left:120px;top:204px;font-size:84px;color:var(--teal-hi)">It lands in your PDF.</div>
+    <div class="abs editor" id="ed2" style="left:120px;top:356px;width:820px;height:520px">
+      <div class="bar"><b></b><b></b><b></b><span>report.typ</span></div>
+      <div class="code" id="code2"></div>
+      <div class="foot"><span>$ typst watch report.typ</span><span class="ok" id="ok2">✓ report.pdf</span></div>
+    </div>
+    <div class="abs" id="chips2" style="left:120px;top:916px;display:flex;gap:11px">
+      <span class="chip"><i></i>no external tools</span><span class="chip"><i></i>no re-exports</span><span class="chip"><i></i>no asset pipeline</span>
+    </div>
+    <div class="abs" id="page" style="left:1060px;top:64px;width:760px;height:1140px">
+      <h4>3&ensp;Results</h4>
+      <div class="sk" style="width:100%"></div><div class="sk" style="width:94%"></div><div class="sk" style="width:62%"></div>
+      <div id="fig"><div id="figph">#render-obj(…)</div><img id="bunA" alt=""><img id="bunB" alt=""><div id="figflash"></div></div>
+      <div class="cap">Figure 2: <span style="font-family:'JBM',monospace;font-size:21px">bunny.obj</span>, rendered at compile time.</div>
+      <div class="sk" style="width:100%"></div><div class="sk" style="width:97%"></div><div class="sk" style="width:88%"></div><div class="sk" style="width:100%"></div><div class="sk" style="width:40%"></div>
+    </div>
+  </div>
+
+  <div class="scene" id="s3">
+    <div class="abs mono" id="s3idx" style="white-space:pre;left:124px;top:104px;font-size:28px;font-weight:700;letter-spacing:.12em"></div>
+    <div class="abs" id="s3lw" style="left:116px;bottom:372px"><div id="s3label"></div></div>
+    <div class="abs" id="s3cw" style="left:120px;top:760px"><div id="s3code"></div></div>
+    <img class="abs" id="s3img" alt="" style="left:930px;top:60px;width:960px;height:960px">
+    <div class="abs" id="s3ticks" style="left:124px;top:968px"></div>
+  </div>
+
+  <div class="scene" id="s4a">
+    <div class="grid" id="g4"></div>
+    <div class="abs" id="t4a" style="left:120px;top:92px"><span class="tag">maquette-scad</span></div>
+    <div class="abs h" id="h4a" style="left:120px;top:162px;font-size:84px">Parametric CAD,<br><span style="color:var(--yellow)">compiled from source.</span></div>
+    <div class="abs editor" id="ed4" style="left:120px;top:392px;width:820px;height:572px">
+      <div class="bar"><b></b><b></b><b></b><span>logo.scad</span></div>
+      <div class="code" id="code4" style="font-size:22.5px;line-height:38px"></div>
+      <div class="foot"><span>OpenSCAD → mesh</span><span class="ok">in WebAssembly · Manifold CSG</span></div>
+    </div>
+    <img class="abs" id="scadimg" alt="" style="left:980px;top:96px;width:900px;height:900px">
+  </div>
+
+  <div class="scene" id="s4b" style="background:#182028">
+    <img class="abs" id="tokyo" alt="" style="left:0;top:0;width:1920px;height:1080px">
+    <div class="abs" style="inset:0;background:linear-gradient(90deg,rgba(24,32,40,.92) 0%,rgba(24,32,40,.7) 30%,rgba(24,32,40,0) 50%)"></div>
+    <div class="abs" id="t4b" style="left:120px;top:296px"><span class="tag">maquette-gltf</span></div>
+    <div class="abs h" id="h4b" style="left:120px;top:366px;font-size:104px">glTF 2.0,<br>physically<br>based.</div>
+    <div class="abs" id="chips4" style="left:120px;top:738px;width:640px;display:flex;flex-wrap:wrap;gap:12px"></div>
+  </div>
+
+  <div class="scene" id="s5" style="background:var(--paper);color:var(--ink)">
+    <div class="abs h" id="h5a" style="left:120px;top:206px;font-size:176px;font-weight:800;font-stretch:82%">One renderer.</div>
+    <div class="abs h" id="h5b" style="left:120px;top:376px;font-size:176px;font-weight:800;font-stretch:82%;color:var(--teal)">Runs everywhere.</div>
+    <div class="abs" id="chips5" style="left:120px;top:640px;display:flex;gap:24px"></div>
+    <div class="abs mono" id="m5" style="left:124px;top:806px;font-size:33px;font-weight:500;color:#40434d">pure WebAssembly · headless · deterministic · no GPU</div>
+  </div>
+
+  <div class="scene" id="s6">
+    <div class="grid" id="g6"></div><div class="glow"></div>
+    <div class="abs logo" id="bigtorus" style="left:360px;top:-60px;width:1200px;height:1200px"></div>
+    <div class="abs" style="left:0;right:0;top:250px;display:flex;justify-content:center;align-items:center;gap:44px">
+      <div class="logo" id="logo6" style="width:168px;height:168px"></div>
+      <div class="word" id="word6" style="font-size:168px"></div>
+    </div>
+    <div class="abs" id="cta6" style="left:0;right:0;top:520px;display:flex;justify-content:center">
+      <div style="display:flex;align-items:center;gap:26px;padding:26px 46px;border-radius:999px;background:var(--teal);color:#fff;box-shadow:0 30px 80px -20px rgba(35,157,173,.7)">
+        <span class="h" style="font-size:44px;font-weight:800">Try it live</span>
+        <span class="mono" style="font-size:40px;font-weight:700">bernsteining.github.io/maquette</span>
+      </div>
+    </div>
+    <div class="abs mono" id="gh6" style="left:0;right:0;top:690px;text-align:center;font-size:36px;font-weight:500;color:var(--soft)">github.com/bernsteining/maquette</div>
+    <div class="abs mono" id="lic6" style="left:0;right:0;top:796px;text-align:center;font-size:26px;font-weight:500;color:var(--muted);letter-spacing:.08em">MIT license · on Typst Universe</div>
+    <div class="vig"></div>
+  </div>
+
+  <div class="wipe" id="wA"></div><div class="wipe" id="wB"></div>
+</div>
+
+<script type="module">
+import * as S from "./shared.js";
+const { T, prog, lerp, clamp, easeOutCubic, easeOutExpo, easeInOut, easeOutBack, pad } = S;
+const $ = (id) => document.getElementById(id);
+const tf = (el, { x = 0, y = 0, s = 1, r = 0, o = 1 } = {}) => { el.style.transform = `translate(${x}px,${y}px) scale(${s}) rotate(${r}deg)`; el.style.opacity = o; };
+const rise = (el, t, t0, d = 0.55, dist = 46) => { const p = easeOutExpo(prog(t, t0, t0 + d)); tf(el, { y: (1 - p) * dist, o: prog(t, t0, t0 + 0.14) }); };
+
+let pending = []; window.__errors = [];
+const setImg = (el, src) => {
+  if (el.dataset.src !== src) { el.dataset.src = src; el.src = src; }
+  pending.push(el.decode().catch(() => window.__errors.push(src)));
+};
+
+const logoSvg = await (await fetch("logo.svg")).text();
+for (const id of ["logo1", "logo6", "bigtorus"]) {
+  $(id).innerHTML = logoSvg;
+  $(id).querySelectorAll("path").forEach((p) => p.setAttribute("pathLength", "1"));
+}
+{ const bt = $("bigtorus"); bt.querySelector("rect").remove(); bt.querySelector("g").setAttribute("stroke", "#239DAD"); bt.querySelector("g").setAttribute("stroke-width", "1.1"); }
+for (const id of ["word1", "word6"]) $(id).innerHTML = [..."maquette"].map((c) => `<span class="ch"><i>${c}</i></span>`).join("");
+$("s3ticks").innerHTML = S.CUTS.map(() => "<b></b>").join("");
+$("chips4").innerHTML = ["PBR materials", "image-based lighting", "shadows", "SSAO", "animations", "Draco"].map((c) => `<span class="chip" style="background:rgba(14,15,19,.55);border-color:rgba(255,255,255,.16);color:#e8e9ec">${c}</span>`).join("");
+$("chips5").innerHTML = ["Typst", "CLI", "Python", "JavaScript", "C ABI"].map((c, i) => `<span class="h" style="font-size:60px;font-weight:700;padding:16px 38px;border-radius:999px;border:3.5px solid var(--ink);${i === 0 ? "background:var(--ink);color:var(--paper)" : ""}">${c}</span>`).join("");
+
+const RE = /("[^"]*")|(#[\w-]+|\$\w+)|(\b\d+(?:\.\d+)?\b)|(\b[a-z_]+(?=:))|(\b(?:module|difference|color|rotate|sphere|cylinder|read)\b)|([()\[\]{},;:=])/g;
+function tokens(line) {
+  const out = []; let last = 0, m;
+  RE.lastIndex = 0;
+  while ((m = RE.exec(line))) {
+    if (m.index > last) out.push(["", line.slice(last, m.index)]);
+    out.push([m[1] ? "s" : m[2] ? "d" : m[3] ? "n" : m[4] ? "k" : m[5] ? "w" : "p", m[0]]);
+    last = RE.lastIndex;
+  }
+  if (last < line.length) out.push(["", line.slice(last)]);
+  return out;
+}
+const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+function lineHTML(line, n = Infinity, caret = false) {
+  let left = n, h = "";
+  for (const [c, txt] of tokens(line)) {
+    if (left <= 0) break;
+    const s = txt.slice(0, left); left -= s.length;
+    h += c ? `<span class="t-${c}">${esc(s)}</span>` : esc(s);
+  }
+  return h + (caret ? '<span class="caret"></span>' : "");
+}
+
+function s1(t) {
+  $("g1").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
+  $("s1in").style.transform = `scale(${lerp(1, 1.045, t / T.s2)})`;
+  tf($("logo1"), { s: Math.max(0.001, easeOutBack(prog(t, 0.05, 0.6))), r: lerp(-30, 0, easeOutCubic(prog(t, 0.05, 0.65))), o: prog(t, 0.05, 0.15) });
+  $("logo1").querySelectorAll("path").forEach((p, i) => { p.style.strokeDashoffset = 1 - easeInOut(prog(t, 0.22 + i * 0.013, 0.82 + i * 0.013)); });
+  $("word1").querySelectorAll("i").forEach((el, i) => { el.style.transform = `translateY(${(1 - easeOutExpo(prog(t, 0.38 + i * 0.045, 1.0 + i * 0.045))) * 115}%)`; });
+  rise($("tag1"), t, 1.0); rise($("sub1"), t, 1.5);
+}
+
+const C2 = ['#import "@preview/maquette:0.2.0": render-obj', "", "#render-obj(", '  read("bunny.obj"),', "  up: (0, 1, 0),", "  azimuth: 180,", ")"];
+const C2total = C2.reduce((a, l) => a + l.length + 1, 0);
+function s2(t) {
+  const { S2 } = S, f = Math.round(t * S.FPS);
+  $("g2").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
+  { const pin = easeOutExpo(prog(t, T.s2 - 0.08, T.s2 + 0.55)), pout = easeInOut(prog(t, S2.scrub0 - 0.2, S2.scrub0 + 0.04));
+    tf($("h2a"), { y: (1 - pin) * 50 - pout * 46, o: prog(t, T.s2 - 0.08, T.s2 + 0.06) * (1 - pout) }); }
+  rise($("h2b"), t, S2.scrub0); rise($("h2c"), t, S2.scrub0 + 0.16);
+  { const p = easeOutExpo(prog(t, T.s2 - 0.04, T.s2 + 0.65)); tf($("ed2"), { y: (1 - p) * 90, o: prog(t, T.s2 - 0.04, T.s2 + 0.1) }); }
+  { const p = easeOutExpo(prog(t, T.s2, T.s2 + 0.85)); tf($("page"), { x: (1 - p) * 260, y: (1 - p) * 120 - (t - T.s2) * 4, r: lerp(7, 1.6, p), o: prog(t, T.s2, T.s2 + 0.14) }); }
+  let n = Math.floor(C2total * prog(t, S2.type0, S2.type1));
+  const typing = t >= S2.type0 - 0.2 && t < S2.compile;
+  const ps = easeOutCubic(prog(t, S2.sss - 0.14, S2.sss + 0.14)), flash = (1 - prog(t, S2.sss + 0.15, S2.sss + 1.0)) * (t > S2.sss - 0.14 ? 1 : 0);
+  const hot = t > S2.scrub0 - 0.12 && t < S2.scrub1 + 0.1;
+  let h = "";
+  C2.forEach((line, i) => {
+    if (i === 6) {
+      for (const extra of ["  lights: (backlight,),", "  sss: (intensity: 4, power: 3.5),"])
+        h += `<div class="ln" style="height:${41 * ps}px;opacity:${ps};background:rgba(79,208,224,${0.2 * flash})">${lineHTML(extra)}</div>`;
+    }
+    const show = Math.min(n, line.length), isLast = n <= line.length;
+    let inner;
+    if (i === 5 && t >= S2.type1) inner = `  <span class="t-k">azimuth</span><span class="t-p">:</span> <span class="val t-n${hot ? " hot" : ""}">${Math.round(S.azS2(t))}</span><span class="t-p">,</span>`;
+    else inner = n > 0 || i === 0 ? lineHTML(line, show, typing && isLast && n >= 0) : "";
+    h += `<div class="ln">${inner}</div>`;
+    n -= line.length + 1; if (isLast) n = -1e9;
+  });
+  $("code2").innerHTML = h;
+  const pulse = hot || (t > S2.sss - 0.1 && t < S2.sss + 0.5) ? 1 : lerp(1, 0.55, prog(t, S2.compile + 0.1, S2.compile + 0.6));
+  $("ok2").style.opacity = t < S2.compile ? 0 : pulse;
+  const shown = t >= S2.compile;
+  $("figph").style.opacity = shown ? 0 : 1;
+  $("figflash").style.opacity = shown ? 0.85 * (1 - prog(t, S2.compile, S2.compile + 0.35)) : 0;
+  const pop = lerp(0.9, 1, easeOutBack(prog(t, S2.compile, S2.compile + 0.45)));
+  const x = prog(t, S2.sss, S2.sss + S2.sssFade), A = $("bunA"), B = $("bunB");
+  A.style.display = shown && x < 1 ? "" : "none"; B.style.display = shown && x > 0 ? "" : "none";
+  if (shown && x < 1) { setImg(A, S.frameFile("plain", f)); A.style.transform = `scale(${pop})`; A.style.opacity = 1; }
+  if (shown && x > 0) { setImg(B, S.frameFile("sss", f)); B.style.opacity = x; }
+  [...$("chips2").children].forEach((c, i) => rise(c, t, S2.chips + i * 0.14, 0.5, 30));
+}
+
+function s3(t) {
+  const { i, u } = S.cutAt(t), c = S.CUTS[i], f = Math.round(t * S.FPS);
+  const light = c.fg !== "#f6f7f9" && c.fg !== "#ffffff";
+  $("s3").style.background = c.bg; $("s3").style.color = c.fg;
+  $("s3idx").textContent = `${String(i + 1).padStart(2, "0")} / ${String(S.CUTS.length).padStart(2, "0")}  ·  ONE CONFIG KEY AWAY`;
+  $("s3idx").style.opacity = 0.62;
+  $("s3label").innerHTML = c.label.replace("\n", "<br>");
+  $("s3code").innerHTML = lineHTML(c.code).replace(/class="t-\w"/g, "");
+  $("s3code").style.background = light ? "rgba(14,15,19,.92)" : "rgba(255,255,255,.14)";
+  $("s3code").style.color = light ? "#f6f7f9" : c.fg;
+  const p = easeOutExpo(prog(u, 0, 0.45));
+  tf($("s3lw"), { x: (1 - p) * -70, o: prog(u, 0, 0.07) });
+  const p2 = easeOutExpo(prog(u, 0.08, 0.52));
+  tf($("s3cw"), { x: (1 - p2) * -60, o: prog(u, 0.07, 0.15) });
+  setImg($("s3img"), S.frameFile("feat", f));
+  tf($("s3img"), { s: lerp(1.12, 1, easeOutExpo(prog(u, 0, 0.4))) });
+  [...$("s3ticks").children].forEach((b, k) => { b.style.background = c.fg; b.style.opacity = k === i ? 1 : k < i ? 0.5 : 0.18; });
+}
+
+function s4a(t) {
+  const a = T.s4a, f = Math.round(t * S.FPS), hole = S.scadHole(t);
+  $("g4").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
+  rise($("t4a"), t, a + 0.02, 0.4, 30); rise($("h4a"), t, a + 0.06, 0.5, 40);
+  { const p = easeOutExpo(prog(t, a + 0.08, a + 0.6)); tf($("ed4"), { y: (1 - p) * 70, o: prog(t, a + 0.08, a + 0.2) }); }
+  const hot = Math.abs(hole - 25) > 0.05 || (t > a + 0.5 && t < a + 2.3);
+  const lines = S.scadSrc("@@").trimEnd().split("\n");
+  $("code4").innerHTML = lines.map((l, i) => {
+    const o = prog(t, a + 0.12 + i * 0.025, a + 0.24 + i * 0.025);
+    const inner = l.includes("@@") ? `hole <span class="t-p">=</span> <span class="val t-n${hot ? " hot" : ""}">${hole.toFixed(0)}</span><span class="t-p">;</span>` : lineHTML(l);
+    return `<div class="ln" style="height:38px;opacity:${o}">${inner}</div>`;
+  }).join("");
+  setImg($("scadimg"), S.frameFile("scad", f));
+  tf($("scadimg"), { s: lerp(0.86, 1, easeOutExpo(prog(t, a, a + 0.5))), o: prog(t, a, a + 0.12) });
+}
+
+function s4b(t) {
+  const a = T.s4b, f = Math.max(Math.ceil(a * S.FPS), Math.round(t * S.FPS));
+  setImg($("tokyo"), S.frameFile("tokyo", f));
+  $("tokyo").style.transform = `scale(${lerp(1.07, 1.0, easeOutCubic(prog(t, a, T.s5)))})`;
+  rise($("t4b"), t, a + 0.2, 0.45, 30); rise($("h4b"), t, a + 0.26, 0.55, 46);
+  [...$("chips4").children].forEach((c, i) => rise(c, t, a + 0.62 + i * 0.07, 0.45, 26));
+}
+
+function s5(t) {
+  const a = T.s5;
+  rise($("h5a"), t, a - 0.05, 0.5, 70); rise($("h5b"), t, a + 0.06, 0.5, 70);
+  [...$("chips5").children].forEach((c, i) => { const p = easeOutBack(prog(t, a + 0.5 + i * 0.125, a + 0.85 + i * 0.125)); tf(c, { s: Math.max(0.001, p), o: prog(t, a + 0.5 + i * 0.125, a + 0.58 + i * 0.125) }); });
+  rise($("m5"), t, a + 1.25, 0.45, 26);
+}
+
+function s6(t) {
+  const a = T.s6;
+  $("g6").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
+  tf($("bigtorus"), { r: (t - a) * 7, s: lerp(0.94, 1.03, prog(t, a, T.end)), o: 0.17 * prog(t, a, a + 0.6) });
+  $("bigtorus").querySelectorAll("path").forEach((p, i) => { p.style.strokeDashoffset = 1 - easeInOut(prog(t, a - 0.1 + i * 0.01, a + 0.7 + i * 0.01)); });
+  tf($("logo6"), { s: Math.max(0.001, easeOutBack(prog(t, a - 0.05, a + 0.42))), r: lerp(-30, 0, easeOutCubic(prog(t, a - 0.05, a + 0.45))), o: prog(t, a - 0.05, a + 0.05) });
+  $("logo6").querySelectorAll("path").forEach((p) => { p.style.strokeDashoffset = 0; });
+  $("word6").querySelectorAll("i").forEach((el, i) => { el.style.transform = `translateY(${(1 - easeOutExpo(prog(t, a + 0.02 + i * 0.03, a + 0.55 + i * 0.03))) * 115}%)`; });
+  { const p = easeOutBack(prog(t, a + 0.5, a + 0.95)), hit = Math.exp(-Math.max(0, t - (a + 2)) * 7) * (t >= a + 2 ? 0.05 : 0);
+    tf($("cta6"), { s: lerp(0.8, 1, p) + hit, o: prog(t, a + 0.5, a + 0.62) }); }
+  rise($("gh6"), t, a + 1.0, 0.5, 30); rise($("lic6"), t, a + 1.25, 0.5, 26);
+}
+
+const WIPES = [
+  { tc: T.s2, c: ["#239DAD", "#0e0f13"] },
+  { tc: T.s4b, c: ["#4fd0e0", "#182028"] },
+  { tc: T.s5, c: ["#239DAD", "#f6f7f9"] },
+  { tc: T.s6, c: ["#4f46e5", "#0e0f13"] },
+];
+function wipes(t) {
+  const h = 0.3, lag = 0.07, els = [$("wA"), $("wB")];
+  const w = WIPES.find((w) => t > w.tc - h && t < w.tc + h + lag);
+  els.forEach((el, k) => {
+    if (!w) { el.style.display = "none"; return; }
+    const p = easeInOut(prog(t, w.tc - h + k * lag, w.tc + h + k * lag));
+    el.style.display = "block"; el.style.background = w.c[k];
+    el.style.transform = `translateX(${lerp(-2760, 2760, p)}px) skewX(-14deg)`;
+  });
+}
+
+const SCENES = [["s1", 0, T.s2, s1], ["s2", T.s2, T.s3, s2], ["s3", T.s3, T.s4a, s3], ["s4a", T.s4a, T.s4b, s4a], ["s4b", T.s4b, T.s5, s4b], ["s5", T.s5, T.s6, s5], ["s6", T.s6, 1e9, s6]];
+window.seek = async (f) => {
+  const t = f / S.FPS; pending = [];
+  for (const [id, a, b, fn] of SCENES) {
+    const on = t >= a - 1e-9 && t < b - 1e-9;
+    $(id).style.display = on ? "block" : "none";
+    if (on) fn(t);
+  }
+  wipes(t);
+  await Promise.all(pending);
+  return window.__errors.length;
+};
+await document.fonts.ready;
+await Promise.all(["800 100px Bricolage", "500 20px JBM", "400 20px JBM", "700 20px JBM"].map((f) => document.fonts.load(f)));
+const Q = new URLSearchParams(location.search);
+await window.seek(+Q.get("f") || 0);
+window.ready = true;
+
+if (Q.has("play")) {
+  const fit = () => { const k = Math.min(innerWidth / S.W, innerHeight / S.H); Object.assign(document.documentElement.style, { width: "100vw", height: "100vh" }); Object.assign(document.body.style, { transformOrigin: "0 0", transform: `scale(${k})` }); };
+  fit(); addEventListener("resize", fit);
+  const audio = new Audio("music.wav"); let run = 0;
+  addEventListener("click", () => {
+    const id = ++run; audio.currentTime = 0; audio.play();
+    const loop = () => { if (id !== run) return; const f = Math.min(S.DUR * S.FPS - 1, Math.floor(audio.currentTime * S.FPS)); window.seek(f); if (!audio.ended) requestAnimationFrame(loop); };
+    loop();
+  });
+}
+</script>
+</body>
+</html>
