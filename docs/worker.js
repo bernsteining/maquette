@@ -149,7 +149,7 @@ function makePlugin(url) {
     try { cfg = JSON.parse(DEC.decode(args[0])); } catch { return null; }
     if (!cfg || cfg.band) return null;
     const w = Math.max(1, cfg.width | 0), h = Math.max(1, cfg.height | 0);
-    const aa = Math.min(4, Math.max(1, (cfg.antialias | 0) || 1));
+    const aa = [1, 1, 2, 4, 2, 4][cfg.antialias ?? 4] || 1;
     if (w * h * aa * aa < BAND_MIN_SAMPLES) return null;
     const deferred = !!cfg.ssao;
     const nb = Math.min(h, pool.length + 1);

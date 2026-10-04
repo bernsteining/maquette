@@ -701,6 +701,8 @@ pub struct RenderConfig {
     pub color: String,
     pub stroke: StrokeConfig,
     pub light_dir: [f64; 3],
+    /// False when `light_dir` is the default, which then follows the camera.
+    pub light_dir_explicit: bool,
     pub ambient: AmbientConfig,
     pub background: String,
     pub mode: String,
@@ -792,6 +794,7 @@ impl Default for RenderConfig {
             color: "#4488cc".into(),
             stroke: StrokeConfig::default(),
             light_dir: [1.0, 2.0, 3.0],
+            light_dir_explicit: false,
             ambient: AmbientConfig { intensity: 0.15, ..AmbientConfig::default() },
             background: "#f0f0f0".into(),
             mode: "solid".into(),
@@ -818,7 +821,7 @@ impl Default for RenderConfig {
             decimate: 0.0,
             debug: false,
             debug_color: "#cc2222".into(),
-            antialias: 1,
+            antialias: 4,
             azimuth: 0.0,
             elevation: 0.0,
             distance: None,
@@ -986,9 +989,10 @@ fn parse_light_def(p: &mut JsonParser) -> Result<LightDef, String> {
                 "type" => {
                     let s = p.parse_str()?;
                     light.kind = match s {
-                        "positional" | "point" => LightKind::Positional,
+                        "directional" => LightKind::Directional,
+                        "positional" => LightKind::Positional,
                         "area" => LightKind::Area,
-                        _ => LightKind::Directional,
+                        _ => return Err(format!("unknown light type \"{s}\" (expected \"directional\", \"positional\" or \"area\")")),
                     };
                 }
                 "vector" => light.vector = p.parse_f64_3()?,
@@ -1079,6 +1083,7 @@ macro_rules! parse_object_or {
 fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
     let mut cfg = RenderConfig::default();
     let mut smooth_explicit = false;
+    let mut light_dir_explicit = false;
     p.expect(b'{')?;
     p.skip_ws();
     if p.peek() != b'}' {
@@ -1099,7 +1104,7 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                     "color" => color = parse_string,
                     "width" => width = parse_f64,
                 }, |v, p| v.color = p.parse_string()?),
-                "light_dir" => cfg.light_dir = p.parse_f64_3()?,
+                "light_dir" => { cfg.light_dir = p.parse_f64_3()?; light_dir_explicit = true; }
                 "ambient" => cfg.ambient = parse_object_or!(p, AmbientConfig, {
                     "intensity" => intensity = parse_f64,
                     "sky" => sky = parse_string,
@@ -1145,7 +1150,10 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
                 "decimate" => cfg.decimate = p.parse_f64()?,
                 "debug" => cfg.debug = p.parse_bool()?,
                 "debug_color" => cfg.debug_color = p.parse_string()?,
-                "antialias" => cfg.antialias = p.parse_usize()?,
+                "antialias" => {
+                    cfg.antialias = p.parse_usize()?;
+                    maquette_core::effects::antialias_mode(cfg.antialias)?;
+                }
                 "azimuth" => cfg.azimuth = p.parse_f64()?,
                 "elevation" => cfg.elevation = p.parse_f64()?,
                 "distance" => cfg.distance = if p.is_null() { None } else { Some(p.parse_f64()?) },
@@ -1231,6 +1239,7 @@ fn parse_render_config(p: &mut JsonParser) -> Result<RenderConfig, String> {
     if cfg.shading == "flat" && !smooth_explicit {
         cfg.smooth = false;
     }
+    cfg.light_dir_explicit = light_dir_explicit;
     Ok(cfg)
 }
 

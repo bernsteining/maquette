@@ -75,7 +75,7 @@ rotate([0, 90, 0]) rod(hole, len);
   elevation: 24,
   up: (0, 1, 0),
   specular: 0.35,
-  antialias: 4,
+  antialias: 3,
   background: none,
 )
 ```

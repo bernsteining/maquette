@@ -40,7 +40,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
      color: "#ff0000", intensity: 3.0),
   ),
   sss: (intensity: 4, power: 3.5, distortion: 0.2),
-  antialias: 4)
+  antialias: 3)
 ```
 
 </td>

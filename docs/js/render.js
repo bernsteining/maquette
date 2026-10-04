@@ -12,7 +12,7 @@ const REDUCE_MS = 150;
 const SMOOTH_MS = 60;
 const BUSY_DELAY_MS = 150;
 const MAX_SAMPLES = 4096 * 4096;
-const SSAA_OF = { 2: 2, 4: 4, 5: 2, 6: 4 };
+const SSAA_OF = { 2: 2, 3: 4, 4: 2, 5: 4 };
 const RFN_PNG = { obj: "render_obj_png", stl: "render_stl_png", ply: "render_ply_png" };
 const RFN_SVG = { obj: "render_obj", stl: "render_stl", ply: "render_ply" };
 
@@ -76,18 +76,17 @@ function renderConfig() {
   let dw = rw / div, dh = rh / div;
   const lo = Math.min(dw, dh);
   if (lo < DRAG_MIN) { const k = DRAG_MIN / lo; dw *= k; dh *= k; }
-  return { ...cfg, width: Math.round(dw), height: Math.round(dh), antialias: model._gltf ? 1 : 0, fxaa: false };
+  return { ...cfg, width: Math.round(dw), height: Math.round(dh), antialias: 0 };
 }
 
 function capSupersampling(cfg) {
   const a = cfg.antialias | 0;
-  const f = model._gltf ? Math.max(1, a) : (SSAA_OF[a] || 1);
+  const f = SSAA_OF[a] || 1;
   let g = f;
   while (g > 1 && cfg.width * cfg.height * g * g > MAX_SAMPLES) g /= 2;
   if (g === f) return;
-  if (model._gltf) cfg.antialias = g;
-  else if (a === 5 || a === 6) cfg.antialias = g === 2 ? 5 : 1;
-  else cfg.antialias = g;
+  if (g === 1) cfg.antialias = 1;
+  else cfg.antialias = (a === 4 || a === 5 ? 4 : 2) + (g === 4 ? 1 : 0);
 }
 
 function tierFromMs(ms) {
@@ -201,7 +200,7 @@ async function renderGltf() {
   const t0 = performance.now();
   if (cold) {
     try {
-      const preview = { ...cfg, no_textures: true, antialias: 1, fxaa: false, ssao: undefined };
+      const preview = { ...cfg, no_textures: true, antialias: 1, ssao: undefined };
       show(await plugins.gltf.render("render_gltf", ENC.encode(JSON.stringify(preview))));
       await new Promise((r) => requestAnimationFrame(r));
     } catch { }

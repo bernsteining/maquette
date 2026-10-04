@@ -43,7 +43,7 @@ For a split `.gltf` (with external `.bin` / textures), give the path plus a `rea
 #render-gltf(model, read: none, ..config, width: auto, height: auto)
 ```
 
-Renders a glTF/GLB asset to a raster image. `model` is either the **bytes** of a self-contained `.glb` (`read("m.glb", encoding: none)`) or a **path** to a `.gltf`, in which case you must also pass `read: p => read(p, encoding: none)` so the wrapper can read the external `.bin` and image sidecars. Configuration is passed as named arguments (or a single positional dictionary). Recognised keys include `camera`, `lights`, `ibl`, `shadows`, `ssao`, `fxaa`, `tone_mapping`, `background`, `ground`, `variant`, and `time` (for animated models).
+Renders a glTF/GLB asset to a raster image. `model` is either the **bytes** of a self-contained `.glb` (`read("m.glb", encoding: none)`) or a **path** to a `.gltf`, in which case you must also pass `read: p => read(p, encoding: none)` so the wrapper can read the external `.bin` and image sidecars. Configuration is passed as named arguments (or a single positional dictionary). Recognised keys include `camera`, `lights`, `ibl`, `shadows`, `ssao`, `antialias`, `tone_mapping`, `background`, `ground`, `variant`, and `time` (for animated models).
 
 ### `get-gltf-info`
 
@@ -55,4 +55,4 @@ Returns scene metadata (triangle count, bounding box, center, radius, `max_anima
 
 ## Output
 
-Raster **PNG** only: glTF's PBR materials and textures are sampled per pixel. Set `width` / `height` for resolution and `fxaa` for antialiasing.
+Raster **PNG** only: glTF's PBR materials and textures are sampled per pixel. Set `width` / `height` for resolution and `antialias` for antialiasing, with the same levels as `maquette`: `0` off, `1` FXAA, `2`/`3` 2×/4× supersampling, `4` (default) and `5` FXAA on top of 2×/4× supersampling.

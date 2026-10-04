@@ -187,7 +187,7 @@
 ///     reference — see the module header for why.
 /// - ..args (arguments): render config as named parameters. Recognised keys:
 ///     `width`, `height`, `background`, `camera`, `lights`, `ibl`, `shadows`,
-///     `ssao`, `fxaa`, `tone_mapping`, `ground`, `time`, `variant`, …
+///     `ssao`, `antialias`, `tone_mapping`, `ground`, `time`, `variant`, …
 ///     See `crates/maquette-gltf/src/config.rs` for the full list.
 /// -> content
 #let render-gltf(model, read: none, ..args) = {

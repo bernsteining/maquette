@@ -9,6 +9,7 @@ function buildConfig() {
   for (const f of visibleFields()) {
     if (f.k[0] === "_" || !exportable(f)) continue;
     if (!gltf && (f.k === "ambient" || f.k === "background")) continue;
+    if (!gltf && f.k === "light_dir" && eq(state.light_dir, f.def)) continue;
     switch (f.t) {
       case "grp":
         if (f.toggle && !state[f.k].__on) break;

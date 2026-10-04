@@ -191,12 +191,9 @@ pub struct RenderConfig {
     /// SSAO: `false` to disable, `true` for defaults, or object with
     /// `{ samples, radius, bias, strength }` overrides.
     pub ssao: Option<SsaoCfg>,
-    /// Supersample anti-aliasing factor. 1 = off (default), 2 = render at
-    /// 2× each dim and downsample (4 subpixels), 4 = 4× (16 subpixels).
-    /// Combines well with FXAA — SSAA cleans the edges, FXAA smooths what
-    /// remains. Cost scales with factor².
+    /// Supersampling factor per axis (1, 2 or 4), from the `antialias` level.
     pub antialias: usize,
-    /// FXAA edge anti-aliasing on the final RGB buffer.
+    /// FXAA on the final RGB buffer, from the `antialias` level.
     pub fxaa: bool,
     /// Tone-mapping operator: `""` = none, `"reinhard"`, `"aces"`.
     pub tone_mapping: String,
@@ -259,8 +256,8 @@ impl Default for RenderConfig {
             shadows: None,
             ground: None,
             ssao: None,
-            antialias: 1,
-            fxaa: false,
+            antialias: 2,
+            fxaa: true,
             tone_mapping: String::new(),
             exposure: 1.0,
             no_textures: false,
@@ -341,8 +338,7 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
             "shadows"       => cfg.shadows = parse_shadows(v),
             "ground"        => cfg.ground = parse_ground(v),
             "ssao"          => cfg.ssao = parse_ssao(v),
-            "antialias"     => if let Some(n) = as_usize(v) { cfg.antialias = n.clamp(1, 4); }
-            "fxaa"          => if let Some(b) = v.as_bool() { cfg.fxaa = b; }
+            "antialias"     => if let Some(n) = as_usize(v) { (cfg.antialias, cfg.fxaa) = maquette_core::effects::antialias_mode(n)?; }
             "tone_mapping"  => if let Some(s) = v.as_str()  { cfg.tone_mapping = s.to_string(); }
             "exposure"      => if let Some(f) = v.as_f64() { cfg.exposure = f.fmax(0.0); }
             "no_textures"   => if let Some(b) = v.as_bool() { cfg.no_textures = b; }

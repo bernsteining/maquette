@@ -47,13 +47,13 @@
     power: 3.5,
     distortion: 0.2,
   ),
-  antialias: 4,
+  antialias: 3,
   background: none,
 )
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D&antialias=4&background=%22none%22" title="Open in the live demo"><img src="examples/readme/maquette-sss.png?v=3" width="340" alt="Subsurface-scattering Stanford bunny backlit by a red light"></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=bunny.obj&up=%5B0%2C1%2C0%5D&azimuth=180&distance=0.25&lights=%5B%7B%22type%22%3A%22positional%22%2C%22vector%22%3A%5B-0.1%2C0.14%2C-0.04%5D%2C%22color%22%3A%22%23ff0000%22%2C%22intensity%22%3A3%7D%5D&sss=%7B%22intensity%22%3A4%2C%22power%22%3A3.5%2C%22distortion%22%3A0.2%7D&antialias=3&background=%22none%22" title="Open in the live demo"><img src="examples/readme/maquette-sss.png?v=3" width="340" alt="Subsurface-scattering Stanford bunny backlit by a red light"></a></td>
 </tr>
 <tr><th colspan="2" align="left">maquette-scad</th></tr>
 <tr>

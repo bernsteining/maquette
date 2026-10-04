@@ -70,7 +70,7 @@ fn render_gltf_split(gltf_data: &[u8], config_json: &[u8], sidecars_bundle: &[u8
 fn render_impl(gltf_data: &[u8], config_json: &[u8], hdr_data: &[u8], sidecars_bundle: &[u8]) -> Result<Vec<u8>, String> {
     install_panic_hook();
     let mut config = config::parse(config_json)?;
-    maquette_core::effects::check_raster_size(config.width.max(1), config.height.max(1), config.antialias.clamp(1, 4), MAX_RASTER_SAMPLES)?;
+    maquette_core::effects::check_raster_size(config.width.max(1), config.height.max(1), config.antialias, MAX_RASTER_SAMPLES)?;
     if !hdr_data.is_empty() {
         use std::hash::Hasher;
         let mut h = maquette_core::math::FxHasher::default();

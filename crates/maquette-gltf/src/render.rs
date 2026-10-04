@@ -28,7 +28,7 @@ use maquette_core::ssao::{DepthCamera, SSAOParams};
 pub fn render(scene: &Scene, scene_key: u64, config: &RenderConfig) -> Vec<u8> {
     let width = config.width.max(1);
     let height = config.height.max(1);
-    let factor = config.antialias.clamp(1, 4);
+    let factor = config.antialias;
     let (bg, transparent) = resolve_background(&config.background);
 
     let (y0, y1) = match config.band {
@@ -282,7 +282,7 @@ fn rasterize_scene(buffer: &mut PixelBuffer, scene: &Scene, scene_key: u64, conf
         (&[][..], None, 0, maquette_core::shadow::BiasParams { bias: 0.0, normal_bias: 0.0, slope_bias: 0.0 }, 0, 0.0)
     };
 
-    let factor = config.antialias.clamp(1, 4);
+    let factor = config.antialias;
     let make_pbr = |shadows: &'static [Option<maquette_core::shadow::LightShadow>]| PbrContext {
         lod_scale_mul: (factor * factor) as f32,
         light_dir: Vec3::from(config.light_dir).normalized(),

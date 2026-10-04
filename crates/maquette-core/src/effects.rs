@@ -59,6 +59,21 @@ pub struct Glow {
     pub radius: usize,
 }
 
+/// Supersampling factor per axis and FXAA flag for an `antialias` level:
+/// `0` off, `1` FXAA, `2`/`3` 2×/4× supersampling, `4`/`5` FXAA on top of
+/// 2×/4× supersampling.
+pub fn antialias_mode(level: usize) -> Result<(usize, bool), String> {
+    match level {
+        0 => Ok((1, false)),
+        1 => Ok((1, true)),
+        2 => Ok((2, false)),
+        3 => Ok((4, false)),
+        4 => Ok((2, true)),
+        5 => Ok((4, true)),
+        n => Err(format!("antialias must be 0 to 5 (0 off, 1 FXAA, 2 or 3 for 2x or 4x supersampling, 4 or 5 for FXAA plus 2x or 4x supersampling), got {n}")),
+    }
+}
+
 /// Refuse a `width`×`height` output supersampled `factor`× per axis when it
 /// needs more than `max_samples` samples, the most a plugin's buffers fit in
 /// wasm32 memory, with an error the user can act on.

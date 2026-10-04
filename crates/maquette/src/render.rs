@@ -236,6 +236,15 @@ fn shadow_data_for<'a>(
 /// `[(i / 255)^p for i in 0..256]`, memoized per exponent across calls: each
 /// table costs 256 software `powf`, and a document re-renders with the same
 /// shininess / fresnel / SSS exponents over and over.
+fn area_spec_lut(sh: f32, spread: f64) -> [f32; 256] {
+    if spread <= 0.0 { return pow_lut(sh); }
+    let a = (2.0 / (sh as f64 + 2.0)).sqrt();
+    let a2 = (a + spread).fmin(1.0);
+    let sh2 = (2.0 / (a2 * a2) - 2.0) as f32;
+    let k = ((a / a2) * (a / a2)) as f32;
+    pow_lut(sh2).map(|x| x * k)
+}
+
 fn pow_lut(p: f32) -> [f32; 256] {
     static CACHE: Global<KeyedCache<[f32; 256]>> = Global::new(KeyedCache::new(32));
     *CACHE.get().get_or_insert_with(p.to_bits() as u64, || {
@@ -267,6 +276,7 @@ fn project_triangles(
     let is_wireframe = config.mode == "wireframe";
     let is_xray = config.mode == "x-ray";
     let skip_cull = matches!(proj, Projection::Cabinet | Projection::Cavalier | Projection::TinyPlanet);
+    let one_sided = config.cull_backface;
     let do_cull = config.cull_backface && !is_wireframe && !is_xray && !skip_cull && config.explode.abs() < 1e-12;
 
     let face_back: Vec<bool> = if do_cull || is_xray {
@@ -332,16 +342,21 @@ fn project_triangles(
     let cfg_shininess = config.shininess as f32;
     let view_camera = view.camera;
 
-    fn lut_ref<'a>(luts: &'a [(f32, [f32; 256])], sh: f32) -> &'a [f32; 256] {
-        const ZERO: [f32; 256] = [0.0f32; 256];
-        luts.iter().find(|(s, _)| *s == sh).map(|(_, l)| l).unwrap_or(&ZERO)
+    let area_spread: Vec<f64> = lights.iter().map(|l| {
+        if l.kind == LightKind::Area && l.size > 0.0 {
+            l.size / (2.0 * l.vector.sub(view.center).length().fmax(1e-3))
+        } else { 0.0 }
+    }).collect();
+    let zero_luts = vec![[0.0f32; 256]; lights.len()];
+    fn lut_ref<'a>(luts: &'a [(f32, Vec<[f32; 256]>)], zero: &'a [[f32; 256]], sh: f32) -> &'a [[f32; 256]] {
+        luts.iter().find(|(s, _)| *s == sh).map(|(_, l)| &l[..]).unwrap_or(zero)
     }
-    let spec_luts: Vec<(f32, [f32; 256])> = {
-        let mut v: Vec<(f32, [f32; 256])> = Vec::new();
+    let spec_luts: Vec<(f32, Vec<[f32; 256]>)> = {
+        let mut v: Vec<(f32, Vec<[f32; 256]>)> = Vec::new();
         if cfg_specular > 0.0 || group_styles.values().any(|a| a.specular.map_or(false, |s| s > 0.0)) {
             let mut add = |sh: f32| {
                 if !v.iter().any(|(s, _)| *s == sh) {
-                    v.push((sh, pow_lut(sh)));
+                    v.push((sh, area_spread.iter().map(|&spread| area_spec_lut(sh, spread)).collect()));
                 }
             };
             add(cfg_shininess);
@@ -351,17 +366,12 @@ fn project_triangles(
         }
         v
     };
-    let lights_f32: Vec<LightF32> = lights.iter().map(|l| {
-        let spec_scale = if l.kind == LightKind::Area && l.size > 0.0 {
-            let d = l.vector.sub(view.center).length().fmax(1e-3);
-            (1.0 / (1.0 + 4.0 * (l.size / d))) as f32
-        } else { 1.0 };
-        LightF32 {
-            kind: l.kind,
-            dx: l.vector.x as f32, dy: l.vector.y as f32, dz: l.vector.z as f32,
-            cr: l.color.0, cg: l.color.1, cb: l.color.2,
-            scr: l.color.0 * spec_scale, scg: l.color.1 * spec_scale, scb: l.color.2 * spec_scale,
-        }
+    let lights_f32: Vec<LightF32> = lights.iter().map(|l| LightF32 {
+        kind: l.kind,
+        dx: l.vector.x as f32, dy: l.vector.y as f32, dz: l.vector.z as f32,
+        cr: l.color.0, cg: l.color.1, cb: l.color.2,
+        ref_d2: l.ref_d2 as f32,
+        fx: l.facing.x as f32, fy: l.facing.y as f32, fz: l.facing.z as f32,
     }).collect();
 
     #[inline(always)]
@@ -378,7 +388,7 @@ fn project_triangles(
         let can_memoize = !is_wireframe && !is_xray && groups_uniform
             && triangles.iter().all(|t| t.color.is_none() && t.vertex_colors.is_none() && t.tex.is_none());
         if can_memoize {
-            let spec_lut = lut_ref(&spec_luts, cfg_shininess);
+            let spec_lut = lut_ref(&spec_luts, &zero_luts, cfg_shininess);
             let one_minus_ambient = 1.0 - cfg_ambient_intensity;
             let n_unique = sd.normals.len();
 
@@ -451,6 +461,7 @@ fn project_triangles(
                         spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
                         simd_cel_bands,
+                        one_sided,
                         simd_gooch, gooch_warm, gooch_cool,
                         sh4,
                     );
@@ -466,7 +477,7 @@ fn project_triangles(
                         sd.normals[i], sd.positions[i], (blr, blg, blb),
                         &lights_f32, view_camera, amb, one_minus_ambient, cfg_specular,
                         cfg_fresnel, cfg_gamma,
-                        tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
+                        tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands, one_sided,
                         spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
                         shadow_factors.map(|f| (f, n_unique, i)),
@@ -485,7 +496,7 @@ fn project_triangles(
                         sd.normals[i], sd.positions[i], (blr, blg, blb),
                         &lights_f32, view_camera, amb, one_minus_ambient, cfg_specular,
                         cfg_fresnel, cfg_gamma,
-                        tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
+                        tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands, one_sided,
                         spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
                         shadow_factors.map(|f| (f, n_unique, i)),
@@ -558,7 +569,7 @@ fn project_triangles(
             let shininess = ga.and_then(|a| a.shininess).map(|v| v as f32).unwrap_or(cfg_shininess);
             let mut opacity = ga.and_then(|a| a.opacity).unwrap_or(config.opacity);
 
-            let spec_lut = lut_ref(&spec_luts, shininess);
+            let spec_lut = lut_ref(&spec_luts, &zero_luts, shininess);
 
             if is_xray {
                 if is_back_facing {
@@ -615,6 +626,7 @@ fn project_triangles(
                         spec_lut, &fresnel_lut,
                         sss_intensity, sss_dist, &sss_lut,
                         if shading == ShadingMode::Cel { cfg_cel_bands } else { 0 },
+                        one_sided,
                         is_gooch, gooch_warm, gooch_cool,
                         sh4,
                     );
@@ -644,7 +656,7 @@ fn project_triangles(
                             vn[i], tri.vertices[i], base_lin,
                             &lights_f32, view_camera, amb, one_minus_ambient, specular,
                             cfg_fresnel, cfg_gamma,
-                            tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
+                            tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands, one_sided,
                             spec_lut, &fresnel_lut,
                             sss_intensity, sss_dist, &sss_lut,
                             shadow_factors.map(|f| (f, sh_stride, uidx)),
@@ -676,7 +688,7 @@ fn project_triangles(
                     tri.normal, centroid, base_lin,
                     &lights_f32, view_camera, amb, one_minus_ambient, specular,
                     cfg_fresnel, cfg_gamma,
-                    tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands,
+                    tm, cfg_exposure, shading, gooch_warm, gooch_cool, cfg_cel_bands, one_sided,
                     spec_lut, &fresnel_lut,
                     sss_intensity, sss_dist, &sss_lut,
                     flat_shadow,
@@ -1242,7 +1254,7 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Grou
     let is_wireframe = config.mode == "wireframe";
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
-    let lights = resolve_lights(config);
+    let lights = resolve_lights(config, bc);
     let mut shadow_owned = None;
     let shadow_data = shadow_data_for(&mut shadow_owned, prep_key, &tris, &lights, smooth_data, config, group_styles, bc, br, false);
     let mut projected = project_triangles(&tris, smooth_data, config, &view, config.width, config.height, br, false, group_styles, &lights, shadow_data);
@@ -1252,7 +1264,7 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Grou
     radix_sort_by_depth(&mut projected, false);
 
     let shadow_tris = if let Some(shadow) = &config.shadow {
-        let mut s = project_shadow(&tris, config, shadow_light_dir(config), &view, config.width, config.height, br, bmin.z, false, &shadow.color);
+        let mut s = project_shadow(&tris, config, shadow_light_dir(config, bc), &view, config.width, config.height, br, bmin.z, false, &shadow.color);
         radix_sort_by_depth(&mut s, false);
         s
     } else {
@@ -1414,7 +1426,7 @@ fn make_debug_light_tris(
 ) -> Vec<ProjectedTri> {
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
-    let lights = resolve_lights(config);
+    let lights = resolve_lights(config, bc);
     let proj = resolve_projection(&config.projection);
     let proj_setup = setup_projection(proj, config, view, w, h, br);
     let view_mat = Mat4::look_at(view.camera, view.center, view.up);
@@ -1519,7 +1531,7 @@ fn render_debug_light_lines(
 ) {
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
-    let lights = resolve_lights(config);
+    let lights = resolve_lights(config, bc);
     let projector = make_point_projector(config, view, w, h, br);
 
     for light in &lights {
@@ -1744,8 +1756,8 @@ fn render_grid_svg(
     let label_h = if config.grid_labels { 24.0 } else { 0.0 };
     let is_wireframe = config.mode == "wireframe";
 
-    let lights = resolve_lights(config);
     let (gbmin, gbmax) = compute_bbox(triangles);
+    let lights = resolve_lights(config, bbox_center(gbmin, gbmax));
     let shadow_data = build_shadow_data(triangles, &lights, None, config, group_styles, bbox_center(gbmin, gbmax), br, false);
     let estimated = triangles.len() * 200 * views.len() + 512;
     let mut svg = String::with_capacity(estimated);
@@ -1777,7 +1789,7 @@ fn render_grid_svg(
 
         if let Some(shadow_cfg) = &config.shadow {
             if !is_wireframe {
-                let mut shadow = project_shadow(triangles, config, shadow_light_dir(config), view, cell_w, render_h, br, ground_z, true, &shadow_cfg.color);
+                let mut shadow = project_shadow(triangles, config, shadow_light_dir(config, bbox_center(gbmin, gbmax)), view, cell_w, render_h, br, ground_z, true, &shadow_cfg.color);
                 radix_sort_by_depth(&mut shadow, false);
                 svg.push_str("<g opacity=\""); push_f2(&mut svg, shadow_cfg.opacity); svg.push_str("\">");
                 for tri in &shadow {
@@ -1817,16 +1829,6 @@ fn render_grid_svg(
 /// The raw RGBA producer shared by both plain and overlay outputs: downsamples
 /// (opaque SSAA) or composites z-buffer coverage (transparent) into straight
 /// RGBA8 at output resolution. Returns `(width, height, rgba)`.
-pub(crate) fn antialias_mode(antialias: usize) -> (usize, bool) {
-    match antialias {
-        0 => (1, false),
-        1 => (1, true),
-        5 => (2, true),
-        6 => (4, true),
-        n => (n.next_power_of_two(), false),
-    }
-}
-
 /// Raster blob, see [`raw_raster`]: tag `0x00` for a plain image, `0x02` for
 /// an image followed by a transparent SVG overlay (labels, grid lines,
 /// annotations, debug text) that the host layers on top in the raster's pixel
@@ -1903,7 +1905,7 @@ fn triangle_texture_lod(pts: &[(f64, f64); 3], uvs: &[[f32; 2]; 3], tex: &maquet
 }
 
 pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles: &GroupStyles, data_key: Option<u64>, prep_key: Option<u64>, textures: &[maquette_core::texture::Texture]) -> Result<Vec<u8>, String> {
-    let (aa, fxaa) = antialias_mode(config.antialias);
+    let (aa, fxaa) = maquette_core::effects::antialias_mode(config.antialias)?;
     maquette_core::effects::check_raster_size(config.width as usize, config.height as usize, aa, MAX_RASTER_SAMPLES)?;
     let w = config.width as usize * aa;
     let h = config.height as usize * aa;
@@ -1985,7 +1987,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     let is_wireframe = config.mode == "wireframe";
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
-    let lights = resolve_lights(config);
+    let lights = resolve_lights(config, bc);
     let mut shadow_owned = None;
     let shadow_data = shadow_data_for(&mut shadow_owned, prep_key, &tris, &lights, smooth_data, config, group_styles, bc, br, true);
     crate::prof::mark(13);
@@ -2002,7 +2004,7 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     if let Some(shadow_cfg) = &config.shadow {
         if !is_wireframe {
-            let shadow = project_shadow(&tris, config, shadow_light_dir(config), &view, vw, vh, br, bmin.z, false, &shadow_cfg.color);
+            let shadow = project_shadow(&tris, config, shadow_light_dir(config, bc), &view, vw, vh, br, bmin.z, false, &shadow_cfg.color);
             rasterize_shadow_to_buf(&mut buf, &shadow, shadow_cfg);
         }
     }
@@ -2178,8 +2180,8 @@ fn render_grid_png_buf(
     let render_h = cell_h - label_h;
     let is_wireframe = config.mode == "wireframe";
 
-    let lights = resolve_lights(config);
     let (gbmin, gbmax) = compute_bbox(triangles);
+    let lights = resolve_lights(config, bbox_center(gbmin, gbmax));
     let shadow_data = build_shadow_data(triangles, &lights, None, config, group_styles, bbox_center(gbmin, gbmax), br, false);
     let mut buf = PixelBuffer::new(w, h, bg);
 
@@ -2197,7 +2199,7 @@ fn render_grid_png_buf(
         if let Some(shadow_cfg) = &config.shadow {
             if !is_wireframe {
                 let shadow = project_shadow(
-                    triangles, config, shadow_light_dir(config), view, cell_w as f64, render_h as f64, br, ground_z, true, &shadow_cfg.color,
+                    triangles, config, shadow_light_dir(config, bbox_center(gbmin, gbmax)), view, cell_w as f64, render_h as f64, br, ground_z, true, &shadow_cfg.color,
                 );
                 let mut mask = vec![false; w * h];
                 for tri in &shadow {

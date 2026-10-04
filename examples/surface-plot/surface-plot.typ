@@ -70,7 +70,7 @@
   // get popped by the wrapper). SSAA ×4 + a real resolution kill the jaggies.
   let cfg = (
     smooth: true, up: (0, 0, 1), azimuth: 40, elevation: 30, background: none,
-    width: 1000, height: 1000, antialias: 4,
+    width: 1000, height: 1000, antialias: 3,
   ) + args.named()
   render-ply(bytes(ply), cfg)
 }
