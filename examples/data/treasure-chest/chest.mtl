@@ -1,0 +1,3 @@
+newmtl treasure_chest
+Kd 1 1 1
+map_Kd chest_diffuse.jpg

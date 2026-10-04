@@ -1,0 +1,6 @@
+Treasure Chest — from Poly Haven (https://polyhaven.com/a/treasure_chest).
+Author(s): Rico Cilliers. Licensed CC0 (public domain).
+
+chest.obj is the Poly Haven glTF decimated to ~14k triangles in Blender and
+exported to OBJ; chest.mtl binds the 1k diffuse map (chest_diffuse.jpg) via
+map_Kd. Normal/ARM maps were dropped (maquette samples map_Kd only).
