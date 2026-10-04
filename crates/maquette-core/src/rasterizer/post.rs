@@ -603,8 +603,8 @@ impl PixelBuffer {
         self.blur_and_blend(buf, plane, intensity, radius);
     }
 
-    /// Glow: extract all foreground pixels (model silhouette), blur, add back.
-    /// Creates a light-emitting aura around the entire model.
+    /// Glow: blur the model's silhouette in `color` and add it to the pixels
+    /// around the model, leaving the model itself untouched.
     pub fn apply_glow(&mut self, color: (u8, u8, u8), intensity: f32, radius: usize) {
         let (mut buf, plane) = self.rgb_planes();
         let rgb = [color.0 as f32, color.1 as f32, color.2 as f32];
@@ -613,7 +613,42 @@ impl PixelBuffer {
                 for (c, v) in rgb.iter().enumerate() { buf[c * plane + i] = *v; }
             }
         }
-        self.blur_and_blend(buf, plane, intensity, radius);
+        let blurred = Self::dual_kawase_blur(buf, plane, self.width, self.height, radius);
+        let bp = blurred.as_ptr();
+        let iv = f32x4_splat(intensity);
+        let empty = f32x4_splat(f32::NEG_INFINITY);
+        let zbuf = std::mem::take(&mut self.zbuf);
+        let zp = zbuf.as_ptr();
+        self.map_rgb(
+            |i| i32x4_bitmask(f32x4_eq(unsafe { v128_load(zp.add(i) as *const v128) }, empty)) == 0,
+            |i, rgb| {
+                let outside = f32x4_eq(unsafe { v128_load(zp.add(i) as *const v128) }, empty);
+                let mut c = 0;
+                rgb.map(|v| {
+                    let b = unsafe { v128_load(bp.add(c * plane + i) as *const v128) };
+                    c += 1;
+                    f32x4_add(v, v128_and(f32x4_mul(b, iv), outside))
+                })
+            },
+            |i, rgb| {
+                if zbuf[i] != f32::NEG_INFINITY { return rgb; }
+                let mut c = 0;
+                rgb.map(|v| {
+                    let b = blurred[c * plane + i];
+                    c += 1;
+                    v + b * intensity
+                })
+            },
+        );
+        let (ch, peak) = rgb.iter().copied().enumerate().fold((0, 0.0f32), |a, (c, v)| if v > a.1 { (c, v) } else { a });
+        if peak > 0.0 {
+            let scale = intensity * 255.0 / peak;
+            self.halo = zbuf.iter().enumerate()
+                .map(|(i, &z)| if z == f32::NEG_INFINITY { (blurred[ch * plane + i] * scale).fmin(255.0) as u8 } else { 0 })
+                .collect();
+            self.halo_color = color;
+        }
+        self.zbuf = zbuf;
     }
 
     /// Depth cueing: blends each covered pixel toward the fog colour by
@@ -836,6 +871,17 @@ impl PixelBuffer {
         if effects.fxaa { crate::fxaa::apply_fxaa(&mut self.pixels, self.width, self.height); }
     }
 
+    /// Fold the glow halo into a transparent output's coverage `alpha`: pixels
+    /// outside the model take the glow colour at the halo's opacity.
+    pub fn merge_halo(&mut self, alpha: &mut [u8]) {
+        for (i, &h) in self.halo.iter().enumerate() {
+            if h > alpha[i] {
+                self.pixels[i * 3..i * 3 + 3].copy_from_slice(&[self.halo_color.0, self.halo_color.1, self.halo_color.2]);
+                alpha[i] = h;
+            }
+        }
+    }
+
     /// RGBA8 where pixels never touched by the rasterizer (zbuf = −∞) become
     /// fully transparent. Used when the config wants a transparent background.
     pub fn to_rgba8_transparent_by_depth(&self) -> (u32, u32, Vec<u8>) {
@@ -847,6 +893,11 @@ impl PixelBuffer {
                 rgba[i * 4 + 1] = self.pixels[i * 3 + 1];
                 rgba[i * 4 + 2] = self.pixels[i * 3 + 2];
                 rgba[i * 4 + 3] = 255;
+            } else if let Some(&a) = self.halo.get(i).filter(|&&a| a > 0) {
+                rgba[i * 4]     = self.halo_color.0;
+                rgba[i * 4 + 1] = self.halo_color.1;
+                rgba[i * 4 + 2] = self.halo_color.2;
+                rgba[i * 4 + 3] = a;
             }
         }
         (self.width as u32, self.height as u32, rgba)

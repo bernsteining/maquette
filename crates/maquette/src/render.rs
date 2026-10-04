@@ -2230,8 +2230,11 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     let effects = post_effects(config, &view, vw, vh, br, bg, aa, fxaa && !transparent, is_wireframe);
     crate::prof::mark(18);
-    let (mut out, alpha) = buf.resolve(aa, transparent, effects.needs_depth());
+    let (mut out, mut alpha) = buf.resolve(aa, transparent, effects.needs_depth());
     out.apply_post(&effects);
+    if let Some(a) = alpha.as_mut() {
+        out.merge_halo(a);
+    }
     crate::prof::mark(19);
 
     let overlay = if let Some(ref ann_cfg) = config.annotations {

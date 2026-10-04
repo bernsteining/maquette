@@ -89,6 +89,10 @@ pub struct PixelBuffer {
     pub pixels: Vec<u8>,
     /// f32 depth, width*height. Initialized to −∞ (nothing rendered yet).
     pub zbuf: Vec<f32>,
+    /// Glow halo opacity per pixel outside the model (empty without glow), so a
+    /// transparent output can keep the halo; drawn in `halo_color`.
+    pub halo: Vec<u8>,
+    pub halo_color: (u8, u8, u8),
     /// WBOIT accumulator: 4 channels (rgb·a·w, a·w) per pixel, f32. Empty
     /// until the first WBOIT write; lazy-init keeps opaque-only renders free.
     pub oit_accum: Vec<f32>,
