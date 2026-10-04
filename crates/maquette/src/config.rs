@@ -627,6 +627,8 @@ pub struct GroupAppearance {
     pub stroke_width: Option<f64>,
     pub opacity: Option<f64>,
     pub name: Option<String>,
+    /// Text shown by annotations instead of the group name.
+    pub label: Option<String>,
 }
 
 /// A highlight value: either a plain hex color string or a full appearance override.
@@ -941,7 +943,7 @@ fn parse_group_appearance(p: &mut JsonParser) -> Result<GroupAppearance, String>
                 "stroke" => ga.stroke = Some(p.parse_string()?),
                 "stroke_width" => ga.stroke_width = Some(p.parse_f64()?),
                 "opacity" => ga.opacity = Some(p.parse_f64()?),
-                "name" => ga.name = Some(p.parse_string()?),
+                "label" => ga.label = Some(p.parse_string()?),
                 _ => { p.skip_value()?; }
             }
             if p.eat_comma_or(b'}') { break; }

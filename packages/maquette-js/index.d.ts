@@ -3,6 +3,8 @@ export interface Raster {
   height: number;
   /** Row-major RGBA8 pixels (width * height * 4 bytes). */
   pixels: Uint8Array;
+  /** Transparent SVG in the raster's pixel space (annotations, grid labels, debug text), to layer on top. */
+  overlay?: string;
 }
 
 export type Config = Record<string, unknown> | string | null;

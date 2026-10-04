@@ -95,3 +95,10 @@ pub(crate) fn push_tri_points(s: &mut String, pts: &[(f64, f64); 3]) {
     }
     unsafe { s.push_str(std::str::from_utf8_unchecked(&buf[..p])); }
 }
+
+pub(crate) fn escape_xml(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains(['&', '<', '>', '"']) {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    std::borrow::Cow::Owned(s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;"))
+}

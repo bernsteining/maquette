@@ -75,14 +75,17 @@ function makePlugin(bytesPromise) {
 }
 
 // Decode the renderer's raster framebuffer:
-// [0x00|0x02][w u32 LE][h u32 LE][rgba8 …] → { width, height, pixels }.
+// [0x00|0x02][w u32 LE][h u32 LE][rgba8 …][svg overlay, 0x02 only] → { width, height, pixels, overlay? }.
 export function decodeRaster(bytes) {
   const marker = bytes[0];
   if (marker !== 0x00 && marker !== 0x02) throw new Error("not a raster result");
   const dv = new DataView(bytes.buffer, bytes.byteOffset);
   const width = dv.getUint32(1, true);
   const height = dv.getUint32(5, true);
-  return { width, height, pixels: bytes.subarray(9, 9 + width * height * 4) };
+  const end = 9 + width * height * 4;
+  const raster = { width, height, pixels: bytes.subarray(9, end) };
+  if (marker === 0x02) raster.overlay = DEC.decode(bytes.subarray(end));
+  return raster;
 }
 
 // Browser helper: raster → ImageData (draw with ctx.putImageData).

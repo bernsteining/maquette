@@ -6,7 +6,7 @@ use crate::svg::{push_f1, push_f2};
 pub struct Annotation<'a> {
     pub anchor: (f64, f64),
     pub label_pos: (f64, f64),
-    pub name: &'a str,
+    pub label: &'a str,
     /// The label text runs rightwards from `label_pos` (else leftwards).
     pub rightwards: bool,
 }
@@ -28,10 +28,9 @@ pub fn compute_annotations<'a>(
     let mut anns: Vec<Annotation> = Vec::new();
 
     for (&gid, &(cx, cy)) in centroids {
-        let name = match group_styles.get(&gid).and_then(|ga| ga.name.as_deref()) {
-            Some(n) => n,
-            None => continue,
-        };
+        let Some(ga) = group_styles.get(&gid) else { continue };
+        let Some(name) = ga.name.as_deref() else { continue };
+        let label = ga.label.as_deref().unwrap_or(name);
 
         if !filter.is_empty() && !filter.iter().any(|f| f == name) {
             continue;
@@ -50,7 +49,7 @@ pub fn compute_annotations<'a>(
         anns.push(Annotation {
             anchor: (cx, cy),
             label_pos: (lx, ly),
-            name,
+            label,
             rightwards: lx >= cx,
         });
     }
@@ -68,7 +67,7 @@ pub fn compute_annotations<'a>(
 
     let margin = ann.font_size;
     for a in &mut anns {
-        let tw = text_width(a.name, ann.font_size);
+        let tw = text_width(a.label, ann.font_size);
         let (lo, hi) = if a.rightwards { (margin, w - margin - tw) } else { (margin + tw, w - margin) };
         a.label_pos.0 = if lo <= hi { a.label_pos.0.clamp(lo, hi) } else { a.label_pos.0.clamp(margin, w - margin) };
         a.label_pos.1 = a.label_pos.1.clamp(margin + ann.font_size, h - margin);
@@ -108,7 +107,7 @@ pub fn write_annotations_svg(
         push_f2(svg, font_size);
         svg.push_str("\" fill=\""); svg.push_str(color);
         svg.push_str("\" text-anchor=\""); svg.push_str(anchor);
-        svg.push_str("\">"); svg.push_str(a.name);
+        svg.push_str("\">"); svg.push_str(&crate::svg::escape_xml(a.label));
         svg.push_str("</text>");
     }
 }
