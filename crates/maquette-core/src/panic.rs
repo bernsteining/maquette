@@ -39,6 +39,7 @@ pub fn last_panic() -> String {
 #[macro_export]
 macro_rules! panic_export {
     () => {
+        #[cfg(target_arch = "wasm32")]
         #[wasm_minimal_protocol::wasm_func]
         fn get_last_panic() -> Vec<u8> {
             $crate::panic::install_hook();
