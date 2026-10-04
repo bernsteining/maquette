@@ -1312,7 +1312,7 @@ usemtl face6
 
 An OBJ references image textures through a material library: the `.obj` names a `.mtl` with `mtllib`, and the `.mtl` points at a diffuse map with `map_Kd`. You never list these files yourself: give `render-obj` the *path* to the `.obj` plus a `read:` lambda and it *auto-discovers* the chain: it follows `mtllib` to the `.mtl`, then each `map_Kd` to its image, and reads every file for you. 
 
-Supported textures formats are *PNG, JPEG and TGA*.
+Supported texture formats are *PNG, JPEG, TGA and BMP*.
 
 ```example
 // cols: 1.05 1

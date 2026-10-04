@@ -59,7 +59,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 <sub><b>Multi-view grid</b> — front / right / top / isometric on one sheet</sub>
 </td>
 <td align="center" width="50%">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_groups.png?v=2" width="100%" alt="Per-group appearance" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_groups.png?v=3" width="100%" alt="Per-group appearance" /><br/>
 <sub><b>Per-group appearance</b> — per-part colour, stroke &amp; opacity from OBJ groups</sub>
 </td>
 </tr>
