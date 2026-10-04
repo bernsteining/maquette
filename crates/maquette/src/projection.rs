@@ -11,7 +11,7 @@ pub(crate) struct ViewParams {
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Projection {
-    Ortho, Cabinet, Cavalier, Fisheye, Stereographic, Curvilinear,
+    Ortho, Cabinet, Cavalier, Military, Fisheye, Stereographic, Curvilinear,
     Cylindrical, Pannini, TinyPlanet, Perspective,
 }
 
@@ -20,6 +20,12 @@ pub(crate) fn resolve_config_view(config: &RenderConfig, bc: Vec3, br: f64) -> V
     let center = maquette_core::math::orbit_pivot(config.auto_center, config.center, bc);
 
     let up = Vec3::from(config.up);
+
+    if config.projection == "military" {
+        let dist = config.camera.map(|c| Vec3::from(c).sub(center).length()).filter(|&d| d >= 1e-6)
+            .or(config.distance.filter(|&d| d > 0.0)).unwrap_or(br * 3.0);
+        return military_view(center, up, dist);
+    }
 
     let camera = if let Some(cam) = config.camera {
         let raw_camera = Vec3::from(cam);
@@ -35,9 +41,21 @@ pub(crate) fn resolve_config_view(config: &RenderConfig, bc: Vec3, br: f64) -> V
     ViewParams { camera, center, up }
 }
 
+fn military_view(center: Vec3, up: Vec3, dist: f64) -> ViewParams {
+    let up = up.normalized();
+    let arbitrary = if up.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+    let right = up.cross(arbitrary).normalized();
+    let forward = right.cross(up).normalized();
+    let toward_viewer = right.add(forward).normalized();
+    ViewParams { camera: center.add(up.scale(dist)), center, up: toward_viewer.scale(-1.0) }
+}
+
 pub(crate) fn named_view(name: &str, bc: Vec3, br: f64) -> ViewParams {
     let dist = br * 3.0;
     let z_up = Vec3::new(0.0, 0.0, 1.0);
+    if name == "military" {
+        return military_view(bc, z_up, dist);
+    }
     let front = Vec3::new(bc.x, bc.y - dist, bc.z);
 
     if let Some(cam) = axonometric_camera(bc, dist, name) {
@@ -71,8 +89,6 @@ fn axonometric_camera(center: Vec3, dist: f64, projection: &str) -> Option<Vec3>
             (1.0_f64 / 8.0_f64.sqrt()).asin(), std::f64::consts::FRAC_PI_4)),
         "trimetric" => Some(spherical_camera(center, dist,
             25.0_f64.to_radians(), 30.0_f64.to_radians())),
-        "military" => Some(spherical_camera(center, dist,
-            2.0_f64.sqrt().atan(), std::f64::consts::FRAC_PI_4)),
         _ => None,
     }
 }
@@ -92,7 +108,8 @@ fn ortho_scale(config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f
 #[inline]
 pub(crate) fn resolve_projection(s: &str) -> Projection {
     match s {
-        "orthographic" | "isometric" | "dimetric" | "trimetric" | "military" => Projection::Ortho,
+        "orthographic" | "isometric" | "dimetric" | "trimetric" => Projection::Ortho,
+        "military" => Projection::Military,
         "cabinet" => Projection::Cabinet,
         "cavalier" => Projection::Cavalier,
         "fisheye" => Projection::Fisheye,
@@ -113,7 +130,7 @@ pub(crate) enum ProjectionSetup {
     Cabinet { s: f64, hw: f64, hh: f64, fc: f64, fs: f64, cd: f64 },
     Fisheye { f: f64, hw: f64, hh: f64 },
     Stereographic { f: f64, hw: f64, hh: f64 },
-    Curvilinear { d: f64, k: f64, aspect: f64, hw: f64, hh: f64 },
+    Curvilinear { s: f64, k: f64, r0: f64, hw: f64, hh: f64 },
     Cylindrical { f: f64, hw: f64, hh: f64 },
     Pannini { f: f64, hw: f64, hh: f64 },
     TinyPlanet { f: f64, hw: f64, hh: f64 },
@@ -129,7 +146,7 @@ impl ProjectionSetup {
             Cabinet { s, hw, hh, fc, fs, cd } => Cabinet { s, hw: hw + dx, hh: hh + dy, fc, fs, cd },
             Fisheye { f, hw, hh } => Fisheye { f, hw: hw + dx, hh: hh + dy },
             Stereographic { f, hw, hh } => Stereographic { f, hw: hw + dx, hh: hh + dy },
-            Curvilinear { d, k, aspect, hw, hh } => Curvilinear { d, k, aspect, hw: hw + dx, hh: hh + dy },
+            Curvilinear { s, k, r0, hw, hh } => Curvilinear { s, k, r0, hw: hw + dx, hh: hh + dy },
             Cylindrical { f, hw, hh } => Cylindrical { f, hw: hw + dx, hh: hh + dy },
             Pannini { f, hw, hh } => Pannini { f, hw: hw + dx, hh: hh + dy },
             TinyPlanet { f, hw, hh } => TinyPlanet { f, hw: hw + dx, hh: hh + dy },
@@ -147,7 +164,7 @@ impl ProjectionSetup {
             Cabinet { s, hw, hh, fc, fs, cd } => Cabinet { s: s * z, hw, hh, fc, fs, cd },
             Fisheye { f, hw, hh } => Fisheye { f: f * z, hw, hh },
             Stereographic { f, hw, hh } => Stereographic { f: f * z, hw, hh },
-            Curvilinear { d, k, aspect, hw, hh } => Curvilinear { d: d * z, k, aspect, hw, hh },
+            Curvilinear { s, k, r0, hw, hh } => Curvilinear { s: s * z, k, r0, hw, hh },
             Cylindrical { f, hw, hh } => Cylindrical { f: f * z, hw, hh },
             Pannini { f, hw, hh } => Pannini { f: f * z, hw, hh },
             TinyPlanet { f, hw, hh } => TinyPlanet { f: f * z, hw, hh },
@@ -204,6 +221,12 @@ fn setup_projection_inner(proj: Projection, config: &RenderConfig, view: &ViewPa
             let cd = (view.camera - view.center).length();
             ProjectionSetup::Cabinet { s, hw, hh, fc, fs, cd }
         }
+        Projection::Military => {
+            let s = ortho_scale(config, view, vw, vh, br);
+            let s = if config.auto_fit { s * std::f64::consts::FRAC_1_SQRT_2 } else { s };
+            let cd = (view.camera - view.center).length();
+            ProjectionSetup::Cabinet { s, hw, hh, fc: 0.0, fs: -1.0, cd }
+        }
         Projection::Fisheye => {
             ProjectionSetup::Fisheye { f: focal_equidistant(config, view, hw, hh, br), hw, hh }
         }
@@ -212,16 +235,15 @@ fn setup_projection_inner(proj: Projection, config: &RenderConfig, view: &ViewPa
         }
         Projection::Curvilinear => {
             let fov_rad = config.fov.to_radians();
-            let k = 0.3_f64;
             let d = if config.auto_fit {
                 let dist = (view.camera - view.center).length();
                 let required = (br / dist).atan();
                 let current = fov_rad / 2.0;
-                1.0 / required.fmax(current).tan() / (1.0 + k)
+                1.0 / required.fmax(current).tan()
             } else {
                 1.0 / (fov_rad / 2.0).tan()
             };
-            ProjectionSetup::Curvilinear { d, k, aspect: vw / vh, hw, hh }
+            ProjectionSetup::Curvilinear { s: d * hh, k: 0.3, r0: hh, hw, hh }
         }
         Projection::Cylindrical => {
             ProjectionSetup::Cylindrical { f: focal_equidistant(config, view, hw, hh, br), hw, hh }
@@ -283,7 +305,7 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
             for (i, v) in cam.iter().enumerate() {
                 let xy = (v.x * v.x + v.y * v.y).sqrt();
                 if xy < 1e-10 { pts[i] = (hw, hh); continue; }
-                let r = xy.atan2((-v.z).fmax(1e-6)) * f;
+                let r = xy.atan2(-v.z) * f;
                 pts[i] = (hw + r * (v.x / xy), hh - r * (v.y / xy));
             }
             pts
@@ -293,19 +315,19 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
             for (i, v) in cam.iter().enumerate() {
                 let xy = (v.x * v.x + v.y * v.y).sqrt();
                 if xy < 1e-10 { pts[i] = (hw, hh); continue; }
-                let r = 2.0 * f * (xy.atan2((-v.z).fmax(1e-6)) / 2.0).tan();
+                let r = 2.0 * f * (xy.atan2(-v.z).fmin(std::f64::consts::PI * 0.995) / 2.0).tan();
                 pts[i] = (hw + r * (v.x / xy), hh - r * (v.y / xy));
             }
             pts
         }
-        ProjectionSetup::Curvilinear { d, k, aspect, hw, hh } => {
+        ProjectionSetup::Curvilinear { s, k, r0, hw, hh } => {
             let mut pts = [(0.0, 0.0); 3];
             for (i, v) in cam.iter().enumerate() {
                 let z = (-v.z).fmax(0.001);
-                let px = (v.x * d) / (z * aspect);
-                let py = (v.y * d) / z;
-                let f = 1.0 + k * (px * px + py * py);
-                pts[i] = (hw + px * f * hw, hh - py * f * hh);
+                let px = v.x * s / z;
+                let py = v.y * s / z;
+                let g = ((1.0 + k) / (1.0 + k * (px * px + py * py) / (r0 * r0))).sqrt();
+                pts[i] = (hw + px * g, hh - py * g);
             }
             pts
         }
@@ -314,7 +336,7 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
             for (i, v) in cam.iter().enumerate() {
                 let horiz = (v.x * v.x + v.z * v.z).sqrt();
                 if horiz < 1e-10 { pts[i] = (hw, hh); continue; }
-                pts[i] = (hw + v.x.atan2((-v.z).fmax(1e-6)) * f, hh - (v.y / horiz) * f);
+                pts[i] = (hw + v.x.atan2(-v.z) * f, hh - (v.y / horiz) * f);
             }
             pts
         }
@@ -351,6 +373,14 @@ pub(crate) fn apply_projection(setup: &ProjectionSetup, cam: &[Vec3; 3]) -> [(f6
 /// Pinhole approximation of the render's projection, for post passes that
 /// reconstruct scene positions from depth. Non-pinhole projections use their
 /// on-axis focal length.
+pub(crate) fn seam_limit(setup: &ProjectionSetup) -> Option<f64> {
+    use ProjectionSetup::*;
+    match *setup {
+        Fisheye { f, .. } | Stereographic { f, .. } | Cylindrical { f, .. } | Pannini { f, .. } | TinyPlanet { f, .. } => Some(f),
+        _ => None,
+    }
+}
+
 pub(crate) fn depth_camera(config: &RenderConfig, view: &ViewParams, vw: f64, vh: f64, br: f64) -> maquette_core::ssao::DepthCamera {
     use maquette_core::ssao::DepthCamera;
     use ProjectionSetup::*;
@@ -358,7 +388,7 @@ pub(crate) fn depth_camera(config: &RenderConfig, view: &ViewParams, vw: f64, vh
     match setup_projection(resolve_projection(&config.projection), config, view, vw, vh, br) {
         Ortho { s, hw, hh } | Cabinet { s, hw, hh, .. } => DepthCamera::Ortho { sx: s as f32, sy: s as f32, cx: hw as f32, cy: hh as f32 },
         Perspective { sx, sy, hw, hh } => persp(sx, sy, hw, hh),
-        Curvilinear { d, aspect, hw, hh, .. } => persp(d * hw / aspect, d * hh, hw, hh),
+        Curvilinear { s, k, hw, hh, .. } => { let f = s * (1.0 + k).sqrt(); persp(f, f, hw, hh) }
         Fisheye { f, hw, hh } | Stereographic { f, hw, hh } | Cylindrical { f, hw, hh } | Pannini { f, hw, hh } | TinyPlanet { f, hw, hh } => persp(f, f, hw, hh),
     }
 }

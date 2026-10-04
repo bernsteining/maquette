@@ -31,7 +31,7 @@ pub(crate) struct LightF32 {
 }
 
 
-pub(crate) fn resolve_lights(config: &RenderConfig, bc: Vec3) -> Vec<ResolvedLight> {
+pub(crate) fn resolve_lights(config: &RenderConfig, bc: Vec3, br: f64) -> Vec<ResolvedLight> {
     if config.lights.is_empty() {
         vec![ResolvedLight {
             kind: LightKind::Directional,
@@ -56,7 +56,7 @@ pub(crate) fn resolve_lights(config: &RenderConfig, bc: Vec3) -> Vec<ResolvedLig
                 color: (l.color.0 * intensity, l.color.1 * intensity, l.color.2 * intensity),
                 cast_shadow: l.cast_shadow,
                 size: l.size,
-                ref_d2: if l.kind == LightKind::Directional { 0.0 } else { let d = Vec3::from(l.vector).sub(bc); d.dot(d).fmax(1e-12) },
+                ref_d2: if l.kind == LightKind::Directional { 0.0 } else { let d = Vec3::from(l.vector).sub(bc); d.dot(d).fmax(br * br).fmax(1e-12) },
                 facing: if l.kind == LightKind::Area { bc.sub(Vec3::from(l.vector)).normalized() } else { Vec3::new(0.0, 0.0, 0.0) },
             }
         }).collect()

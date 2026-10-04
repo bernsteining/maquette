@@ -272,10 +272,11 @@ fn project_triangles(
     let proj_setup = setup_projection(proj, config, view, vw, vh, br);
     let view_mat = Mat4::look_at(view.camera, view.center, view.up);
     let view_simd = ViewMatSimd::from_mat4(&view_mat);
+    let seam_sq = seam_limit(&proj_setup).map(|l| l * l);
     let (base_r, base_g, base_b) = parse_hex_color(&config.color);
     let is_wireframe = config.mode == "wireframe";
     let is_xray = config.mode == "x-ray";
-    let skip_cull = matches!(proj, Projection::Cabinet | Projection::Cavalier | Projection::TinyPlanet);
+    let skip_cull = matches!(proj, Projection::Cabinet | Projection::Cavalier | Projection::Military | Projection::TinyPlanet);
     let one_sided = config.cull_backface;
     let do_cull = config.cull_backface && !is_wireframe && !is_xray && !skip_cull && config.explode.abs() < 1e-12;
 
@@ -698,6 +699,12 @@ fn project_triangles(
         };
 
         let pts = apply_projection(&proj_setup, &cam);
+        if let Some(limit) = seam_sq {
+            let len_sq = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0) * (a.0 - b.0) + (a.1 - b.1) * (a.1 - b.1);
+            if len_sq(pts[0], pts[1]) > limit || len_sq(pts[1], pts[2]) > limit || len_sq(pts[2], pts[0]) > limit {
+                continue;
+            }
+        }
         let depths = [cam[0].z, cam[1].z, cam[2].z];
         let depth = (depths[0] + depths[1] + depths[2]) / 3.0;
         projected.push(ProjectedTri { pts, depths, depth, r, g, b, vertex_colors, group_id: tri.group_id, opacity, src: ti as u32, splat: tri.splat });
@@ -902,7 +909,23 @@ fn push_hatch_defs(svg: &mut String, hc: &crate::config::HatchConfig) {
     svg.push_str("</pattern></defs>");
 }
 
-fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Option<(&str, f64)>, group_styles: &GroupStyles, hatch: bool) {
+fn push_edge_path(svg: &mut String, pts: &[(f64, f64); 3], mask: u8, color: &str, width: f64) {
+    if mask == 0 { return; }
+    svg.push_str("<path d=\"");
+    for e in 0..3 {
+        if (mask >> e) & 1 == 0 { continue; }
+        let (a, b) = (pts[e], pts[(e + 1) % 3]);
+        svg.push('M'); push_f2(svg, a.0); svg.push(' '); push_f2(svg, a.1);
+        svg.push('L'); push_f2(svg, b.0); svg.push(' '); push_f2(svg, b.1);
+    }
+    svg.push_str("\" fill=\"none\" stroke=\"");
+    svg.push_str(color);
+    svg.push_str("\" stroke-width=\"");
+    push_f2(svg, width);
+    svg.push_str("\" stroke-linecap=\"round\"/>");
+}
+
+fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Option<(&str, f64)>, group_styles: &GroupStyles, hatch: bool, mask: u8) {
     svg.push_str("<polygon points=\"");
     push_tri_points(svg, &tri.pts);
     svg.push_str("\" fill=\"");
@@ -925,6 +948,23 @@ fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Opti
     let has_group_stroke = ga.map_or(false, |a| {
         a.stroke.as_deref().map_or(false, |s| s != "none") && a.stroke_width.unwrap_or(1.0) > 0.0
     });
+    if mask != crate::tessellate::ALL_EDGES && (has_group_stroke || global_stroke.is_some()) {
+        let (stroke, width) = if has_group_stroke {
+            let a = unsafe { ga.unwrap_unchecked() };
+            (unsafe { a.stroke.as_deref().unwrap_unchecked() }, a.stroke_width.unwrap_or(1.0))
+        } else {
+            unsafe { global_stroke.unwrap_unchecked() }
+        };
+        if tri.opacity < 1.0 {
+            svg.push_str(" stroke=\"none\"/>");
+        } else {
+            svg.push_str(" stroke=\"");
+            push_hex_color(svg, tri.r, tri.g, tri.b);
+            svg.push_str("\" stroke-width=\"0.5\" stroke-linejoin=\"round\"/>");
+        }
+        push_edge_path(svg, &tri.pts, mask, stroke, width);
+        return;
+    }
     if has_group_stroke {
         let a = unsafe { ga.unwrap_unchecked() };
         svg.push_str(" stroke=\"");
@@ -953,7 +993,11 @@ fn write_solid_polygon(svg: &mut String, tri: &ProjectedTri, global_stroke: Opti
     }
 }
 
-fn write_wireframe_polygon(svg: &mut String, tri: &ProjectedTri, color: &str, width: f64) {
+fn write_wireframe_polygon(svg: &mut String, tri: &ProjectedTri, color: &str, width: f64, mask: u8) {
+    if mask != crate::tessellate::ALL_EDGES {
+        push_edge_path(svg, &tri.pts, mask, color, width);
+        return;
+    }
     svg.push_str("<polygon points=\"");
     push_tri_points(svg, &tri.pts);
     svg.push_str("\" fill=\"none\" stroke=\"");
@@ -1182,6 +1226,25 @@ fn cached_preprocess<'a>(
 }
 
 
+fn tessellate_for_view(tris: &[Triangle], config: &RenderConfig, view: &ViewParams, br: f64) -> Option<crate::tessellate::Tessellated> {
+    let proj = resolve_projection(&config.projection);
+    let clipped = if matches!(proj, Projection::Perspective | Projection::Curvilinear) {
+        let forward = view.center.sub(view.camera).normalized();
+        crate::tessellate::clip_near(tris, view.camera, forward, br * 1e-3)
+    } else {
+        None
+    };
+    if !matches!(proj, Projection::Fisheye | Projection::Stereographic | Projection::Curvilinear
+        | Projection::Cylindrical | Projection::Pannini | Projection::TinyPlanet) {
+        return clipped;
+    }
+    let (base, masks) = match &clipped {
+        Some(c) => (&c.tris[..], Some(&c.edge_masks[..])),
+        None => (tris, None),
+    };
+    crate::tessellate::subdivide_angular(base, masks, view.camera, 3.0f64.to_radians()).or(clipped)
+}
+
 fn make_point_projector(
     config: &RenderConfig,
     view: &ViewParams,
@@ -1231,6 +1294,13 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Grou
         }
     }
 
+    let view = resolve_config_view(config, bc, br);
+    let tess = tessellate_for_view(tris, config, &view, br);
+    let (tris, edge_masks, data_key, prep_key) = match &tess {
+        Some(t) => (&t.tris[..], Some(&t.edge_masks[..]), None, None),
+        None => (tris, None, data_key, prep_key),
+    };
+
     let needs_smooth = config.smooth
         && config.mode != "wireframe"
         && config.shading != "cel"
@@ -1250,11 +1320,10 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Grou
         None
     };
 
-    let view = resolve_config_view(config, bc, br);
     let is_wireframe = config.mode == "wireframe";
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
-    let lights = resolve_lights(config, bc);
+    let lights = resolve_lights(config, bc, br);
     let mut shadow_owned = None;
     let shadow_data = shadow_data_for(&mut shadow_owned, prep_key, &tris, &lights, smooth_data, config, group_styles, bc, br, false);
     let mut projected = project_triangles(&tris, smooth_data, config, &view, config.width, config.height, br, false, group_styles, &lights, shadow_data);
@@ -1282,7 +1351,7 @@ pub fn render(triangles: &[Triangle], config: &RenderConfig, group_styles: &Grou
     build_single_svg_full(
         &projected, &shadow_tris, &outline_edges, config,
         config.width, config.height, is_wireframe, is_solid_wireframe,
-        &view, &tris, bmin, bmax, group_styles,
+        &view, &tris, bmin, bmax, group_styles, edge_masks,
     )
 }
 
@@ -1302,7 +1371,9 @@ fn build_single_svg_full(
     bmin: Vec3,
     bmax: Vec3,
     group_styles: &GroupStyles,
+    edge_masks: Option<&[u8]>,
 ) -> String {
+    let mask_of = |t: &ProjectedTri| edge_masks.and_then(|m| m.get(t.src as usize)).copied().unwrap_or(crate::tessellate::ALL_EDGES);
     let estimated = tris.len() * 200 + shadow_tris.len() * 120 + outline_edges.len() * 80 + 512;
     let mut svg = String::with_capacity(estimated);
     svg.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ");
@@ -1331,14 +1402,14 @@ fn build_single_svg_full(
         let wire_color = resolve_wireframe_color(config, false);
         let wire_width = config.wireframe.width;
         for tri in tris {
-            write_wireframe_polygon(&mut svg, tri, wire_color, wire_width);
+            write_wireframe_polygon(&mut svg, tri, wire_color, wire_width, mask_of(tri));
         }
     } else {
         let global_stroke = if config.stroke.color != "none" && config.stroke.width > 0.0 {
             Some((config.stroke.color.as_str(), config.stroke.width))
         } else { None };
         for tri in tris {
-            write_solid_polygon(&mut svg, tri, global_stroke, group_styles, hatch.is_some());
+            write_solid_polygon(&mut svg, tri, global_stroke, group_styles, hatch.is_some(), mask_of(tri));
         }
     }
 
@@ -1346,7 +1417,7 @@ fn build_single_svg_full(
         let wire_color = resolve_wireframe_color(config, true);
         let wire_width = config.wireframe.width;
         for tri in tris {
-            write_wireframe_polygon(&mut svg, tri, wire_color, wire_width);
+            write_wireframe_polygon(&mut svg, tri, wire_color, wire_width, mask_of(tri));
         }
     }
 
@@ -1426,7 +1497,7 @@ fn make_debug_light_tris(
 ) -> Vec<ProjectedTri> {
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
-    let lights = resolve_lights(config, bc);
+    let lights = resolve_lights(config, bc, br);
     let proj = resolve_projection(&config.projection);
     let proj_setup = setup_projection(proj, config, view, w, h, br);
     let view_mat = Mat4::look_at(view.camera, view.center, view.up);
@@ -1531,7 +1602,7 @@ fn render_debug_light_lines(
 ) {
     let bc = bbox_center(bmin, bmax);
     let br = bbox_radius(bmin, bmax);
-    let lights = resolve_lights(config, bc);
+    let lights = resolve_lights(config, bc, br);
     let projector = make_point_projector(config, view, w, h, br);
 
     for light in &lights {
@@ -1757,7 +1828,7 @@ fn render_grid_svg(
     let is_wireframe = config.mode == "wireframe";
 
     let (gbmin, gbmax) = compute_bbox(triangles);
-    let lights = resolve_lights(config, bbox_center(gbmin, gbmax));
+    let lights = resolve_lights(config, bbox_center(gbmin, gbmax), br);
     let shadow_data = build_shadow_data(triangles, &lights, None, config, group_styles, bbox_center(gbmin, gbmax), br, false);
     let estimated = triangles.len() * 200 * views.len() + 512;
     let mut svg = String::with_capacity(estimated);
@@ -1803,14 +1874,14 @@ fn render_grid_svg(
             let wire_color = resolve_wireframe_color(config, false);
             let wire_width = config.wireframe.width;
             for tri in &projected {
-                write_wireframe_polygon(&mut svg, tri, wire_color, wire_width);
+                write_wireframe_polygon(&mut svg, tri, wire_color, wire_width, crate::tessellate::ALL_EDGES);
             }
         } else {
             let global_stroke = if config.stroke.color != "none" && config.stroke.width > 0.0 {
                 Some((config.stroke.color.as_str(), config.stroke.width))
             } else { None };
             for tri in &projected {
-                write_solid_polygon(&mut svg, tri, global_stroke, group_styles, hatch.is_some());
+                write_solid_polygon(&mut svg, tri, global_stroke, group_styles, hatch.is_some(), crate::tessellate::ALL_EDGES);
             }
         }
 
@@ -1963,6 +2034,13 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
         }
     }
 
+    let view = resolve_config_view(config, bc, br);
+    let tess = tessellate_for_view(tris, config, &view, br);
+    let (tris, edge_masks, data_key, prep_key) = match &tess {
+        Some(t) => (&t.tris[..], Some(&t.edge_masks[..]), None, None),
+        None => (tris, None, data_key, prep_key),
+    };
+
     let needs_smooth = config.smooth
         && config.mode != "wireframe"
         && config.shading != "cel"
@@ -1983,11 +2061,10 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     };
 
     crate::prof::mark(12);
-    let view = resolve_config_view(config, bc, br);
     let is_wireframe = config.mode == "wireframe";
     let is_solid_wireframe = config.mode == "solid+wireframe";
 
-    let lights = resolve_lights(config, bc);
+    let lights = resolve_lights(config, bc, br);
     let mut shadow_owned = None;
     let shadow_data = shadow_data_for(&mut shadow_owned, prep_key, &tris, &lights, smooth_data, config, group_styles, bc, br, true);
     crate::prof::mark(13);
@@ -2129,7 +2206,17 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
     if is_solid_wireframe || is_wireframe {
         let (wr, wg, wb) = parse_hex_color(resolve_wireframe_color(config, is_solid_wireframe));
         for tri in &projected {
-            buf.draw_triangle_edges(&tri.pts, wr, wg, wb);
+            match edge_masks.and_then(|m| m.get(tri.src as usize)).copied() {
+                Some(mask) if mask != crate::tessellate::ALL_EDGES => {
+                    for e in 0..3 {
+                        if (mask >> e) & 1 == 1 {
+                            let ((x0, y0), (x1, y1)) = (tri.pts[e], tri.pts[(e + 1) % 3]);
+                            buf.draw_line(x0, y0, x1, y1, wr, wg, wb);
+                        }
+                    }
+                }
+                _ => buf.draw_triangle_edges(&tri.pts, wr, wg, wb),
+            }
         }
     }
 
@@ -2181,7 +2268,7 @@ fn render_grid_png_buf(
     let is_wireframe = config.mode == "wireframe";
 
     let (gbmin, gbmax) = compute_bbox(triangles);
-    let lights = resolve_lights(config, bbox_center(gbmin, gbmax));
+    let lights = resolve_lights(config, bbox_center(gbmin, gbmax), br);
     let shadow_data = build_shadow_data(triangles, &lights, None, config, group_styles, bbox_center(gbmin, gbmax), br, false);
     let mut buf = PixelBuffer::new(w, h, bg);
 

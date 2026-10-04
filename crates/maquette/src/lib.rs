@@ -24,6 +24,7 @@ mod shading;
 mod shadow;
 mod smooth;
 mod svg;
+mod tessellate;
 
 use maquette_core::color;
 use maquette_core::math::FxHasher;
