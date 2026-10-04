@@ -268,7 +268,7 @@ for w in WIPES:
     sig, start = whoosh(w, 0.45)
     fx.add(sig, start, 0.22, pan=-0.3)
     fx.add(crash(1.6), w, 0.3)
-    if w != COMPILE:
+    if w == GLTF:
         drums.add(K, w, 0.85)
         drums.add(CL, w, 0.3)
 
@@ -356,21 +356,25 @@ fx.add(bell(88, 1.4), EVERY + 1.25, 0.18)
 
 
 fx.add(boom(), OUTRO, 0.45)
-pad(F, OUTRO, 2.0, 1800, 0.45, attack=0.4)
+beat(OUTRO, FINAL)
+offbeat_bass(OUTRO, FINAL, lambda t: F if t < OUTRO + 1.0 else G)
+pad(F, OUTRO, 1.0, 2200, 0.45, attack=0.2)
+pad(G, OUTRO + 1.0, 1.0, 2600, 0.45, attack=0.2)
 for i, m in enumerate(reversed(BELLS)):
     fx.add(bell(m, 0.8), OUTRO + 0.02 + i * 0.03, 0.14, pan=0.5 - i / 7)
-drums.add(K, OUTRO + 0.5, 0.8)
-kicks.append(OUTRO + 0.5)
 fx.add(bell(81, 1.2), OUTRO + 0.5, 0.3)
+fx.add(bell(76, 1.0), OUTRO + 1.0, 0.2)
+fx.add(bell(79, 1.0), OUTRO + 1.25, 0.18)
 drums.add(CL, OUTRO + 0.5, 0.45)
 for m in G:
     fx.add(pluck(m + 12, 0.5, 4200), OUTRO + 0.5, 0.24)
 fx.add(crash(1.4), OUTRO + 0.5, 0.14)
-arpeggio(G, OUTRO + 0.5, FINAL - 0.05, 0.22, cutoff=lambda t: 600 + 2600 * prog(t, OUTRO + 0.5, FINAL) ** 2)
+arpeggio(F, OUTRO, OUTRO + 1.0, 0.24, cutoff=lambda t: 900 + 2300 * prog(t, OUTRO, FINAL) ** 2)
+arpeggio(G, OUTRO + 1.0, FINAL, 0.26, cutoff=lambda t: 900 + 2300 * prog(t, OUTRO, FINAL) ** 2)
 fx.add(riser(1.4), FINAL - 1.4, 0.24)
 for k, ts in enumerate(np.arange(FINAL - BEAT, FINAL - 1e-6, STEP / 2)):
     drums.add(CL, ts, 0.06 + 0.03 * k)
-drums.add(K, FINAL, 0.95)
+drums.add(K, FINAL, 1.0)
 kicks.append(FINAL)
 fx.add(boom(2.5), FINAL, 0.6)
 fx.add(crash(2.5), FINAL, 0.32)
@@ -398,7 +402,7 @@ wet = np.stack([sg.fftconvolve(send.b[:, ch], ir[:, ch])[:N] for ch in range(2)]
 
 mix = drums.b + (low.b + pads.b + arp.b + echo) * pump[:, None] + wet + fx.b
 gap = np.ones(N)
-for g in (COMPILE, EVERY, FINAL):
+for g in (COMPILE, EVERY):
     a0, a1 = int((g - 0.1) * SR), int(g * SR)
     gap[a0:a1] = 0.0
     gap[a0 - 300 : a0] = np.linspace(1, 0, 300)

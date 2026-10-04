@@ -21,7 +21,7 @@ export function azS2(t) {
 
 export const CUTS = [
   { id: "lights", label: "Multiple\nlights", code: "lights: (red, cyan, gold)", bg: "#0e0f13", fg: "#f6f7f9" },
-  { id: "glow", label: "Glow", code: 'glow: (color: "#22d3ee")', bg: "#4338ca", fg: "#ffffff" },
+  { id: "decimate", label: "Decimation", code: "decimate: 0.85", bg: "#4338ca", fg: "#ffffff" },
   { id: "xray", label: "X-ray", code: 'mode: "x-ray"', bg: "#0e0f13", fg: "#f6f7f9" },
   { id: "ann", label: "Annotations", code: "annotations: true", bg: "#f6f7f9", fg: "#0e0f13" },
   { id: "clip", label: "Section\ncuts", code: "clip: (plane: (2, -1, 0, 1))", bg: "#239DAD", fg: "#0b1418" },
