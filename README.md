@@ -9,6 +9,8 @@
 
 **maquette is a set of Typst plugins for embedding 3D renders directly in your documents.** Change a parameter, recompile the `.typ`, and the render lands in your PDF, no external tools, no manual re-exports, no separate asset pipeline.
 
+https://github.com/user-attachments/assets/05467b0a-0a60-4e09-9583-cfc89ad29e9c
+
 **[Try it live →](https://bernsteining.github.io/maquette/)** a browser demo runs the exact same WebAssembly the plugins ship. Drag to orbit, tweak every setting, copy the generated Typst source. The demo runs the wasm through a browser JIT rather than Typst's interpreter, so it iterates ~10× faster than a document rebuild.
 
 ## The plugins

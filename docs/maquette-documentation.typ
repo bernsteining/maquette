@@ -474,10 +474,12 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     == #link("https://en.wikipedia.org/wiki/Perspective_(graphical)")[Perspective] (default)
     Objects farther from the camera appear smaller, giving a natural sense of depth.
     ```example
-    // hl: 3-4
+    // hl: 3-5
     #render-stl(cube,
       camera: (3, 2, 2),
-      stroke: (color: "#111111", width: 1.0),
+      stroke: 
+        (color: "#111111",
+         width: 1.0),
     )
     ```
   ],
@@ -545,7 +547,7 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
   ],
   [
     == #link("https://en.wikipedia.org/wiki/Military_projection")[Military]
-    Top-down axonometric where the plan view dominates. Elevation ~54.7°, azimuth 45°.
+    Oblique projection: the plan keeps its true shape, rotated 45°, and heights are drawn straight up at full scale.
     ```example
     // hl: 6
     #render-stl(cube,
@@ -598,7 +600,7 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     #render-obj(teapot,
       up: (0, 1, 0),
       elevation: 25,
-      distance: 2.5,
+      distance: 2,
       projection: "fisheye",
     )
     ```
@@ -611,7 +613,7 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     #render-obj(teapot,
       up: (0, 1, 0),
       elevation: 25,
-      distance: 2.5,
+      distance: 2,
       projection: "stereographic",
     )
     ```
@@ -713,10 +715,7 @@ The `ambient` parameter (0--1) controls how much light reaches surfaces regardle
 
 The `ambient` parameter accepts either a number or an object with `intensity`, `sky`, and `ground` fields. Hemisphere ambient lights surfaces facing up with the sky color and surfaces facing down with the ground color, blending the two on slopes. It imitates light bounced from the surroundings at no extra cost.
 
-Defaults:
-```typst
-ambient: (intensity: 0.15, sky: "#ccd4e0", ground: "#d4ccc4")
-```
+The default is ```typc ambient: (intensity: 0.15, sky: "#ccd4e0", ground: "#d4ccc4")```.
 
 #grid(columns: (1fr, 1fr), gutter: 1em,
   align(center)[
@@ -729,19 +728,20 @@ ambient: (intensity: 0.15, sky: "#ccd4e0", ground: "#d4ccc4")
       distance: 0.25,
       specular: 0.3,
       ambient: (intensity: 0.4, sky: "#8899cc", ground: "#443322"),
-      width: 90%,
+      width: 100%,
     )```
   ],
   align(center)[
-    *Flat ambient (default)*
+    *Flat ambient*
     ```examplev
+    // hl: 6
     #render-obj(bunny,
       up: (0, 1, 0),
       azimuth: 180,
       distance: 0.25,
       specular: 0.3,
-      ambient: 0.3,
-      width: 90%,
+      ambient: (intensity: 0.4, sky: "#ffffff", ground: "#ffffff"),
+      width: 100%,
     )```
   ],
 )
@@ -876,7 +876,7 @@ Fresnel rim lighting brightens edges where the surface curves away from the came
 By default, a single white directional light shines from `light_dir`. The `lights` array replaces it with any number of lights. Each light has a `type` (default `directional`), a `vector`, a `color`, an `intensity` and a `cast_shadow` flag. The type decides what `vector` means:
 
 - *`directional`*: parallel rays, like sunlight. `vector` points toward the light.
-- *`positional`*: a point light at position `vector`. Its brightness falls off with the square of the distance; `intensity` is the brightness at the model's center, so the same value works in any units.
+- *`positional`*: a point light at position `vector`. Its brightness falls off with the square of the distance; `intensity` is the brightness at the model's center (or at the edge of its bounding sphere, for a light inside it), so the same value works in any units.
 - *`area`*: a disk light at position `vector` with radius `size`, which softens its highlight and shadow, see #link(<area-lights>)[Area Lights]. It falls off with distance like a positional light, but shines only from the face turned toward the model's center: it weakens at grazing angles and lights nothing behind it.
 
 Surfaces facing away from a light receive none of its direct light, only ambient. With `cull_backface: false`, which renders the inside of open meshes, surfaces are lit from both sides instead.
@@ -1356,6 +1356,7 @@ Groups not listed keep their default appearance.
     \"stroke\": \"#000000\",     // Triangle edge stroke color
     \"stroke_width\": 1.0,     // Triangle edge stroke width
     \"opacity\": 0.5,          // Transparency 0-1 (0=invisible, 1=opaque)
+    \"label\": \"Piston A\",     // Annotation text (default: the group name)
     )
 )"))
 ], [We can list the groups as follows:
@@ -1425,7 +1426,7 @@ Instead of a plain color, pass a dictionary with specific appearance overrides t
 
 Annotate OBJ groups by drawing a leader line from each group's centroid to a text label.
 
-Pass `annotations: true` to label all groups with default styling, or pass an object to customize. The `groups` field filters to specific groups; `color`, `font_size`, and `offset` control appearance.
+Pass `annotations: true` to label all groups with default styling, or pass an object to customize. The `groups` field filters to specific groups; `color`, `font_size`, and `offset` control appearance. A group's `label` in `highlight` replaces its name in the annotation text, while `groups` still matches the group name.
 
 ```example
 // hl: 7-17
