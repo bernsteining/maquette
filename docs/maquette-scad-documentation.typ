@@ -1,5 +1,5 @@
 #import "@local/maquette-scad:0.1.0": *
-#import "@preview/maquette:0.1.3": render-ply
+#import "@preview/maquette:0.2.0": render-ply
 
 #import "@preview/zebraw:0.6.1": *
 
@@ -263,7 +263,7 @@ Every helper takes Typst-native named arguments, as in `cube(20, center: true)`.
   ("rotate(deg, child)", [Euler degrees `(x, y, z)`, or a single number for a 2D rotation.]),
   ("scale(v, child)", [Per-axis scale.]),
   ("mirror(v, child)", [Reflect across a plane whose normal is `v`.]),
-  ("multmatrix(m, child)", [A 4×4 (or 4×3) affine matrix — the escape hatch for anything the named transforms cannot express.]),
+  ("multmatrix(m, child)", [A 4×4 (or 4×3) affine matrix: the escape hatch for anything the named transforms cannot express.]),
   ("resize(v, child)", [Non-uniform scale to fit a target bounding box.]),
   ("offset(d, child)", [Grow (`d > 0`) or shrink (`d < 0`) a 2D shape by `d`.]),
   ("color(rgb, child, alpha: none)", [`rgb` is a 3-array of 0–1 floats, or a 4-array `(r, g, b, a)`. See _Colours and alpha_ below.]),
@@ -276,7 +276,7 @@ Every helper takes Typst-native named arguments, as in `cube(20, center: true)`.
   ("difference(..items)", [The first child minus all the rest.]),
   ("intersection(..items)", [Keep only the region shared by every child.]),
   ("hull(..items)", [Convex hull of the union (3D).]),
-  ("hull-pts(points)", [Convex hull of a raw 3D point set — a list of `(x, y, z)` triples — when you have coordinates rather than geometry to wrap.]),
+  ("hull-pts(points)", [Convex hull of a raw 3D point set (a list of `(x, y, z)` triples), for when you have coordinates rather than geometry to wrap.]),
   ("minkowski(..items)", [Minkowski sum (3D).]),
 ))
 
@@ -619,7 +619,7 @@ Need the files as a dict instead (to edit one before compiling)? `scad-collect(e
 
 = What `compile-scad` accepts
 
-If your `.scad` source works in the OpenSCAD editor, it should work here; the evaluator covers everything a typical file uses. The known gaps are `surface()` (heightmap import), `import()` of DXF, the `$vpr` / `$vpt` / `$vpd` / `$vpf` viewport variables, and adaptive tessellation from `$fa` / `$fs` (we use `$fn` or the per-primitive `fn:` instead). Any external STL or OBJ mesh referenced by `import()` must be routed through the `bin:` argument, since the plugin has no filesystem access.
+If your `.scad` source works in the OpenSCAD editor, it should work here; the evaluator covers everything a typical file uses. The known gaps are `surface()` (heightmap import), `import()` of DXF, and the `$vpr` / `$vpt` / `$vpd` / `$vpf` viewport variables. Adaptive tessellation from `$fa` / `$fs` *is* supported (defaults `$fa = 12`, `$fs = 2`), alongside `$fn` and the per-primitive `fn:` override. Any external STL or OBJ mesh referenced by `import()` must be routed through the `bin:` argument, since the plugin has no filesystem access.
 
 The exhaustive per-feature tracker lives at `crates/maquette-scad/FIDELITY.md`.
 

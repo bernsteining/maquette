@@ -15,7 +15,7 @@
 #show: zebraw.with(lang: false, numbering: false)
 
 // The plugin wrapper needs a `read:` lambda for split-glTF paths (Typst
-// packages can't reach the caller's project directly — see the wrapper
+// packages can't reach the caller's project directly; see the wrapper
 // header). Bind it once here and reuse across every example.
 #let R = p => read(p, encoding: none)
 
@@ -35,7 +35,7 @@
 #let duck-ktx   = "/examples/data/gltf/Duck-ktx2/Duck.gltf"
 #let box-draco  = "/examples/data/gltf/Box-draco/Box.gltf"
 
-// Every example block is `#render-gltf(...)` — pass models by path (with `read: R`
+// Every example block is `#render-gltf(...)`: pass models by path (with `read: R`
 // for splits) or by bytes for `.glb`. Scope used by the `example` show rule below.
 #let doc-scope = (
   render-gltf: render-gltf, get-gltf-info: get-gltf-info, R: R,
@@ -104,7 +104,7 @@
   #render-gltf(helmet, read: R, width: 55%, camera: (2.5, 1.5, 2.5), center: (0, 0, 0), up: (0, 1, 0), fov: 40,
     background: "#181820",
     ground: (color: "#282838", size_scale: 3.0, roughness: 0.9),
-    ssao: (samples: 16, radius: 0.4, strength: 1.0),
+    ssao: (samples: 16, strength: 1.0),
   )
   #v(0.4em)
   #text(size: 10pt, fill: luma(150))[Version #toml("/crates/maquette-gltf/maquette-gltf/typst.toml").package.version #h(0.4em)·#h(0.4em) #datetime.today().display("[month repr:long] [day], [year]")]
@@ -130,20 +130,20 @@
 
 *maquette-gltf* renders `.glb` and `.gltf` assets as images inside a Typst document. Two entry points:
 
-- *`render-gltf(model, ..options)`* — the render call. Returns a Typst `image`.
-- *`get-gltf-info(model, ..options)`* — returns a metadata dict (bbox, triangle count, animation length) without rendering.
+- *`render-gltf(model, ..options)`*: the render call. Returns a Typst `image`.
+- *`get-gltf-info(model, ..options)`*: returns a metadata dict (bbox, triangle count, animation length) without rendering.
 
-Camera framing, background, shadows, ground plane, anti-aliasing and tone mapping are inherited unchanged from #link("maquette-documentation.pdf")[`maquette`]. This document only covers what `render-gltf` adds on top of that base — see the maquette manual for the shared options.
+Camera framing, background, shadows, ground plane, anti-aliasing and tone mapping are inherited unchanged from #link("maquette-documentation.pdf")[`maquette`]. This document only covers what `render-gltf` adds on top of that base; see the maquette manual for the shared options.
 
 #pagebreak(weak: true)
 
 = Where to find sample glTF assets
 
-The examples below use models from Khronos's sample set (Damaged Helmet, Fox, CesiumMan, ToyCar). Any `.glb` or `.gltf` should work — compression, quantization, and animations are handled transparently.
+The examples below use models from Khronos's sample set (Damaged Helmet, Fox, CesiumMan, ToyCar). Any `.glb` or `.gltf` should work: compression, quantization and animations are handled transparently.
 
-- #link("https://github.com/KhronosGroup/glTF-Sample-Assets")[KhronosGroup/glTF-Sample-Assets] — the reference sample set. Every extension has a dedicated test asset.
-- #link("https://polyhaven.com/models")[Poly Haven Models] — CC0, glTF-native, authored PBR materials.
-- #link("https://sketchfab.com/3d-models?features=downloadable")[Sketchfab] (downloadable filter) — largest general library.
+- #link("https://github.com/KhronosGroup/glTF-Sample-Assets")[KhronosGroup/glTF-Sample-Assets]: the reference sample set. Every extension has a dedicated test asset.
+- #link("https://polyhaven.com/models")[Poly Haven Models]: CC0, glTF-native, with authored PBR materials.
+- #link("https://sketchfab.com/3d-models?features=downloadable")[Sketchfab] (downloadable filter): the largest general library.
 
 For the IBL section, HDR environment maps come from #link("https://polyhaven.com/hdris")[Poly Haven HDRIs] (CC0). Bundle one with your `.typ` and pass the bytes as `ibl: (hdr: ...)`.
 
@@ -215,15 +215,14 @@ All parameters are optional; pass them as named arguments or a single dictionary
   \"animation_index\": null,                         // Animation clip index; null = all clips stacked
   // ── Shading & lighting ────────────────────────────────────────────
   \"light_dir\": [1, 2, 3],                          // Key directional light vector
-  \"ambient\": 0.2,                                  // Constant ambient (0-1); ignored when ibl is set
+  \"ambient\": 0.05,                                 // Constant ambient (0-1); ignored when ibl is set
   \"cull_backface\": true,                           // Back-face culling
   \"ibl\": null,                                     // Image-based lighting: true, or {sky, ground, intensity, rotation, hdr}
-  \"shadows\": null,                                 // Shadow maps: true, or {resolution, softness, bias, normal_bias, slope_bias, pcss_light_size}
+  \"shadows\": null,                                 // Shadow maps: true, or {resolution, softness, bias, normal_bias, slope_bias, pcss_light_size (alias light_size)}
   \"ground\": null,                                  // Shadow-catcher plane: true, or {color, size_scale, y, roughness}
   // ── Post-processing ───────────────────────────────────────────────
-  \"ssao\": null,                                    // Ambient occlusion: true, or {samples, radius, bias, strength}
-  \"antialias\": 1,                                  // Supersampling factor: 1 = off, 2, 3, 4
-  \"fxaa\": false,                                   // FXAA edge anti-aliasing
+  \"ssao\": null,                                    // Ambient occlusion: true, or {samples, radius, bias, strength, space}
+  \"antialias\": 4,                                  // 0: off, 1: FXAA, 2-3: SSAA x2/x4, 4-5: FXAA + SSAA x2/x4
   \"tone_mapping\": \"\",                              // \"\", \"reinhard\", or \"aces\"
   \"exposure\": 1.0,                                 // Exposure multiplier for tone mapping
   // ── Textures ──────────────────────────────────────────────────────
@@ -334,7 +333,7 @@ Assets using `KHR_materials_diffuse_transmission` render with the extension's ba
 
 = Compressed and quantized assets
 
-These are decoded transparently — no options to set. Renders identically to an uncompressed version of the same asset.
+These are decoded transparently, with no options to set. Renders identically to an uncompressed version of the same asset.
 
 ```example
 #render-gltf(box-draco, read: R,
@@ -348,7 +347,7 @@ These are decoded transparently — no options to set. Renders identically to an
 
 = Texture formats
 
-PNG, JPEG, and WebP textures are decoded natively. KTX2 (Basis Universal) and AVIF fall back to a plain white texture — geometry renders correctly, but the material's albedo is lost. If your asset targets KTX2, pre-transcode with #link("https://gltf-transform.dev")[`gltf-transform`] to WebP or PNG.
+PNG, JPEG, and WebP textures are decoded natively. KTX2 (Basis Universal) and AVIF fall back to a plain white texture: geometry renders correctly, but the material's albedo is lost. If your asset targets KTX2, pre-transcode with #link("https://gltf-transform.dev")[`gltf-transform`] to WebP or PNG.
 
 ```example
 #render-gltf(duck-ktx, read: R,
@@ -362,7 +361,7 @@ PNG, JPEG, and WebP textures are decoded natively. KTX2 (Basis Universal) and AV
 
 = Metadata
 
-`get-gltf-info` returns a dict with the asset's bounding box, triangle count, and animation length — enough to drive an auto-frame calculation or a scrub slider without going through the render path.
+`get-gltf-info` returns a dict with the asset's bounding box, triangle count, and animation length, enough to drive an auto-frame calculation or a scrub slider without going through the render path.
 
 ```example
 // cols: 2 1
