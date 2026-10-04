@@ -17,6 +17,8 @@ export interface RenderOptions {
 export interface ScadOptions extends RenderOptions {
   /** Default facet count ($fn) for round shapes. */
   facets?: number;
+  /** Smooth normals across edges sharper than this angle (degrees), like the Typst `smooth-normals`. */
+  smoothNormals?: number;
 }
 
 export interface Maquette {
@@ -27,7 +29,7 @@ export interface Maquette {
   renderGltf(data: Data, config?: Config): Promise<Raster>;
   renderScad(src: string, config?: Config, opts?: ScadOptions): Promise<Raster | string>;
   /** OpenSCAD → PLY bytes. */
-  compileScad(src: string, opts?: { facets?: number }): Promise<Uint8Array>;
+  compileScad(src: string, opts?: { facets?: number; smoothNormals?: number }): Promise<Uint8Array>;
   infoStl(data: Data): Promise<any>;
   infoObj(data: Data): Promise<any>;
   infoPly(data: Data): Promise<any>;

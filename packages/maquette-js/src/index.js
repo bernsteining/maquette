@@ -109,8 +109,11 @@ export function createMaquette(opts = {}) {
       : raster("maquette", `render_${kind}_png`, [d, c]);
   };
 
-  const scadPly = (src, facets) =>
-    call("scad", "build_scad", [asBytes(src), ENC.encode("{}"), ENC.encode(JSON.stringify({ fn: facets })), new Uint8Array()]);
+  const scadPly = (src, o = {}) => {
+    const opts = { fn: o.facets ?? 32 };
+    if (o.smoothNormals != null) opts.smooth_normals = o.smoothNormals;
+    return call("scad", "build_scad", [asBytes(src), ENC.encode("{}"), ENC.encode(JSON.stringify(opts)), new Uint8Array()]);
+  };
 
   return {
     renderStl: mesh("stl"),
@@ -118,14 +121,13 @@ export function createMaquette(opts = {}) {
     renderPly: mesh("ply"),
     renderGltf: (data, config) => raster("gltf", "render_gltf", [asBytes(data), cfgBytes(config)]),
     async renderScad(src, config, o = {}) {
-      const facets = o.facets ?? 32;
-      const ply = await scadPly(src, facets);
+      const ply = await scadPly(src, o);
       const c = cfgBytes(config);
       return o.format === "svg"
         ? text("maquette", "render_ply", [ply, c])
         : raster("maquette", "render_ply_png", [ply, c]);
     },
-    compileScad: (src, o = {}) => scadPly(src, o.facets ?? 32),
+    compileScad: (src, o = {}) => scadPly(src, o),
     infoStl: (data) => meta("maquette", "get_stl_info", [asBytes(data), ENC.encode("{}")]),
     infoObj: (data) => meta("maquette", "get_obj_info", [asBytes(data), ENC.encode("{}")]),
     infoPly: (data) => meta("maquette", "get_ply_info", [asBytes(data), ENC.encode("{}")]),

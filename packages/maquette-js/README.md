@@ -36,7 +36,7 @@ const helmet = await mq.renderGltf(glbBytes, { camera: [2.5,1.5,2.5], shadows: t
 
 - `renderStl / renderObj / renderPly(data, config?, { format }?)`
 - `renderGltf(data, config?)` — PNG raster only
-- `renderScad(src, config?, { facets, format }?)` · `compileScad(src, { facets }?)` → PLY
+- `renderScad(src, config?, { facets, smoothNormals, format }?)` · `compileScad(src, { facets, smoothNormals }?)` → PLY
 - `infoStl / infoObj / infoPly / infoGltf(data)` → metadata object
 - `decodeRaster(bytes)`, `toImageData(raster)` (browser)
 
