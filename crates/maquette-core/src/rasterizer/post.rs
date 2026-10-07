@@ -399,33 +399,33 @@ impl PixelBuffer {
     /// destination pixels per SIMD step away from the borders.
     fn kawase_down_plane(src: &[f32], w: usize, h: usize, dst: &mut [f32], dw: usize, dh: usize) {
         let tap = |x: usize, y: usize| -> f32 {
-            let (cx, cy) = (2 * x, 2 * y);
-            let (xl, xr) = (cx.saturating_sub(1), (cx + 1).min(w - 1));
-            let (yu, yd) = (cy.saturating_sub(1), (cy + 1).min(h - 1));
-            let corners = (src[yu * w + xl] + src[yu * w + xr]) + (src[yd * w + xl] + src[yd * w + xr]);
-            src[cy * w + cx] * 0.5 + corners * 0.125
+            let (c0, c1) = (2 * x, 2 * x + 1);
+            let (xl, xr) = (c0.saturating_sub(1), (c0 + 2).min(w - 1));
+            let (r0, r1) = (2 * y * w, (2 * y + 1) * w);
+            let (ru, rd) = ((2 * y).saturating_sub(1) * w, (2 * y + 2).min(h - 1) * w);
+            let inner = (src[r0 + c0] + src[r0 + c1]) + (src[r1 + c0] + src[r1 + c1]);
+            let corners = (src[ru + xl] + src[ru + xr]) + (src[rd + xl] + src[rd + xr]);
+            (inner + corners) * 0.125
         };
-        let (half, eighth) = (f32x4_splat(0.5), f32x4_splat(0.125));
-        let simd_end = if w >= 9 { ((w - 8) / 2 + 1).min(dw) } else { 0 };
+        let eighth = f32x4_splat(0.125);
+        let simd_end = if w >= 11 { ((w - 3) / 2 + 1).min(dw) } else { 0 };
         let sp = src.as_ptr();
         for y in 0..dh {
             let cy = 2 * y;
-            if cy == 0 || cy + 1 >= h {
+            if cy == 0 || cy + 2 >= h {
                 for x in 0..dw { dst[y * dw + x] = tap(x, y); }
                 continue;
             }
-            let (ru, rc, rd) = ((cy - 1) * w, cy * w, (cy + 1) * w);
+            let (ru, r0, r1, rd) = ((cy - 1) * w, cy * w, (cy + 1) * w, (cy + 2) * w);
             dst[y * dw] = tap(0, y);
             let mut x = 1;
             while x + 4 <= simd_end {
                 unsafe {
                     let lo = |row: usize, off: usize| v128_load(sp.add(row + 2 * x + off - 1) as *const v128);
-                    let odd = |row: usize| (i32x4_shuffle::<0, 2, 4, 6>(lo(row, 0), lo(row, 4)), i32x4_shuffle::<0, 2, 4, 6>(lo(row, 2), lo(row, 6)));
-                    let (tl, tr) = odd(ru);
-                    let (bl, br) = odd(rd);
-                    let c = i32x4_shuffle::<1, 3, 5, 7>(lo(rc, 0), lo(rc, 4));
-                    let corners = f32x4_add(f32x4_add(tl, tr), f32x4_add(bl, br));
-                    v128_store(dst.as_mut_ptr().add(y * dw + x) as *mut v128, f32x4_add(f32x4_mul(c, half), f32x4_mul(corners, eighth)));
+                    let outer = |row: usize| f32x4_add(i32x4_shuffle::<0, 2, 4, 6>(lo(row, 0), lo(row, 4)), i32x4_shuffle::<1, 3, 5, 7>(lo(row, 2), lo(row, 6)));
+                    let inner = |row: usize| f32x4_add(i32x4_shuffle::<1, 3, 5, 7>(lo(row, 0), lo(row, 4)), i32x4_shuffle::<0, 2, 4, 6>(lo(row, 2), lo(row, 6)));
+                    let sum = f32x4_add(f32x4_add(inner(r0), inner(r1)), f32x4_add(outer(ru), outer(rd)));
+                    v128_store(dst.as_mut_ptr().add(y * dw + x) as *mut v128, f32x4_mul(sum, eighth));
                 }
                 x += 4;
             }
@@ -487,7 +487,7 @@ impl PixelBuffer {
 
     /// Dual Kawase blur of a planar RGB buffer (three planes of `plane`
     /// floats) via a mip chain with ping-pong buffers.
-    fn dual_kawase_blur(mut buf_a: Vec<f32>, plane: usize, w: usize, h: usize, radius: usize) -> Vec<f32> {
+    fn dual_kawase_blur(mut buf_a: Vec<f32>, plane: usize, channels: usize, w: usize, h: usize, radius: usize) -> Vec<f32> {
         let max_levels = ((w.min(h) as f32).log2() as usize).saturating_sub(1);
         let levels = ((radius + 3) / 4).max(1).min(max_levels).min(8);
         let mut buf_b = vec![0.0f32; buf_a.len()];
@@ -495,7 +495,7 @@ impl PixelBuffer {
         dims.push((w, h));
         let mut src_is_a = true;
         let pass = |from: &[f32], to: &mut [f32], f: &dyn Fn(&[f32], &mut [f32])| {
-            for c in 0..3 { f(&from[c * plane..(c + 1) * plane], &mut to[c * plane..(c + 1) * plane]); }
+            for c in 0..channels { f(&from[c * plane..(c + 1) * plane], &mut to[c * plane..(c + 1) * plane]); }
         };
 
         for _ in 0..levels {
@@ -527,7 +527,7 @@ impl PixelBuffer {
 
     /// Blur a planar RGB source and additively blend it onto the pixels.
     fn blur_and_blend(&mut self, source: Vec<f32>, plane: usize, intensity: f32, radius: usize) {
-        let blurred = Self::dual_kawase_blur(source, plane, self.width, self.height, radius);
+        let blurred = Self::dual_kawase_blur(source, plane, 3, self.width, self.height, radius);
         let bp = blurred.as_ptr();
         let iv = f32x4_splat(intensity);
         self.map_rgb(
@@ -603,52 +603,48 @@ impl PixelBuffer {
         self.blur_and_blend(buf, plane, intensity, radius);
     }
 
-    /// Glow: blur the model's silhouette in `color` and add it to the pixels
-    /// around the model, leaving the model itself untouched.
+    /// Glow: blur the model's silhouette and lay `color` over the pixels
+    /// around the model at the blurred coverage times `intensity`, leaving the
+    /// model itself untouched.
     pub fn apply_glow(&mut self, color: (u8, u8, u8), intensity: f32, radius: usize) {
-        let (mut buf, plane) = self.rgb_planes();
-        let rgb = [color.0 as f32, color.1 as f32, color.2 as f32];
-        for (i, &z) in self.zbuf.iter().enumerate() {
-            if z != f32::NEG_INFINITY {
-                for (c, v) in rgb.iter().enumerate() { buf[c * plane + i] = *v; }
-            }
+        let plane = self.width * self.height + 8;
+        let mut mask = vec![0.0f32; plane];
+        for (m, &z) in mask.iter_mut().zip(&self.zbuf) {
+            if z != f32::NEG_INFINITY { *m = 1.0; }
         }
-        let blurred = Self::dual_kawase_blur(buf, plane, self.width, self.height, radius);
-        let bp = blurred.as_ptr();
-        let iv = f32x4_splat(intensity);
+        let blurred = Self::dual_kawase_blur(mask, plane, 1, self.width, self.height, radius);
+        let alpha: Vec<f32> = blurred.iter().zip(self.zbuf.iter().chain(std::iter::repeat(&0.0)))
+            .map(|(&b, &z)| if z == f32::NEG_INFINITY { (b * intensity).fmin(1.0) } else { 0.0 })
+            .collect();
+        let ap = alpha.as_ptr();
+        let rgb = [color.0 as f32, color.1 as f32, color.2 as f32];
+        let col = [f32x4_splat(rgb[0]), f32x4_splat(rgb[1]), f32x4_splat(rgb[2])];
+        let half = f32x4_splat(0.5);
+        let zp = self.zbuf.as_ptr();
         let empty = f32x4_splat(f32::NEG_INFINITY);
-        let zbuf = std::mem::take(&mut self.zbuf);
-        let zp = zbuf.as_ptr();
         self.map_rgb(
             |i| i32x4_bitmask(f32x4_eq(unsafe { v128_load(zp.add(i) as *const v128) }, empty)) == 0,
-            |i, rgb| {
-                let outside = f32x4_eq(unsafe { v128_load(zp.add(i) as *const v128) }, empty);
+            |i, px| {
+                let a = unsafe { v128_load(ap.add(i) as *const v128) };
                 let mut c = 0;
-                rgb.map(|v| {
-                    let b = unsafe { v128_load(bp.add(c * plane + i) as *const v128) };
+                px.map(|v| {
+                    let out = f32x4_add(f32x4_add(v, f32x4_mul(f32x4_sub(col[c], v), a)), half);
                     c += 1;
-                    f32x4_add(v, v128_and(f32x4_mul(b, iv), outside))
+                    out
                 })
             },
-            |i, rgb| {
-                if zbuf[i] != f32::NEG_INFINITY { return rgb; }
+            |i, px| {
+                let a = alpha[i];
                 let mut c = 0;
-                rgb.map(|v| {
-                    let b = blurred[c * plane + i];
+                px.map(|v| {
+                    let out = v + (rgb[c] - v) * a + 0.5;
                     c += 1;
-                    v + b * intensity
+                    out
                 })
             },
         );
-        let (ch, peak) = rgb.iter().copied().enumerate().fold((0, 0.0f32), |a, (c, v)| if v > a.1 { (c, v) } else { a });
-        if peak > 0.0 {
-            let scale = intensity * 255.0 / peak;
-            self.halo = zbuf.iter().enumerate()
-                .map(|(i, &z)| if z == f32::NEG_INFINITY { (blurred[ch * plane + i] * scale).fmin(255.0) as u8 } else { 0 })
-                .collect();
-            self.halo_color = color;
-        }
-        self.zbuf = zbuf;
+        self.halo = alpha[..self.width * self.height].iter().map(|&a| (a * 255.0 + 0.5) as u8).collect();
+        self.halo_color = color;
     }
 
     /// Depth cueing: blends each covered pixel toward the fog colour by
