@@ -16,6 +16,7 @@
 #let obj-cube = read("/examples/data/cube.obj")
 #let teapot = read("/examples/data/teapot.obj")
 #let crankshaft = read("/examples/data/crankshaft.obj")
+#let city = read("/examples/data/city.obj")
 #let skull-brain = read("/examples/data/brain_skull.obj")
 #let rubi = read("/examples/data/rubi_blender.ply", encoding: none)
 #let rubi_scan = read("/examples/data/rubi_scan.ply", encoding: none)
@@ -110,6 +111,8 @@
 #let obj-cube = dm("cube.obj", obj-cube)
 #let teapot = dm("teapot.obj", teapot)
 #let crankshaft = dm("crankshaft.obj", crankshaft)
+#let city = dm("city.obj", city)
+#let street = (camera: (0, 6, 0), center: (17, 2, 11), up: (0, 1, 0), auto_center: false, auto_fit: false, cull_backface: false)
 #let skull-brain = dm("brain_skull.obj", skull-brain)
 #let rubi = dm("rubi_blender.ply", rubi)
 #let rubi_scan = dm("rubi_scan.ply", rubi_scan)
@@ -118,7 +121,7 @@
   render-stl: render-stl, render-obj: render-obj, render-ply: render-ply,
   get-stl-info: get-stl-info, get-obj-info: get-obj-info, get-ply-info: get-ply-info,
   settings: settings, cube: cube, colored: colored, obj-cube: obj-cube, teapot: teapot,
-  crankshaft: crankshaft, bunny: bunny, skull-brain: skull-brain, rubi: rubi, rubi_scan: rubi_scan,
+  crankshaft: crankshaft, city: city, street: street, bunny: bunny, skull-brain: skull-brain, rubi: rubi, rubi_scan: rubi_scan,
 )
 #let filter-eval(text) = text.split("\n").filter(l =>
   not l.starts-with("#import") and not (l.starts-with("#let ") and l.contains("read("))
@@ -467,7 +470,12 @@ At `zoom: 1.45` the teapot is larger, but its spout and handle touch both sides.
 
 maquette supports 14 projection types. Set `projection: "name"` to switch. 
 
-In the following examples we're using `stroke: (color, width)` to visualize triangle edges, in order to better visualize each projection's property.
+The parallel projections below draw triangle edges with `stroke: (color, width)` to show how each one treats the cube's lines. The wide-angle lenses stand in the middle of `city.obj`, a grid of towers, with a shared camera:
+
+```typst
+#let street = (camera: (0, 6, 0), center: (17, 2, 11), up: (0, 1, 0),
+  auto_center: false, auto_fit: false, cull_backface: false)
+```
 
 #grid(columns: (1fr, 1fr), column-gutter: 2em, row-gutter: 1.5em,
   [
@@ -594,27 +602,23 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
   ],
   [
     == #link("https://en.wikipedia.org/wiki/Fisheye_lens")[Fisheye]
-    Equidistant: angular distance maps linearly to radius. Uniform distortion across the field.
+    Equidistant: angular distance maps linearly to radius, so distortion is uniform across the field, which can exceed 180°.
     ```example
-    // hl: 5
-    #render-obj(teapot,
-      up: (0, 1, 0),
-      elevation: 25,
-      distance: 2,
+    // hl: 2
+    #render-obj(city, ..street,
       projection: "fisheye",
+      fov: 200,
     )
     ```
   ],
   [
     == #link("https://en.wikipedia.org/wiki/Stereographic_projection")[Stereographic]
-    Conformal: preserves local shapes but enlarges the periphery. Compare the teapot's spout/handle to fisheye.
+    Conformal: preserves local shapes but enlarges the periphery. Compare the outer towers with fisheye.
     ```example
-    // hl: 5
-    #render-obj(teapot,
-      up: (0, 1, 0),
-      elevation: 25,
-      distance: 2,
+    // hl: 2
+    #render-obj(city, ..street,
       projection: "stereographic",
+      fov: 200,
     )
     ```
   ],
@@ -622,48 +626,48 @@ In the following examples we're using `stroke: (color, width)` to visualize tria
     == #link("https://en.wikipedia.org/wiki/Curvilinear_perspective")[Curvilinear]
     Perspective with barrel distortion: straight lines curve outward near the edges, simulating a wide-angle lens.
     ```example
-    // hl: 5
-    #render-obj(teapot,
-      up: (0, 1, 0),
-      elevation: 25,
-      distance: 14,
+    // hl: 2
+    #render-obj(city, ..street,
       projection: "curvilinear",
+      fov: 110,
     )
     ```
   ],
   [
     == #link("https://en.wikipedia.org/wiki/Cylindrical_perspective")[Cylindrical]
-    Horizontal angles map linearly (like a panorama), vertical stays perspective. Keeps vertical lines straight.
+    Horizontal angles map linearly, like a panorama, while vertical lines stay straight.
     ```example
-    // hl: 5
-    #render-obj(teapot,
-      up: (0, 1, 0),
-      elevation: 25,
-      distance: 2.5,
+    // hl: 2
+    #render-obj(city, ..street,
       projection: "cylindrical",
+      fov: 160,
     )
     ```
   ],
   [
     == #link("https://en.wikipedia.org/wiki/Pannini_projection")[Pannini]
-    Architectural photography projection: verticals stay straight, horizontals curve gracefully. A hybrid between cylindrical and stereographic.
+    Architectural photography projection: verticals stay straight and horizontals curve gently. A hybrid between cylindrical and stereographic.
     ```example
-    // hl: 4
-    #render-obj(teapot,
-      up: (0, 1, 0),
-      distance: 2.5,
+    // hl: 2
+    #render-obj(city, ..street,
       projection: "pannini",
+      fov: 150,
     )
     ```
   ],
   [
     == #link("https://en.wikipedia.org/wiki/Stereographic_projection#Photography")[Tiny Planet]
-    Full 360° inverse projection: objects ahead wrap to the outer edge, objects behind map to the center. Backface culling auto-disabled. Example shows Tiny Planet from inside our teapot.
+    Full 360° inverse projection: the camera looks straight up, so the ground wraps around the centre and the sky fills the outer ring. Backface culling is disabled automatically.
     ```example
-    // hl: 4
-    #render-obj(teapot,
-      camera: (0, 1.7, 0),
-      up: (0, 0, 1),
+    // hl: 9
+    #render-obj(city,
+      camera: (0, 4, 0),
+      center: (0, 100, 0),
+      up: (1, 0, 0),
+      auto_center: false,
+      auto_fit: false,
+      fov: 210,
+      zoom: 1.6,
       projection: "tiny-planet",
     )
     ```
