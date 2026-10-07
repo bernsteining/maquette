@@ -97,11 +97,11 @@ function makePlugin(url) {
   const imports = { typst_env: {
     wasm_minimal_protocol_write_args_to_buffer: (ptr) => {
       const dst = new Uint8Array(inst.exports.memory.buffer);
-      let o = ptr;
+      let o = ptr >>> 0;
       for (const a of argParts) { dst.set(a, o); o += a.length; }
     },
     wasm_minimal_protocol_send_result_to_host: (ptr, len) => {
-      result = new Uint8Array(inst.exports.memory.buffer, ptr, len).slice();
+      result = new Uint8Array(inst.exports.memory.buffer, ptr >>> 0, len >>> 0).slice();
     },
   }};
   const plugin = {
