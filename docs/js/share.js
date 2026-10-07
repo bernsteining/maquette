@@ -122,6 +122,7 @@ function applyConfig(cfg) {
       else if (k === "turntable" && typeof v === "number") v = { ...base, iterations: v };
       else if (k === "tone_mapping" && typeof v === "string") v = { ...base, method: v };
       else if (v && typeof v === "object" && !Array.isArray(v)) v = { ...base, ...v };
+      for (const sub of f.fields || []) if (sub.list && Array.isArray(v[sub.k])) v[sub.k] = v[sub.k].join(", ");
       state[k] = v; continue;
     }
     if (f && f.t === "map" && v && typeof v === "object" && !Array.isArray(v)) {

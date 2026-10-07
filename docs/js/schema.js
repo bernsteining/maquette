@@ -70,7 +70,7 @@ const SCHEMA = [
     { k: "center", label: "Look-at center", help: "Look-at target point.", t: "vec", def: [0,0,0] },
     { k: "up", label: "Up vector", help: "Up direction. Bunny/most OBJ models are Y-up (0,1,0).", t: "vec", def: [0,0,1], init: [0,1,0] },
     { k: "projection", label: "Projection", help: "Camera projection — perspective, orthographic, or one of 12 others.", t: "sel", def: "perspective", opts: PROJ.map(p => [p, p]) },
-    { k: "fov", label: "Field of view °", help: "Vertical field of view in degrees (perspective only).", t: "num", def: 45 },
+    { k: "fov", label: "Field of view °", help: "Field of view in degrees: vertical for perspective, the full lens angle for fisheye, curvilinear and the other wide projections.", t: "num", def: 45 },
     { k: "zoom", label: "Zoom", help: "Magnify the auto-fit framing (>1 zooms in). Scroll the render to change.", t: "rng", def: 1, init: 1.4, min: 0.3, max: 4, step: 0.05 },
     { k: "pan", label: "Pan [right, up]", help: "Shift the framing in screen space, [right, up] as a fraction of the viewport.", t: "vec", def: [0,0] },
     { k: "auto_center", label: "Auto-center", help: "Center the camera on the model's bounding box.", t: "bool", def: true },
@@ -138,6 +138,7 @@ const SCHEMA = [
 
   { s: "Color mapping", fields: [
     { k: "color_map", label: "Map", help: "Color the surface by overhang, curvature, or a scalar function.", t: "sel", def: "", opts: [["","Off"],["overhang","Overhang"],["curvature","Curvature"],["scalar","Scalar"],["ply_scalar","PLY scalar"]] },
+    { k: "color_map_property", label: "PLY property", help: "PLY scalar map: the vertex property to color by (e.g. quality, intensity). Blank = the first scalar property.", t: "txt", def: "", omitIf: (v) => v === "", when: (s) => s.color_map === "ply_scalar" },
     { k: "overhang_angle", label: "Overhang angle °", help: "Overhang threshold in degrees.", t: "num", def: 45, when: s => s.color_map === "overhang" },
     { k: "scalar_function", label: "Scalar function", help: "Expression over x,y,z, e.g. sqrt(x*x+y*y+z*z).", t: "txt", def: "", when: s => s.color_map === "scalar" },
     { k: "vertex_smoothing", label: "Vertex smoothing 0–4", help: "Smooth color-map values across vertices (0–4).", t: "num", def: 4, when: s => s.color_map !== "" },
@@ -234,10 +235,11 @@ const SCHEMA = [
   { s: "OBJ groups", fields: [
     { k: "materials", label: "Materials (name → color)", help: "Map OBJ material names to colors.", t: "map", def: [] },
     { k: "highlight", label: "Highlight (group → appearance)", help: "Recolor named OBJ groups.", t: "map", rich: true, def: [] },
-    { k: "annotations", label: "Annotations", help: "Label OBJ groups on the render.", t: "grp", toggle: true, bool: true, def: { color: "#333333", font_size: 12, offset: 40 }, fields: [
+    { k: "annotations", label: "Annotations", help: "Label OBJ groups on the render.", t: "grp", toggle: true, bool: true, def: { color: "#333333", font_size: 12, offset: 40, groups: "" }, fields: [
       { k: "color", label: "Color", t: "col", def: "#333333" },
       { k: "font_size", label: "Font size", t: "num", def: 12 },
       { k: "offset", label: "Offset", t: "num", def: 40 },
+      { k: "groups", label: "Groups (comma-separated, blank = all)", t: "txt", def: "", allowBlank: true, list: true },
     ]},
   ]},
 

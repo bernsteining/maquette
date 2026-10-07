@@ -199,7 +199,7 @@ function mapNode(f) {
   const remove = (i, rerender) => removeButton(() => { state[f.k].splice(i, 1); rerender(); changed(); });
   const input = (type, value, apply, attrs) => el("input", { type, value, attrs: attrs || {}, oninput: (e) => { apply(e.target.value); changed(); } });
   if (f.rich) return dynList(state[f.k], "+ entry",
-    () => ["", { color: "#88ccff", stroke: "", stroke_width: 0, opacity: 1 }],
+    () => ["", { color: "#88ccff", stroke: "", stroke_width: 0, opacity: 1, label: "" }],
     (row, i, rerender) => {
       const v = row[1];
       return el("div", { className: "item" },
@@ -209,7 +209,8 @@ function mapNode(f) {
           remove(i, rerender)),
         labeled("Stroke (blank = none)", input("text", v.stroke, (x) => { v.stroke = x; }, { placeholder: "#ffffff" })),
         labeled("Stroke width", input("number", v.stroke_width, (x) => { v.stroke_width = x === "" ? 0 : +x; }, { step: "any" })),
-        labeled("Opacity", input("number", v.opacity, (x) => { v.opacity = x === "" ? 1 : +x; }, { step: "0.05", min: "0", max: "1" })));
+        labeled("Opacity", input("number", v.opacity, (x) => { v.opacity = x === "" ? 1 : +x; }, { step: "0.05", min: "0", max: "1" })),
+        labeled("Label (annotations)", input("text", v.label || "", (x) => { v.label = x; }, { placeholder: "group name" })));
     });
   return dynList(state[f.k], "+ entry", () => ["", "#88ccff"],
     (row, i, rerender) => el("div", { className: "row map-row" },

@@ -10,7 +10,8 @@
       ["rubi_scan.ply",   "Rubik scan (PLY point cloud)"],
       ["teapot.obj",      "Teapot (OBJ)"],
       ["crankshaft.obj",  "Crankshaft (OBJ)"],
-      ["brain_skull.obj", "Brain + skull (OBJ)"]
+      ["brain_skull.obj", "Brain + skull (OBJ)"],
+      ["city.obj",        "City (projections)"]
     ]},
     { "id": "scad", "label": "SCAD", "hint": "Accepts .scad · or edit inline in the browser",
       "formats": [".scad"],
@@ -49,6 +50,24 @@
   },
   "defaults": {
     "bunny.obj": { "color": "#4488cc" },
+    "city.obj": {
+      "_cam": "cartesian",
+      "camera": [0, 6, 0],
+      "center": [17, 2, 11],
+      "up": [0, 1, 0],
+      "auto_center": false,
+      "auto_fit": false,
+      "projection": "fisheye",
+      "fov": 200,
+      "cull_backface": false,
+      "light_dir": [1, 2.2, 0.6],
+      "shading": "cel",
+      "cel_bands": 3,
+      "color_map": "scalar",
+      "scalar_function": "y",
+      "color_map_palette": ["#475569", "#239dad", "#4fd0e0", "#f9d72c"],
+      "background": "#0b1020"
+    },
     "__scad__": {
       "_cam": "spherical",
       "azimuth": 219, "elevation": 33, "fov": 40, "zoom": 1.2,

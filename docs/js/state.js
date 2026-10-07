@@ -100,19 +100,20 @@ function group(f, mode) {
     if (sub.allowBlank && v === "") continue;
     if (sub.omitIf && sub.omitIf(v)) continue;
     if (mode === "diff" && eq(v, sub.def)) continue;
-    o[sub.k] = v;
+    o[sub.k] = sub.list ? v.split(",").map((x) => x.trim()).filter(Boolean) : v;
   }
   return o;
 }
 
 function hlNormalize(cv) {
-  const a = { color: "#88ccff", stroke: "", stroke_width: 0, opacity: 1 };
+  const a = { color: "#88ccff", stroke: "", stroke_width: 0, opacity: 1, label: "" };
   if (typeof cv === "string") a.color = cv;
   else if (cv && typeof cv === "object") {
     if (cv.color) a.color = cv.color;
     if (cv.stroke) a.stroke = cv.stroke;
     if (cv.stroke_width != null) a.stroke_width = cv.stroke_width;
     if (cv.opacity != null) a.opacity = cv.opacity;
+    if (cv.label) a.label = cv.label;
   }
   return a;
 }
@@ -122,6 +123,7 @@ function hlCollapse(v) {
   if (v.stroke) o.stroke = v.stroke;
   if (v.stroke_width) o.stroke_width = v.stroke_width;
   if (v.opacity != null && v.opacity !== 1) o.opacity = v.opacity;
+  if (v.label) o.label = v.label;
   return Object.keys(o).length === 1 ? o.color : o;
 }
 
