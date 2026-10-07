@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
+import json
 import math
 import wave
 import numpy as np
 import scipy.signal as sg
 
-SR, BPM, DUR = 44100, 120, 27.0
+SR, BPM, DUR = 44100, 120, 40.0
 BEAT = 60 / BPM
 STEP = BEAT / 4
 N = int(SR * DUR)
@@ -13,16 +14,20 @@ rng = np.random.default_rng(7)
 
 S2, COMPILE, SCRUB0, SCRUB_MID, SCRUB1, SSS, CHIPS2 = 3.0, 4.0, 4.5, 5.25, 5.95, 6.0, 6.75
 TYPING = (3.3, 3.9)
-BLITZ, CUT, NCUTS = 8.0, 1.5, 6
-SCAD = BLITZ + NCUTS * CUT
-GLTF, EVERY, OUTRO = SCAD + 2.5, SCAD + 5.0, SCAD + 7.0
+BLITZ, CUT, NCUTS = 8.0, 1.5, 7
+PROJ = BLITZ + NCUTS * CUT
+SCAD = PROJ + 4.0
+GLTF = SCAD + 3.0
+MOL = GLTF + 3.5
+MOL_SWITCH = MOL + 2.0
+EVERY, OUTRO = MOL + 4.0, MOL + 7.0
 FINAL = OUTRO + 2.0
-WIPES = [S2, GLTF, EVERY, OUTRO]
+WIPES = [S2, SCAD, GLTF, MOL, EVERY, OUTRO]
 
 hz = lambda m: 440 * 2 ** ((m - 69) / 12)
 Am, F, C, G, Dm, E = (57, 60, 64), (53, 57, 60), (55, 60, 64), (55, 59, 62), (50, 53, 57), (52, 56, 59)
 ROOT = {Am: 33, F: 29, C: 36, G: 31, Dm: 38, E: 28}
-CUT_CHORDS = [Am, F, C, G, Dm, E]
+CUT_CHORDS = [Am, F, C, G, Am, Dm, E]
 BELLS = [69, 72, 74, 76, 79, 81, 84, 88]
 
 
@@ -282,7 +287,7 @@ fx.add(riser(1.0), COMPILE - 1.0, 0.25)
 fx.add(reverse_crash(0.8), COMPILE - 0.8, 0.22)
 for k, ts in enumerate(np.arange(COMPILE - BEAT, COMPILE - 1e-6, STEP / 2)):
     drums.add(CL, ts, 0.06 + 0.03 * k)
-fx.add(boom(), COMPILE, 0.6)
+fx.add(boom(), COMPILE, 0.5)
 fx.add(crash(), COMPILE, 0.3)
 drums.add(CL, COMPILE, 0.4)
 drop = prog_at(COMPILE)
@@ -317,7 +322,6 @@ for i, ch in enumerate(CUT_CHORDS):
 
 
 beat(SCAD, GLTF - 0.25, hats=False)
-fx.add(crash(1.6), SCAD, 0.26)
 drums.add(CL, SCAD, 0.35)
 for m in Am:
     fx.add(pluck(m + 12, 0.6, 4200), SCAD, 0.24)
@@ -332,14 +336,51 @@ arpeggio(Am, SCAD, GLTF - 0.25, 0.18, cutoff=lambda t: 400 + (hole(t) - 10) * 14
 
 
 pad(F, GLTF, 4 * BEAT, 2200, 0.55, attack=0.6)
-pad(G, GLTF + 4 * BEAT, EVERY - GLTF - 4 * BEAT, 2200, 0.5, attack=0.3)
+pad(G, GLTF + 4 * BEAT, MOL - GLTF - 4 * BEAT, 2200, 0.5, attack=0.3)
 for st, m, ln in [(0, 72, 1.0), (1.0, 71, 0.5), (1.5, 69, 0.5), (2.0, 67, 1.0), (3.0, 69, 1.0), (4.0, 71, 0.9)]:
     fx.add(pluck(m, ln * BEAT * 2, 2200), GLTF + st * BEAT, 0.3)
     send.add(pluck(m, ln * BEAT * 2, 2200), GLTF + st * BEAT, 0.3)
 for i in range(6):
     fx.add(bell(76 + [0, 3, 5, 7, 5, 3][i], 0.6), GLTF + 0.62 + i * 0.07, 0.12, pan=-0.4 + 0.16 * i)
-fx.add(riser(1.6), EVERY - 1.6, 0.28)
+fx.add(riser(1.4), SCAD - 1.4, 0.24)
+fx.add(reverse_crash(0.9), SCAD - 0.9, 0.18)
+
+drums.add(CL, PROJ, 0.35)
+for m in Am:
+    fx.add(pluck(m + 12, 0.6, 4200), PROJ, 0.22)
+for i, ch in enumerate([Am, F, C, G]):
+    t0 = PROJ + i * 2 * BEAT
+    beat(t0, t0 + 2 * BEAT)
+    offbeat_bass(t0, t0 + 2 * BEAT, lambda t, ch=ch: ch)
+    pad(ch, t0, 2 * BEAT, 2800, 0.5, attack=0.05)
+    arpeggio(ch, t0, t0 + 2 * BEAT, 0.3)
+    fx.add(crash(1.0), t0, 0.12)
+    fx.add(bell(ch[2] + 24, 0.8), t0, 0.16)
+    sig, start = whoosh(t0, 0.18)
+    fx.add(sig, start, 0.12, pan=0.3)
+
+for k, tb in enumerate(np.arange(MOL, EVERY - 1e-6, BEAT)):
+    if k % 2 == 0:
+        drums.add(K, tb, 0.8)
+        kicks.append(tb)
+    else:
+        drums.add(CL, tb, 0.28)
+    drums.add(HC, tb + BEAT / 2, 0.05 + 0.012 * k, pan=0.25)
+offbeat_bass(MOL, EVERY - 0.1, lambda t: Dm if t < MOL_SWITCH else E)
+pad(Dm, MOL, MOL_SWITCH - MOL, 1600, 0.5, attack=0.3)
+pad(E, MOL_SWITCH, EVERY - MOL_SWITCH - 0.1, 2400, 0.5, attack=0.05)
+arpeggio(Dm, MOL, MOL_SWITCH, 0.22, cutoff=lambda t: 700 + 1500 * prog(t, MOL, EVERY))
+arpeggio(E, MOL_SWITCH, EVERY - 0.1, 0.26, cutoff=lambda t: 700 + 2600 * prog(t, MOL, EVERY) ** 1.5)
+fx.add(bell(80, 1.4), MOL_SWITCH, 0.24)
+fx.add(crash(1.4), MOL_SWITCH, 0.16)
+for i in range(4):
+    fx.add(bell([69, 72, 76, 81][i], 0.6), MOL + 0.5 + i * 0.08, 0.12, pan=-0.3 + 0.2 * i)
+fx.add(riser(1.6), EVERY - 1.6, 0.34)
 fx.add(reverse_crash(1.0), EVERY - 1.0, 0.2)
+for k, ts in enumerate(np.arange(EVERY - BEAT, EVERY - 0.1, STEP / 2)):
+    drums.add(CL, ts, 0.06 + 0.03 * k)
+for k, ts in enumerate(np.arange(EVERY - BEAT, EVERY - 0.1, STEP)):
+    drums.add(K, ts, 0.45 + 0.1 * k)
 
 
 fx.add(boom(), EVERY, 0.5)
@@ -349,10 +390,14 @@ beat(EVERY, OUTRO)
 offbeat_bass(EVERY, OUTRO, again)
 pad(again(EVERY), EVERY, OUTRO - EVERY)
 arpeggio(Am, EVERY, OUTRO, 0.3)
-for i in range(5):
-    fx.add(bell([81, 84, 86, 88, 93][i], 0.7), EVERY + 0.5 + i * 0.125, 0.28, pan=-0.4 + 0.2 * i)
-    fx.add(pluck([69, 72, 74, 76, 81][i], 0.25, 5000), EVERY + 0.5 + i * 0.125, 0.3, pan=-0.4 + 0.2 * i)
-fx.add(bell(88, 1.4), EVERY + 1.25, 0.18)
+for t0 in np.arange(EVERY + 0.4, EVERY + 1.2, 0.8 / 36):
+    fx.add(TK, t0, rng.uniform(0.05, 0.1), pan=rng.uniform(-0.3, 0.3))
+for i, m in enumerate((81, 84, 88, 93)):
+    fx.add(bell(m, 0.9), EVERY + 1.2 + i * 0.03, 0.22, pan=-0.3 + 0.2 * i)
+for m in (69, 72, 76):
+    fx.add(pluck(m, 0.3, 5000), EVERY + 1.2, 0.3)
+drums.add(CL, EVERY + 1.2, 0.35)
+fx.add(bell(88, 1.4), EVERY + 1.35, 0.16)
 
 
 fx.add(boom(), OUTRO, 0.45)
@@ -402,16 +447,23 @@ wet = np.stack([sg.fftconvolve(send.b[:, ch], ir[:, ch])[:N] for ch in range(2)]
 
 mix = drums.b + (low.b + pads.b + arp.b + echo) * pump[:, None] + wet + fx.b
 gap = np.ones(N)
-for g in (COMPILE, EVERY):
+for g, floor in ((COMPILE, 0.45), (EVERY, 0.3)):
     a0, a1 = int((g - 0.1) * SR), int(g * SR)
-    gap[a0:a1] = 0.0
-    gap[a0 - 300 : a0] = np.linspace(1, 0, 300)
+    gap[a0:a1] = floor
+    gap[a0 - 300 : a0] = np.linspace(1, floor, 300)
 mix *= gap[:, None]
 mix *= 10 ** (-14.5 / 20) / np.sqrt((mix**2).mean())
 lim = 0.8
 mag = np.abs(mix)
 mix = np.where(mag > lim, np.sign(mix) * (lim + 0.19 * np.tanh((mag - lim) / 0.19)), mix)
 mix *= np.minimum(1, (DUR - t) / 0.5)[:, None]
+
+hits = [{"t": COMPILE, "kind": "drop", "amp": 0.4}, {"t": EVERY, "kind": "drop"}, {"t": FINAL, "kind": "final"}]
+hits += [{"t": BLITZ + i * CUT, "kind": "cut"} for i in range(1, NCUTS)] + [{"t": PROJ, "kind": "cut"}]
+hits += [{"t": w, "kind": "wipe"} for w in WIPES if w != EVERY]
+hits += [{"t": PROJ + i * 2 * BEAT, "kind": "cut"} for i in range(1, 4)] + [{"t": MOL_SWITCH, "kind": "cut"}]
+with open("beats.json", "w") as fh:
+    json.dump({"kicks": sorted({round(k, 4) for k in kicks}), "hits": sorted(hits, key=lambda h: h["t"])}, fh)
 
 with wave.open("music.wav", "wb") as w:
     w.setnchannels(2)

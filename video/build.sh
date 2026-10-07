@@ -11,8 +11,10 @@ fi
 python3 music.py
 rm -rf frames
 python3 capture.py frames
-ffmpeg -y -loglevel error -framerate 30 -i frames/%04d.png -i music.wav \
-  -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p \
-  -color_primaries bt709 -color_trc bt709 -colorspace bt709 \
-  -c:a aac -b:a 192k -shortest -movflags +faststart maquette-27s.mp4
-echo "→ maquette-27s.mp4"
+V=(-c:v libx264 -preset veryslow -b:v 1680k -maxrate 6000k -bufsize 12000k -x264-params aq-mode=3
+   -pix_fmt yuv420p -color_primaries bt709 -color_trc bt709 -colorspace bt709)
+ffmpeg -nostdin -y -loglevel error -framerate 30 -i frames/%04d.png "${V[@]}" -pass 1 -passlogfile x264 -an -f mp4 /dev/null
+ffmpeg -nostdin -y -loglevel error -framerate 30 -i frames/%04d.png -i music.wav "${V[@]}" -pass 2 -passlogfile x264 \
+  -c:a aac -b:a 192k -shortest -movflags +faststart maquette-40s.mp4
+rm -f x264*.log x264*.mbtree
+echo "→ maquette-40s.mp4"

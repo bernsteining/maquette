@@ -56,12 +56,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
 .chip i { width: 10px; height: 10px; border-radius: 50%; background: var(--teal-hi); }
 .tag { display: inline-block; padding: 9px 20px; border-radius: 10px; font: 700 26px "JBM", monospace; color: var(--teal-hi); background: rgba(35,157,173,.16); border: 1.5px solid rgba(79,208,224,.45); }
 
-#s3label { font-weight: 800; font-stretch: 86%; font-size: 166px; line-height: .94; letter-spacing: 0.004em; white-space: nowrap; }
-#s3code { font: 500 37px "JBM", monospace; padding: 16px 28px; border-radius: 14px; white-space: nowrap; }
+#s3label { font-weight: 800; font-stretch: 86%; font-size: 132px; line-height: .94; letter-spacing: 0.004em; white-space: nowrap; }
+#s3code, .snip { font: 500 22px "JBM", monospace; line-height: 1.45; padding: 20px 26px; border-radius: 14px; white-space: pre; background: rgba(14,15,19,.92); color: #e8e9ec; border: 1.5px solid rgba(255,255,255,.1); box-shadow: 0 30px 70px -30px rgba(0,0,0,.6); }
 #s3ticks { display: flex; gap: 10px; }
 #s3ticks b { width: 62px; height: 8px; border-radius: 4px; }
 
 .wipe { position: absolute; top: -40px; height: 1160px; left: -400px; width: 2720px; display: none; }
+#flash { position: absolute; inset: 0; background: radial-gradient(ellipse 70% 65% at 50% 45%, #ffffff, rgba(255,255,255,.55)); opacity: 0; pointer-events: none; mix-blend-mode: screen; }
 </style>
 </head>
 <body>
@@ -104,9 +105,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
 
   <div class="scene" id="s3">
     <div class="abs mono" id="s3idx" style="white-space:pre;left:124px;top:104px;font-size:28px;font-weight:700;letter-spacing:.12em"></div>
-    <div class="abs" id="s3lw" style="left:116px;bottom:372px"><div id="s3label"></div></div>
-    <div class="abs" id="s3cw" style="left:120px;top:760px"><div id="s3code"></div></div>
-    <img class="abs" id="s3img" alt="" style="left:930px;top:60px;width:960px;height:960px">
+    <div class="abs" id="s3lw" style="left:116px;top:165px"><div id="s3label"></div></div>
+    <div class="abs" id="s3cw" style="left:120px;top:448px"><div id="s3code"></div></div>
+    <img class="abs" id="s3img" alt="" style="left:1000px;top:60px;width:960px;height:960px">
     <div class="abs" id="s3ticks" style="left:124px;top:968px"></div>
   </div>
 
@@ -125,16 +126,38 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
   <div class="scene" id="s4b" style="background:#182028">
     <img class="abs" id="tokyo" alt="" style="left:0;top:0;width:1920px;height:1080px">
     <div class="abs" style="inset:0;background:linear-gradient(90deg,rgba(24,32,40,.92) 0%,rgba(24,32,40,.7) 30%,rgba(24,32,40,0) 50%)"></div>
-    <div class="abs" id="t4b" style="left:120px;top:296px"><span class="tag">maquette-gltf</span></div>
-    <div class="abs h" id="h4b" style="left:120px;top:366px;font-size:104px">glTF 2.0,<br>physically<br>based.</div>
-    <div class="abs" id="chips4" style="left:120px;top:738px;width:640px;display:flex;flex-wrap:wrap;gap:12px"></div>
+    <div class="abs" id="t4b" style="left:120px;top:90px"><span class="tag">maquette-gltf</span></div>
+    <div class="abs h" id="h4b" style="left:120px;top:150px;font-size:76px">glTF 2.0,<br>physically based.</div>
+    <div class="abs" id="sn4b" style="left:120px;top:340px"><div class="snip" id="code4b" style="font-size:20px"></div></div>
+    <div class="abs" id="chips4" style="left:120px;top:850px;width:760px;display:flex;flex-wrap:wrap;gap:12px"></div>
+  </div>
+
+  <div class="scene" id="s4c" style="background:#0b1020">
+    <img class="abs" id="projimg" alt="" style="left:0;top:0;width:1920px;height:1080px">
+    <div class="abs" style="inset:0;background:linear-gradient(180deg,rgba(11,16,32,.55) 0%,rgba(11,16,32,0) 18%,rgba(11,16,32,0) 52%,rgba(11,16,32,.9) 100%)"></div>
+    <div class="abs mono" id="t4c" style="left:0;right:0;top:64px;text-align:center;font-size:28px;font-weight:700;letter-spacing:.12em;color:rgba(246,247,249,.72)">14 PROJECTIONS  ·  ONE CONFIG KEY</div>
+    <div class="abs" id="pl4c" style="left:0;right:0;top:700px;text-align:center"><div id="projname" class="h" style="font-size:150px;font-weight:800;font-stretch:86%;line-height:1"></div></div>
+    <div class="abs" id="pc4c" style="left:0;right:0;top:880px;display:flex;justify-content:center"><div id="projcode" style="font:500 37px 'JBM',monospace;padding:16px 28px;border-radius:14px;background:rgba(255,255,255,.14);white-space:nowrap"></div></div>
+    <div class="abs" id="projticks" style="left:0;right:0;top:1000px;display:flex;justify-content:center;gap:10px"></div>
+  </div>
+
+  <div class="scene" id="s4d">
+    <div class="grid" id="g4d"></div><div class="glow"></div>
+    <div class="abs" id="t4d" style="left:120px;top:90px"><span class="tag">molfig</span></div>
+    <div class="abs h" id="h4d" style="left:120px;top:150px;font-size:76px">Molecules, too.</div>
+    <div class="abs" id="mc4d" style="left:120px;top:262px"><div class="snip" id="molcode"></div></div>
+    <div class="abs" id="chips4d" style="left:120px;top:832px;display:flex;gap:12px"></div>
+    <div class="abs mono" id="stat4d" style="left:124px;top:922px;font-size:26px;font-weight:600;letter-spacing:.06em;color:rgba(246,247,249,.62)"></div>
+    <img class="abs" id="molc" alt="" style="left:880px;top:60px;width:960px;height:960px">
+    <img class="abs" id="mols" alt="" style="left:880px;top:60px;width:960px;height:960px">
   </div>
 
   <div class="scene" id="s5" style="background:var(--paper);color:var(--ink)">
-    <div class="abs h" id="h5a" style="left:120px;top:206px;font-size:176px;font-weight:800;font-stretch:82%">One renderer.</div>
-    <div class="abs h" id="h5b" style="left:120px;top:376px;font-size:176px;font-weight:800;font-stretch:82%;color:var(--teal)">Runs everywhere.</div>
-    <div class="abs" id="chips5" style="left:120px;top:640px;display:flex;gap:24px"></div>
-    <div class="abs mono" id="m5" style="left:124px;top:806px;font-size:33px;font-weight:500;color:#40434d">pure WebAssembly · headless · deterministic · no GPU</div>
+    <div class="abs mono" id="e5" style="left:124px;top:150px;font-size:30px;font-weight:700;letter-spacing:.14em;color:var(--teal)">TYPST UNIVERSE</div>
+    <div class="abs h" id="h5a" style="left:120px;top:206px;font-size:176px;font-weight:800;font-stretch:82%">One import away.</div>
+    <div class="abs editor" id="ed5" style="left:120px;top:456px"><div id="imp5" style="font:500 58px 'JBM',monospace;padding:40px 52px;white-space:nowrap;color:var(--soft)"></div></div>
+    <div class="abs mono" id="m5" style="left:124px;top:676px;font-size:33px;font-weight:500;color:#40434d">no install · no external tools · just <span style="color:var(--teal);font-weight:700">typst compile</span></div>
+    <div class="abs mono" id="x5" style="left:124px;top:930px;font-size:24px;font-weight:500;color:#8a8e99;letter-spacing:.04em">also in progress: CLI · Python · JavaScript · C ABI</div>
   </div>
 
   <div class="scene" id="s6">
@@ -150,20 +173,26 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--
         <span class="mono" style="font-size:40px;font-weight:700">bernsteining.github.io/maquette</span>
       </div>
     </div>
-    <div class="abs mono" id="gh6" style="left:0;right:0;top:690px;text-align:center;font-size:36px;font-weight:500;color:var(--soft)">github.com/bernsteining/maquette</div>
-    <div class="abs mono" id="lic6" style="left:0;right:0;top:796px;text-align:center;font-size:26px;font-weight:500;color:var(--muted);letter-spacing:.08em">MIT license · on Typst Universe</div>
+    <div class="abs mono" id="gh6" style="left:0;right:0;top:690px;text-align:center;font-size:36px;font-weight:500;color:var(--soft)">typst.app/universe/package/maquette</div>
+    <div class="abs mono" id="lic6" style="left:0;right:0;top:796px;text-align:center;font-size:26px;font-weight:500;color:var(--muted);letter-spacing:.08em">MIT license · github.com/bernsteining/maquette</div>
     <div class="vig"></div>
   </div>
 
   <div class="wipe" id="wA"></div><div class="wipe" id="wB"></div>
+  <div id="flash"></div>
 </div>
 
 <script type="module">
 import * as S from "./shared.js";
-const { T, prog, lerp, clamp, easeOutCubic, easeOutExpo, easeInOut, easeOutBack, pad } = S;
+const { T, prog, lerp, clamp, easeOutCubic, easeOutExpo, easeInOut, pad, spring } = S;
 const $ = (id) => document.getElementById(id);
 const tf = (el, { x = 0, y = 0, s = 1, r = 0, o = 1 } = {}) => { el.style.transform = `translate(${x}px,${y}px) scale(${s}) rotate(${r}deg)`; el.style.opacity = o; };
-const rise = (el, t, t0, d = 0.55, dist = 46) => { const p = easeOutExpo(prog(t, t0, t0 + d)); tf(el, { y: (1 - p) * dist, o: prog(t, t0, t0 + 0.14) }); };
+const rise = (el, t, t0, d = 0.55, dist = 46) => { const p = spring(t, t0); tf(el, { y: (1 - p) * dist, o: prog(t, t0, t0 + 0.14) }); };
+const BEATS = await (await fetch("beats.json")).json();
+const envelope = (t, times, decay) => { let e = 0; for (const tk of times) { const [t0, amp] = typeof tk === "number" ? [tk, 1] : tk, d = t - t0; if (d >= 0 && d < 1.5) e = Math.max(e, amp * Math.exp(-d * decay)); } return e; };
+const DROPS = BEATS.hits.filter((h) => h.kind === "drop" || h.kind === "final").map((h) => [h.t, h.amp ?? 1]);
+const kick = (t) => envelope(t, BEATS.kicks, 14), drop = (t) => envelope(t, DROPS, 6), shake = (t) => envelope(t, DROPS, 11);
+const gridPulse = (el, t) => { el.style.opacity = 0.7 + 0.45 * kick(t); };
 
 let pending = []; window.__errors = [];
 const setImg = (el, src) => {
@@ -180,7 +209,8 @@ for (const id of ["logo1", "logo6", "bigtorus"]) {
 for (const id of ["word1", "word6"]) $(id).innerHTML = [..."maquette"].map((c) => `<span class="ch"><i>${c}</i></span>`).join("");
 $("s3ticks").innerHTML = S.CUTS.map(() => "<b></b>").join("");
 $("chips4").innerHTML = ["PBR materials", "image-based lighting", "shadows", "SSAO", "animations", "Draco"].map((c) => `<span class="chip" style="background:rgba(14,15,19,.55);border-color:rgba(255,255,255,.16);color:#e8e9ec">${c}</span>`).join("");
-$("chips5").innerHTML = ["Typst", "CLI", "Python", "JavaScript", "C ABI"].map((c, i) => `<span class="h" style="font-size:60px;font-weight:700;padding:16px 38px;border-radius:999px;border:3.5px solid var(--ink);${i === 0 ? "background:var(--ink);color:var(--paper)" : ""}">${c}</span>`).join("");
+$("projticks").innerHTML = S.PROJS.map(() => "<b style=\"display:block;width:62px;height:8px;border-radius:4px;background:#f6f7f9\"></b>").join("");
+$("chips4d").innerHTML = ["PDB", "mmCIF", "BinaryCIF", "XYZ"].map((c) => `<span class="chip"><i></i>${c}</span>`).join("");
 
 const RE = /("[^"]*")|(#[\w-]+|\$\w+)|(\b\d+(?:\.\d+)?\b)|(\b[a-z_]+(?=:))|(\b(?:module|difference|color|rotate|sphere|cylinder|read)\b)|([()\[\]{},;:=])/g;
 function tokens(line) {
@@ -208,22 +238,24 @@ function lineHTML(line, n = Infinity, caret = false) {
 function s1(t) {
   $("g1").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
   $("s1in").style.transform = `scale(${lerp(1, 1.045, t / T.s2)})`;
-  tf($("logo1"), { s: Math.max(0.001, easeOutBack(prog(t, 0.05, 0.6))), r: lerp(-30, 0, easeOutCubic(prog(t, 0.05, 0.65))), o: prog(t, 0.05, 0.15) });
+  gridPulse($("g1"), t);
+  tf($("logo1"), { s: Math.max(0.001, spring(t, 0.05, 220, 13)), r: lerp(-30, 0, easeOutCubic(prog(t, 0.05, 0.65))), o: prog(t, 0.05, 0.15) });
   $("logo1").querySelectorAll("path").forEach((p, i) => { p.style.strokeDashoffset = 1 - easeInOut(prog(t, 0.22 + i * 0.013, 0.82 + i * 0.013)); });
-  $("word1").querySelectorAll("i").forEach((el, i) => { el.style.transform = `translateY(${(1 - easeOutExpo(prog(t, 0.38 + i * 0.045, 1.0 + i * 0.045))) * 115}%)`; });
+  $("word1").querySelectorAll("i").forEach((el, i) => { el.style.transform = `translateY(${(1 - spring(t, 0.38 + i * 0.045, 200, 17)) * 115}%)`; });
   rise($("tag1"), t, 1.0); rise($("sub1"), t, 1.5);
 }
 
 const C2 = ['#import "@preview/maquette:0.2.0": render-obj', "", "#render-obj(", '  read("bunny.obj"),', "  up: (0, 1, 0),", "  azimuth: 180,", ")"];
 const C2total = C2.reduce((a, l) => a + l.length + 1, 0);
 function s2(t) {
-  const { S2 } = S, f = Math.round(t * S.FPS);
+  const { S2 } = S, ff = t * S.FPS, k = kick(t);
   $("g2").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
+  gridPulse($("g2"), t);
   { const pin = easeOutExpo(prog(t, T.s2 - 0.08, T.s2 + 0.55)), pout = easeInOut(prog(t, S2.scrub0 - 0.2, S2.scrub0 + 0.04));
     tf($("h2a"), { y: (1 - pin) * 50 - pout * 46, o: prog(t, T.s2 - 0.08, T.s2 + 0.06) * (1 - pout) }); }
   rise($("h2b"), t, S2.scrub0); rise($("h2c"), t, S2.scrub0 + 0.16);
-  { const p = easeOutExpo(prog(t, T.s2 - 0.04, T.s2 + 0.65)); tf($("ed2"), { y: (1 - p) * 90, o: prog(t, T.s2 - 0.04, T.s2 + 0.1) }); }
-  { const p = easeOutExpo(prog(t, T.s2, T.s2 + 0.85)); tf($("page"), { x: (1 - p) * 260, y: (1 - p) * 120 - (t - T.s2) * 4, r: lerp(7, 1.6, p), o: prog(t, T.s2, T.s2 + 0.14) }); }
+  { const p = spring(t, T.s2 - 0.04); tf($("ed2"), { y: (1 - p) * 90, o: prog(t, T.s2 - 0.04, T.s2 + 0.1) }); }
+  { const p = spring(t, T.s2, 120, 15); tf($("page"), { x: (1 - p) * 260, y: (1 - p) * 120 - (t - T.s2) * 4, r: lerp(7, 1.6, p), o: prog(t, T.s2, T.s2 + 0.14) }); }
   let n = Math.floor(C2total * prog(t, S2.type0, S2.type1));
   const typing = t >= S2.type0 - 0.2 && t < S2.compile;
   const ps = easeOutCubic(prog(t, S2.sss - 0.14, S2.sss + 0.14)), flash = (1 - prog(t, S2.sss + 0.15, S2.sss + 1.0)) * (t > S2.sss - 0.14 ? 1 : 0);
@@ -231,7 +263,7 @@ function s2(t) {
   let h = "";
   C2.forEach((line, i) => {
     if (i === 6) {
-      for (const extra of ["  lights: (backlight,),", "  sss: (intensity: 4, power: 3.5),"])
+      for (const extra of ['  lights: ((type: "positional", color: "#ff0000",', "    vector: (-0.1, 0.14, -0.04), intensity: 3),),", "  sss: (intensity: 4, power: 3.5),"])
         h += `<div class="ln" style="height:${41 * ps}px;opacity:${ps};background:rgba(79,208,224,${0.2 * flash})">${lineHTML(extra)}</div>`;
     }
     const show = Math.min(n, line.length), isLast = n <= line.length;
@@ -245,40 +277,38 @@ function s2(t) {
   const pulse = hot || (t > S2.sss - 0.1 && t < S2.sss + 0.5) ? 1 : lerp(1, 0.55, prog(t, S2.compile + 0.1, S2.compile + 0.6));
   $("ok2").style.opacity = t < S2.compile ? 0 : pulse;
   const shown = t >= S2.compile;
-  $("figph").style.opacity = shown ? 0 : 1;
-  $("figflash").style.opacity = shown ? 0.85 * (1 - prog(t, S2.compile, S2.compile + 0.35)) : 0;
-  const pop = lerp(0.9, 1, easeOutBack(prog(t, S2.compile, S2.compile + 0.45)));
+  $("figph").style.opacity = 1 - prog(t, S2.compile - 0.12, S2.compile + 0.05);
+  $("figflash").style.opacity = 0.4 * prog(t, S2.compile - 0.1, S2.compile) * (1 - easeOutCubic(prog(t, S2.compile, S2.compile + 0.6)));
+  const pop = lerp(0.96, 1, spring(t, S2.compile, 170, 18)) * (1 + 0.014 * k);
   const x = prog(t, S2.sss, S2.sss + S2.sssFade), A = $("bunA"), B = $("bunB");
   A.style.display = shown && x < 1 ? "" : "none"; B.style.display = shown && x > 0 ? "" : "none";
-  if (shown && x < 1) { setImg(A, S.frameFile("plain", f)); A.style.transform = `scale(${pop})`; A.style.opacity = 1; }
-  if (shown && x > 0) { setImg(B, S.frameFile("sss", f)); B.style.opacity = x; }
+  if (shown && x < 1) { setImg(A, S.frameFile("plain", ff)); A.style.transform = `scale(${pop})`; A.style.opacity = easeOutCubic(prog(t, S2.compile, S2.compile + 0.25)); }
+  if (shown && x > 0) { setImg(B, S.frameFile("sss", ff)); B.style.transform = `scale(${pop})`; B.style.opacity = x; }
   [...$("chips2").children].forEach((c, i) => rise(c, t, S2.chips + i * 0.14, 0.5, 30));
 }
 
 function s3(t) {
-  const { i, u } = S.cutAt(t), c = S.CUTS[i], f = Math.round(t * S.FPS);
-  const light = c.fg !== "#f6f7f9" && c.fg !== "#ffffff";
+  const { i, u } = S.cutAt(t), c = S.CUTS[i], ff = t * S.FPS;
   $("s3").style.background = c.bg; $("s3").style.color = c.fg;
   $("s3idx").textContent = `${String(i + 1).padStart(2, "0")} / ${String(S.CUTS.length).padStart(2, "0")}  ·  ONE CONFIG KEY AWAY`;
   $("s3idx").style.opacity = 0.62;
   $("s3label").innerHTML = c.label.replace("\n", "<br>");
-  $("s3code").innerHTML = lineHTML(c.code).replace(/class="t-\w"/g, "");
-  $("s3code").style.background = light ? "rgba(14,15,19,.92)" : "rgba(255,255,255,.14)";
-  $("s3code").style.color = light ? "#f6f7f9" : c.fg;
-  const p = easeOutExpo(prog(u, 0, 0.45));
-  tf($("s3lw"), { x: (1 - p) * -70, o: prog(u, 0, 0.07) });
-  const p2 = easeOutExpo(prog(u, 0.08, 0.52));
-  tf($("s3cw"), { x: (1 - p2) * -60, o: prog(u, 0.07, 0.15) });
-  setImg($("s3img"), S.frameFile("feat", f));
-  tf($("s3img"), { s: lerp(1.12, 1, easeOutExpo(prog(u, 0, 0.4))) });
+  $("s3code").innerHTML = c.code(u, t, c.id).map((l) => lineHTML(l)).join("\n");
+  const p = spring(u, 0, 200, 15);
+  tf($("s3lw"), { x: (1 - p) * -90, o: prog(u, 0, 0.07) });
+  const p2 = spring(u, 0.08, 200, 15);
+  tf($("s3cw"), { x: (1 - p2) * -70, o: prog(u, 0.07, 0.15) });
+  setImg($("s3img"), S.frameFile("feat", ff));
+  tf($("s3img"), { s: lerp(1.12, 1, spring(u, 0, 160, 15)) * (1 + 0.016 * kick(t)) });
   [...$("s3ticks").children].forEach((b, k) => { b.style.background = c.fg; b.style.opacity = k === i ? 1 : k < i ? 0.5 : 0.18; });
 }
 
 function s4a(t) {
-  const a = T.s4a, f = Math.round(t * S.FPS), hole = S.scadHole(t);
+  const a = T.s4a, ff = t * S.FPS, hole = S.scadHole(t);
   $("g4").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
+  gridPulse($("g4"), t);
   rise($("t4a"), t, a + 0.02, 0.4, 30); rise($("h4a"), t, a + 0.06, 0.5, 40);
-  { const p = easeOutExpo(prog(t, a + 0.08, a + 0.6)); tf($("ed4"), { y: (1 - p) * 70, o: prog(t, a + 0.08, a + 0.2) }); }
+  { const p = spring(t, a + 0.08); tf($("ed4"), { y: (1 - p) * 70, o: prog(t, a + 0.08, a + 0.2) }); }
   const hot = Math.abs(hole - 25) > 0.05 || (t > a + 0.5 && t < a + 2.3);
   const lines = S.scadSrc("@@").trimEnd().split("\n");
   $("code4").innerHTML = lines.map((l, i) => {
@@ -286,56 +316,96 @@ function s4a(t) {
     const inner = l.includes("@@") ? `hole <span class="t-p">=</span> <span class="val t-n${hot ? " hot" : ""}">${hole.toFixed(0)}</span><span class="t-p">;</span>` : lineHTML(l);
     return `<div class="ln" style="height:38px;opacity:${o}">${inner}</div>`;
   }).join("");
-  setImg($("scadimg"), S.frameFile("scad", f));
-  tf($("scadimg"), { s: lerp(0.86, 1, easeOutExpo(prog(t, a, a + 0.5))), o: prog(t, a, a + 0.12) });
+  setImg($("scadimg"), S.frameFile("scad", ff));
+  tf($("scadimg"), { s: lerp(0.86, 1, spring(t, a, 170, 14)) * (1 + 0.014 * kick(t)), o: prog(t, a, a + 0.12) });
 }
 
 function s4b(t) {
-  const a = T.s4b, f = Math.max(Math.ceil(a * S.FPS), Math.round(t * S.FPS));
-  setImg($("tokyo"), S.frameFile("tokyo", f));
-  $("tokyo").style.transform = `scale(${lerp(1.07, 1.0, easeOutCubic(prog(t, a, T.s5)))})`;
+  const a = T.s4b, ff = Math.max(Math.ceil(a * S.FPS), t * S.FPS);
+  setImg($("tokyo"), S.frameFile("tokyo", ff));
+  $("tokyo").style.transform = `scale(${lerp(1.07, 1.0, easeOutCubic(prog(t, a, T.s4d)))})`;
   rise($("t4b"), t, a + 0.2, 0.45, 30); rise($("h4b"), t, a + 0.26, 0.55, 46);
+  $("code4b").innerHTML = S.gltfCode(t).map((l) => lineHTML(l)).join("\n");
+  { const p = spring(t, a + 0.36, 220, 15); tf($("sn4b"), { y: (1 - p) * 40, o: prog(t, a + 0.36, a + 0.5) }); }
   [...$("chips4").children].forEach((c, i) => rise(c, t, a + 0.62 + i * 0.07, 0.45, 26));
 }
 
-function s5(t) {
-  const a = T.s5;
-  rise($("h5a"), t, a - 0.05, 0.5, 70); rise($("h5b"), t, a + 0.06, 0.5, 70);
-  [...$("chips5").children].forEach((c, i) => { const p = easeOutBack(prog(t, a + 0.5 + i * 0.125, a + 0.85 + i * 0.125)); tf(c, { s: Math.max(0.001, p), o: prog(t, a + 0.5 + i * 0.125, a + 0.58 + i * 0.125) }); });
-  rise($("m5"), t, a + 1.25, 0.45, 26);
+function s4c(t) {
+  const a = T.s4c, ff = Math.max(Math.ceil(a * S.FPS), t * S.FPS), { i, u } = S.projAt(t);
+  setImg($("projimg"), S.frameFile("proj", ff));
+  $("projimg").style.transform = `scale(${lerp(1.05, 1, spring(u, 0, 160, 16)) * (1 + 0.008 * kick(t))})`;
+  rise($("t4c"), t, a + 0.1, 0.45, 24);
+  $("projname").textContent = ["Perspective", "Fisheye", "Curvilinear", "Tiny planet"][i];
+  tf($("pl4c"), { y: (1 - spring(u, 0, 200, 15)) * 60, o: prog(u, 0, 0.08) });
+  $("projcode").innerHTML = lineHTML(`projection: "${S.PROJS[i]}"`);
+  tf($("pc4c"), { y: (1 - spring(u, 0.08, 220, 15)) * 40, o: prog(u, 0.06, 0.16) });
+  [...$("projticks").children].forEach((el, k) => { el.style.opacity = k === i ? 1 : k < i ? 0.5 : 0.18; });
+  $("projticks").style.opacity = prog(t, a + 0.2, a + 0.35);
 }
 
+function s4d(t) {
+  const a = T.s4d, ff = Math.max(Math.ceil(a * S.FPS), t * S.FPS), sw = S.MOL_SWITCH;
+  $("g4d").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
+  gridPulse($("g4d"), t);
+  rise($("t4d"), t, a + 0.05, 0.45, 30); rise($("h4d"), t, a + 0.1, 0.55, 46);
+  [...$("chips4d").children].forEach((c, i) => rise(c, t, a + 0.5 + i * 0.08, 0.45, 26));
+  $("stat4d").textContent = `GroEL–GroES · ${Math.round(58870 * easeOutCubic(prog(t, a + 0.8, a + 1.8))).toLocaleString("en-US")} atoms · 21 chains`;
+  rise($("stat4d"), t, a + 0.8, 0.45, 20);
+  const after = t >= sw, cs = spring(t, after ? sw : a + 0.3, 220, 15);
+  const flashOn = after && t < sw + 0.6;
+  $("molcode").innerHTML = S.molCode(t, after).map((l, i) => i >= 5 && i <= 7 && flashOn ? `<span style="background:rgba(79,208,224,${0.25 * (1 - prog(t, sw, sw + 0.6))});border-radius:4px">${lineHTML(l)}</span>` : lineHTML(l)).join("\n");
+  tf($("mc4d"), { x: (1 - cs) * -40, o: prog(t, a + 0.3, a + 0.45) });
+  const x = prog(t, sw - 0.05, sw + 0.3), pop = lerp(0.88, 1, spring(t, a, 170, 14)) * (1 + 0.014 * kick(t)), C = $("molc"), F = $("mols");
+  C.style.display = x < 1 ? "" : "none"; F.style.display = x > 0 ? "" : "none";
+  if (x < 1) { setImg(C, S.frameFile("molc", ff)); C.style.transform = `scale(${pop})`; C.style.opacity = (1 - x) * prog(t, a, a + 0.15); }
+  if (x > 0) { setImg(F, S.frameFile("mols", ff)); F.style.transform = `scale(${pop * lerp(0.9, 1, spring(t, sw, 200, 13))})`; F.style.opacity = x; }
+}
+
+function s5(t) {
+  const a = T.s5, imp = '#import "@preview/maquette:0.2.0": *';
+  rise($("e5"), t, a - 0.05, 0.45, 30); rise($("h5a"), t, a, 0.5, 70);
+  { const p = spring(t, a + 0.25, 220, 15); tf($("ed5"), { y: (1 - p) * 60, s: 1 + 0.01 * kick(t), o: prog(t, a + 0.25, a + 0.37) }); }
+  const n = Math.floor(clamp((t - a - 0.4) / 0.8) * imp.length);
+  $("imp5").innerHTML = lineHTML(imp, n, n < imp.length && t > a + 0.4);
+  rise($("m5"), t, a + 1.35, 0.45, 26); rise($("x5"), t, a + 1.7, 0.45, 20);
+}
 function s6(t) {
   const a = T.s6;
   $("g6").style.transform = `translate(${-t * 10}px,${-t * 6}px)`;
+  gridPulse($("g6"), t);
   tf($("bigtorus"), { r: (t - a) * 7, s: lerp(0.94, 1.03, prog(t, a, T.end)), o: 0.17 * prog(t, a, a + 0.6) });
   $("bigtorus").querySelectorAll("path").forEach((p, i) => { p.style.strokeDashoffset = 1 - easeInOut(prog(t, a - 0.1 + i * 0.01, a + 0.7 + i * 0.01)); });
-  tf($("logo6"), { s: Math.max(0.001, easeOutBack(prog(t, a - 0.05, a + 0.42))), r: lerp(-30, 0, easeOutCubic(prog(t, a - 0.05, a + 0.45))), o: prog(t, a - 0.05, a + 0.05) });
+  tf($("logo6"), { s: Math.max(0.001, spring(t, a - 0.05, 220, 13)), r: lerp(-30, 0, easeOutCubic(prog(t, a - 0.05, a + 0.45))), o: prog(t, a - 0.05, a + 0.05) });
   $("logo6").querySelectorAll("path").forEach((p) => { p.style.strokeDashoffset = 0; });
-  $("word6").querySelectorAll("i").forEach((el, i) => { el.style.transform = `translateY(${(1 - easeOutExpo(prog(t, a + 0.02 + i * 0.03, a + 0.55 + i * 0.03))) * 115}%)`; });
-  { const p = easeOutBack(prog(t, a + 0.5, a + 0.95)), hit = Math.exp(-Math.max(0, t - (a + 2)) * 7) * (t >= a + 2 ? 0.05 : 0);
+  $("word6").querySelectorAll("i").forEach((el, i) => { el.style.transform = `translateY(${(1 - spring(t, a + 0.02 + i * 0.03, 200, 17)) * 115}%)`; });
+  { const p = spring(t, a + 0.5, 220, 14), hit = Math.exp(-Math.max(0, t - (a + 2)) * 7) * (t >= a + 2 ? 0.05 : 0);
     tf($("cta6"), { s: lerp(0.8, 1, p) + hit, o: prog(t, a + 0.5, a + 0.62) }); }
   rise($("gh6"), t, a + 1.0, 0.5, 30); rise($("lic6"), t, a + 1.25, 0.5, 26);
 }
 
 const WIPES = [
+  ...S.CUTS.slice(1).map((c, i) => ({ tc: T.s3 + (i + 1) * T.cut, c: [c.fg, c.bg], h: 0.13, lag: 0.035 })),
+  { tc: T.s4c, c: ["#f9d72c", "#0b1020"], h: 0.13, lag: 0.035 },
   { tc: T.s2, c: ["#239DAD", "#0e0f13"] },
   { tc: T.s4b, c: ["#4fd0e0", "#182028"] },
+  { tc: T.s4a, c: ["#a78bfa", "#0e0f13"] },
+  { tc: T.s4d, c: ["#ec4899", "#0e0f13"] },
   { tc: T.s5, c: ["#239DAD", "#f6f7f9"] },
   { tc: T.s6, c: ["#4f46e5", "#0e0f13"] },
 ];
 function wipes(t) {
-  const h = 0.3, lag = 0.07, els = [$("wA"), $("wB")];
-  const w = WIPES.find((w) => t > w.tc - h && t < w.tc + h + lag);
+  const els = [$("wA"), $("wB")];
+  const w = WIPES.find((w) => { const h = w.h ?? 0.3, lag = w.lag ?? 0.07; return t > w.tc - h && t < w.tc + h + lag; });
   els.forEach((el, k) => {
     if (!w) { el.style.display = "none"; return; }
+    const h = w.h ?? 0.3, lag = w.lag ?? 0.07;
     const p = easeInOut(prog(t, w.tc - h + k * lag, w.tc + h + k * lag));
     el.style.display = "block"; el.style.background = w.c[k];
     el.style.transform = `translateX(${lerp(-2760, 2760, p)}px) skewX(-14deg)`;
   });
 }
 
-const SCENES = [["s1", 0, T.s2, s1], ["s2", T.s2, T.s3, s2], ["s3", T.s3, T.s4a, s3], ["s4a", T.s4a, T.s4b, s4a], ["s4b", T.s4b, T.s5, s4b], ["s5", T.s5, T.s6, s5], ["s6", T.s6, 1e9, s6]];
+const SCENES = [["s1", 0, T.s2, s1], ["s2", T.s2, T.s3, s2], ["s3", T.s3, T.s4c, s3], ["s4c", T.s4c, T.s4a, s4c], ["s4a", T.s4a, T.s4b, s4a], ["s4b", T.s4b, T.s4d, s4b], ["s4d", T.s4d, T.s5, s4d], ["s5", T.s5, T.s6, s5], ["s6", T.s6, 1e9, s6]];
 window.seek = async (f) => {
   const t = f / S.FPS; pending = [];
   for (const [id, a, b, fn] of SCENES) {
@@ -344,6 +414,9 @@ window.seek = async (f) => {
     if (on) fn(t);
   }
   wipes(t);
+  const d = drop(t), q = shake(t);
+  $("flash").style.opacity = 0.3 * d * d;
+  $("stage").style.transform = q > 0.01 ? `translate(${7 * q * Math.sin(t * 2 * Math.PI * 10)}px,${5 * q * Math.cos(t * 2 * Math.PI * 8)}px) scale(${1 + 0.012 * q})` : "";
   await Promise.all(pending);
   return window.__errors.length;
 };

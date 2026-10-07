@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Sources de la vidéo de présentation de maquette (27 s, 1080p, 120 BPM)",
+  "description": "Sources de la vidéo de présentation de maquette (40 s, 1080p, 120 BPM)",
   "scripts": {
     "sequences": "node render_seq.mjs all && node render_seq.mjs tokyo",
     "music": "python3 music.py",
