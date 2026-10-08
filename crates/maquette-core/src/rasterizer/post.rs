@@ -603,48 +603,89 @@ impl PixelBuffer {
         self.blur_and_blend(buf, plane, intensity, radius);
     }
 
-    /// Glow: blur the model's silhouette and lay `color` over the pixels
-    /// around the model at the blurred coverage times `intensity`, leaving the
-    /// model itself untouched.
-    pub fn apply_glow(&mut self, color: (u8, u8, u8), intensity: f32, radius: usize) {
-        let plane = self.width * self.height + 8;
-        let mut mask = vec![0.0f32; plane];
-        for (m, &z) in mask.iter_mut().zip(&self.zbuf) {
-            if z != f32::NEG_INFINITY { *m = 1.0; }
+    /// Fraction of each `factor`×`factor` block covered by the model (depth
+    /// or translucent coverage), one value per output pixel.
+    pub fn coverage(&self, factor: usize) -> Vec<f32> {
+        let f = factor.max(1);
+        let (nw, nh) = (self.width / f, self.height / f);
+        let inv = 1.0 / (f * f) as f32;
+        let mut out = vec![0.0f32; nw * nh];
+        for ny in 0..nh {
+            for nx in 0..nw {
+                let mut sum = 0.0f32;
+                for sy in 0..f {
+                    let row = (ny * f + sy) * self.width + nx * f;
+                    for si in row..row + f {
+                        sum += if self.zbuf[si] != f32::NEG_INFINITY { 1.0 } else { self.tcov.get(si).copied().unwrap_or(0.0) };
+                    }
+                }
+                out[ny * nw + nx] = (sum * inv).fmin(1.0);
+            }
         }
+        out
+    }
+
+    /// Hand `apply_glow` the output-resolution model `coverage` and the
+    /// background colour, so anti-aliased edges take the halo in proportion to
+    /// the background they show. With `deferred`, the pixels are left alone and
+    /// the halo is composited later by [`merge_halo`](Self::merge_halo).
+    pub fn set_glow_coverage(&mut self, coverage: Vec<f32>, bg: (u8, u8, u8), deferred: bool) {
+        self.coverage = coverage;
+        self.bg = [bg.0 as f32, bg.1 as f32, bg.2 as f32];
+        self.glow_deferred = deferred;
+    }
+
+    /// Glow: blur the model's silhouette and lay `color` over the background
+    /// around it at the blurred coverage times `intensity`, leaving the model
+    /// itself untouched.
+    pub fn apply_glow(&mut self, color: (u8, u8, u8), intensity: f32, radius: usize) {
+        let n = self.width * self.height;
+        let plane = n + 8;
+        let mut mask = std::mem::take(&mut self.coverage);
+        if mask.len() != n {
+            mask = self.zbuf.iter().map(|&z| if z != f32::NEG_INFINITY { 1.0 } else { 0.0 }).collect();
+        }
+        let cov = mask.clone();
+        mask.resize(plane, 0.0);
         let blurred = Self::dual_kawase_blur(mask, plane, 1, self.width, self.height, radius);
-        let alpha: Vec<f32> = blurred.iter().zip(self.zbuf.iter().chain(std::iter::repeat(&0.0)))
-            .map(|(&b, &z)| if z == f32::NEG_INFINITY { (b * intensity).fmin(1.0) } else { 0.0 })
-            .collect();
-        let ap = alpha.as_ptr();
+        let halo: Vec<f32> = blurred[..n].iter().map(|&b| (b * intensity).fmin(1.0)).collect();
+        self.halo = halo.iter().map(|&a| (a * 255.0 + 0.5) as u8).collect();
+        self.halo_color = color;
+        if self.glow_deferred { return; }
+        let mut alpha: Vec<f32> = halo.iter().zip(&cov).map(|(&a, &c)| a * (1.0 - c)).collect();
+        alpha.resize(plane, 0.0);
+        let mut cv = cov;
+        cv.resize(plane, 1.0);
+        let (ap, cp) = (alpha.as_ptr(), cv.as_ptr());
         let rgb = [color.0 as f32, color.1 as f32, color.2 as f32];
         let col = [f32x4_splat(rgb[0]), f32x4_splat(rgb[1]), f32x4_splat(rgb[2])];
-        let half = f32x4_splat(0.5);
-        let zp = self.zbuf.as_ptr();
-        let empty = f32x4_splat(f32::NEG_INFINITY);
+        let bg = self.bg;
+        let bgv = [f32x4_splat(bg[0]), f32x4_splat(bg[1]), f32x4_splat(bg[2])];
+        let (half, zero, one) = (f32x4_splat(0.5), f32x4_splat(0.0), f32x4_splat(1.0));
         self.map_rgb(
-            |i| i32x4_bitmask(f32x4_eq(unsafe { v128_load(zp.add(i) as *const v128) }, empty)) == 0,
+            |i| i32x4_bitmask(f32x4_eq(unsafe { v128_load(cp.add(i) as *const v128) }, one)) == 0xF,
             |i, px| {
                 let a = unsafe { v128_load(ap.add(i) as *const v128) };
+                let empty = f32x4_eq(unsafe { v128_load(cp.add(i) as *const v128) }, zero);
                 let mut c = 0;
                 px.map(|v| {
-                    let out = f32x4_add(f32x4_add(v, f32x4_mul(f32x4_sub(col[c], v), a)), half);
+                    let base = v128_bitselect(v, bgv[c], empty);
+                    let out = f32x4_add(f32x4_add(v, f32x4_mul(f32x4_sub(col[c], base), a)), half);
                     c += 1;
                     out
                 })
             },
             |i, px| {
-                let a = alpha[i];
+                let (a, empty) = (alpha[i], cv[i] == 0.0);
                 let mut c = 0;
                 px.map(|v| {
-                    let out = v + (rgb[c] - v) * a + 0.5;
+                    let base = if empty { v } else { bg[c] };
+                    let out = v + (rgb[c] - base) * a + 0.5;
                     c += 1;
                     out
                 })
             },
         );
-        self.halo = alpha[..self.width * self.height].iter().map(|&a| (a * 255.0 + 0.5) as u8).collect();
-        self.halo_color = color;
     }
 
     /// Depth cueing: blends each covered pixel toward the fog colour by
@@ -867,14 +908,20 @@ impl PixelBuffer {
         if effects.fxaa { crate::fxaa::apply_fxaa(&mut self.pixels, self.width, self.height); }
     }
 
-    /// Fold the glow halo into a transparent output's coverage `alpha`: pixels
-    /// outside the model take the glow colour at the halo's opacity.
+    /// Composite the glow halo under a transparent output's model: each
+    /// pixel's colour and coverage `alpha` become the model over the halo.
     pub fn merge_halo(&mut self, alpha: &mut [u8]) {
+        let col = [self.halo_color.0 as f32, self.halo_color.1 as f32, self.halo_color.2 as f32];
         for (i, &h) in self.halo.iter().enumerate() {
-            if h > alpha[i] {
-                self.pixels[i * 3..i * 3 + 3].copy_from_slice(&[self.halo_color.0, self.halo_color.1, self.halo_color.2]);
-                alpha[i] = h;
+            if h == 0 || alpha[i] == 255 { continue; }
+            let (ah, am) = (h as f32 / 255.0, alpha[i] as f32 / 255.0);
+            let under = ah * (1.0 - am);
+            let ao = am + under;
+            for c in 0..3 {
+                let p = self.pixels[i * 3 + c] as f32;
+                self.pixels[i * 3 + c] = ((p * am + col[c] * under) / ao + 0.5).fmin(255.0) as u8;
             }
+            alpha[i] = (ao * 255.0 + 0.5).fmin(255.0) as u8;
         }
     }
 

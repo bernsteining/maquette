@@ -2183,7 +2183,9 @@ pub fn render_raster(triangles: &[Triangle], config: &RenderConfig, group_styles
 
     let effects = post_effects(config, &view, vw, vh, br, bg, aa, fxaa && !transparent, is_wireframe);
     crate::prof::mark(18);
+    let glow_cov = effects.glow.is_some().then(|| buf.coverage(aa));
     let (mut out, mut alpha) = buf.resolve(aa, transparent, effects.needs_depth());
+    if let Some(cov) = glow_cov { out.set_glow_coverage(cov, bg, transparent); }
     out.apply_post(&effects);
     if let Some(a) = alpha.as_mut() {
         out.merge_halo(a);

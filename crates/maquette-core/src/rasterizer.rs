@@ -93,6 +93,8 @@ pub struct PixelBuffer {
     /// transparent output can keep the halo; drawn in `halo_color`.
     pub halo: Vec<u8>,
     pub halo_color: (u8, u8, u8),
+    coverage: Vec<f32>,
+    glow_deferred: bool,
     /// WBOIT accumulator: 4 channels (rgb·a·w, a·w) per pixel, f32. Empty
     /// until the first WBOIT write; lazy-init keeps opaque-only renders free.
     pub oit_accum: Vec<f32>,
