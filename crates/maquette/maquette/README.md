@@ -59,17 +59,17 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 <sub><b>Multi-view grid</b> — front / right / top / isometric on one sheet</sub>
 </td>
 <td align="center" width="50%">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_groups.png?v=3" width="100%" alt="Per-group appearance" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_groups.png?v=4" width="100%" alt="Per-group appearance" /><br/>
 <sub><b>Per-group appearance</b> — per-part colour, stroke &amp; opacity from OBJ groups</sub>
 </td>
 </tr>
 <tr>
 <td align="center">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_scalar.png?v=2" width="100%" alt="Scalar color map" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_scalar.png?v=3" width="100%" alt="Scalar color map" /><br/>
 <sub><b>Scalar color map</b> — a math expression <code>f(x,y,z)</code> over a custom palette</sub>
 </td>
 <td align="center">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_clip.png?v=2" width="100%" alt="Clipping plane" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_clip.png?v=3" width="100%" alt="Clipping plane" /><br/>
 <sub><b>Clipping plane</b> — a mathematical cut opens the model to its interior</sub>
 </td>
 </tr>

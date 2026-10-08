@@ -103,7 +103,7 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 </td>
-<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/docs/cyclone-example.png?v=2" width="300" alt="Cyclone-PCB-Factory CNC mill, a full multi-file OpenSCAD project" /></td>
+<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/docs/cyclone-example.png?v=3" width="300" alt="Cyclone-PCB-Factory CNC mill, a full multi-file OpenSCAD project" /></td>
 </tr>
 </table>
 
