@@ -1,6 +1,17 @@
 WASM_TARGET = target/wasm32-unknown-unknown/release/maquette.wasm
 WASM_OUT = crates/maquette/maquette.wasm
-WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette/0.2.0/maquette.wasm
+
+# Typst's local package dir (`@local/...`), as Typst itself resolves it:
+# TYPST_PACKAGE_PATH if set, else the OS data dir. Quote it in recipes: the
+# macOS path contains a space.
+ifneq ($(TYPST_PACKAGE_PATH),)
+TYPST_LOCAL ?= $(TYPST_PACKAGE_PATH)/local
+else ifeq ($(shell uname -s),Darwin)
+TYPST_LOCAL ?= $(HOME)/Library/Application Support/typst/packages/local
+else
+TYPST_LOCAL ?= $(or $(XDG_DATA_HOME),$(HOME)/.local/share)/typst/packages/local
+endif
+MAQ_LOCAL = $(TYPST_LOCAL)/maquette/0.2.0
 
 # Path remaps so no build-machine paths (home, cargo registry, rustup toolchain)
 # leak into the wasm. Overridable — CI passes its container-specific prefixes.
@@ -24,9 +35,8 @@ wasm:
 # resolves — otherwise a bare wasm sits there without the manifest and
 # typst can't find the entry .typ.
 build: wasm
-	mkdir -p $(dir $(WASM_PKG))
-	cp $(WASM_OUT) $(WASM_PKG)
-	cp crates/maquette/maquette/maquette.typ crates/maquette/maquette/typst.toml $(dir $(WASM_PKG))
+	mkdir -p "$(MAQ_LOCAL)"
+	cp $(WASM_OUT) crates/maquette/maquette/maquette.typ crates/maquette/maquette/typst.toml "$(MAQ_LOCAL)/"
 
 harness:
 	cargo build --release --manifest-path harness/Cargo.toml
@@ -149,7 +159,7 @@ scad-wasm:
 # --- maquette-gltf: glTF 2.0 plugin (workspace member, shares maquette-core) ---
 GLTF_WASM_TARGET = target/wasm32-unknown-unknown/release/maquette_gltf.wasm
 GLTF_WASM_OUT = crates/maquette-gltf/maquette-gltf.wasm
-GLTF_WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette-gltf/0.1.0/maquette-gltf.wasm
+GLTF_LOCAL = $(TYPST_LOCAL)/maquette-gltf/0.1.0
 
 # Build + optimize the glTF plugin wasm. Flags mostly mirror the maquette
 # core plugin, minus `--converge`: on this codebase, --converge trades ~1%
@@ -164,16 +174,14 @@ gltf-wasm:
 
 # Install glTF plugin into the local Typst package dir (mirror of `build`).
 gltf-build: gltf-wasm
-	mkdir -p $(dir $(GLTF_WASM_PKG))
-	cp $(GLTF_WASM_OUT) $(GLTF_WASM_PKG)
-	cp crates/maquette-gltf/maquette-gltf/maquette-gltf.typ crates/maquette-gltf/maquette-gltf/typst.toml $(dir $(GLTF_WASM_PKG))
+	mkdir -p "$(GLTF_LOCAL)"
+	cp $(GLTF_WASM_OUT) crates/maquette-gltf/maquette-gltf/maquette-gltf.typ crates/maquette-gltf/maquette-gltf/typst.toml "$(GLTF_LOCAL)/"
 
 # Install SCAD plugin into the local Typst package dir.
-SCAD_WASM_PKG = $(HOME)/.local/share/typst/packages/local/maquette-scad/0.1.0/maquette-scad.wasm
+SCAD_LOCAL = $(TYPST_LOCAL)/maquette-scad/0.1.0
 scad-build: scad-wasm
-	mkdir -p $(dir $(SCAD_WASM_PKG))
-	cp $(SCAD_WASM_OUT) $(SCAD_WASM_PKG)
-	cp crates/maquette-scad/maquette-scad/maquette-scad.typ crates/maquette-scad/maquette-scad/typst.toml $(dir $(SCAD_WASM_PKG))
+	mkdir -p "$(SCAD_LOCAL)"
+	cp $(SCAD_WASM_OUT) crates/maquette-scad/maquette-scad/maquette-scad.typ crates/maquette-scad/maquette-scad/typst.toml "$(SCAD_LOCAL)/"
 
 # --- publish: refresh the three Typst package dirs so they can't drift ---
 # Each package dir (crates/<crate>/<name>/) holds the committed typst.toml +
