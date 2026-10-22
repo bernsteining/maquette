@@ -72,7 +72,7 @@ DEMO_MODELS = bunny.obj teapot.obj crankshaft.obj brain_skull.obj city.obj rubi_
 # examples/data/gltf/ for the PDF documentation build + local dev; add it
 # back here to reinclude it in the demo's model list. Other assets (fox,
 # boombox, toycar, cesiumman, potofcoals) are dev-only in the same way.
-DEMO_GLTF_MODELS = tokyo.glb
+DEMO_GLTF_MODELS = tokyo.glb fox.glb
 DEMO_MOL_MODELS = lsd.pdb aspirin.xyz crambin.bcif 9R1O.pdb
 DEMO_SCAD_MODELS = gear.scad
 
@@ -181,7 +181,7 @@ gltf-build: gltf-wasm
 SCAD_LOCAL = $(TYPST_LOCAL)/maquette-scad/0.1.0
 scad-build: scad-wasm
 	mkdir -p "$(SCAD_LOCAL)"
-	cp $(SCAD_WASM_OUT) crates/maquette-scad/maquette-scad/maquette-scad.typ crates/maquette-scad/maquette-scad/typst.toml "$(SCAD_LOCAL)/"
+	cp $(SCAD_WASM_OUT) crates/maquette-scad/maquette-scad/maquette-scad.typ crates/maquette-scad/maquette-scad/typst.toml crates/maquette-scad/maquette-scad/openscad.sublime-syntax "$(SCAD_LOCAL)/"
 
 # --- publish: refresh the three Typst package dirs so they can't drift ---
 # Each package dir (crates/<crate>/<name>/) holds the committed typst.toml +

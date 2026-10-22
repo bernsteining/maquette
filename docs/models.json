@@ -28,7 +28,8 @@
       "typst": "https://typst.app/universe/package/maquette-gltf",
       "github": "https://github.com/bernsteining/maquette",
       "models": [
-      ["tokyo.glb",       "Littlest Tokyo (animated)"]
+      ["tokyo.glb",       "Littlest Tokyo (animated)"],
+      ["fox.glb",         "Fox (skinned, animated)"]
     ]},
     { "id": "molfig", "label": "molfig", "hint": "Accepts .pdb .cif .mmcif .bcif .xyz",
       "formats": [".pdb", ".cif", ".mmcif", ".bcif", ".xyz"],
@@ -101,6 +102,14 @@
     "rubi_scan.ply": {
       "point_size": 0.024, "point_boundary": 110,
       "_cam": "spherical", "azimuth": -119, "elevation": 24.5, "up": [0, 1, 0], "zoom": 2.254
+    },
+    "fox.glb": {
+      "_cam": "spherical",
+      "azimuth": 90,
+      "elevation": 8,
+      "zoom": 1.6,
+      "animation_index": 2,
+      "time": 0.3
     },
     "tokyo.glb": {
       "camera": [290, 464, 774], "center": [-86, 5, -25], "up": [0, 1, 0], "fov": 40,
