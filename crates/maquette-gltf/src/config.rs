@@ -145,6 +145,9 @@ pub struct RenderConfig {
     pub azimuth: f64,
     pub elevation: f64,
     pub distance: Option<f64>,
+    /// Scales the automatic framing: 2.0 halves the fitted distance. Ignored
+    /// when `distance` or `camera` is set.
+    pub zoom: f64,
     pub fov: f64,
     pub auto_center: bool,
     pub auto_fit: bool,
@@ -241,6 +244,7 @@ impl Default for RenderConfig {
             azimuth: 30.0,
             elevation: 20.0,
             distance: None,
+            zoom: 1.0,
             fov: 45.0,
             auto_center: true,
             auto_fit: true,
@@ -324,6 +328,7 @@ pub fn parse(json_bytes: &[u8]) -> Result<RenderConfig, String> {
             "elevation"     => if let Some(f) = v.as_f64() { cfg.elevation = f; }
             "distance"      => cfg.distance      = v.as_f64().filter(|&d| d > 0.0),
             "fov"           => if let Some(f) = v.as_f64() { cfg.fov = f.clamp(1.0, 179.0); }
+            "zoom"          => if let Some(f) = v.as_f64() { cfg.zoom = f.clamp(0.01, 100.0); }
             "auto_center"   => if let Some(b) = v.as_bool() { cfg.auto_center = b; }
             "auto_fit"      => if let Some(b) = v.as_bool() { cfg.auto_fit = b; }
             "camera_name"   => if let Some(s) = v.as_str()  { cfg.camera_name = Some(s.to_string()); }

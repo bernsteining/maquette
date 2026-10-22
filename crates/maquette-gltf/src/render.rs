@@ -996,7 +996,7 @@ fn camera_position(config: &RenderConfig, pivot: Vec3, radius: f64) -> Vec3 {
         return Vec3::from(cam);
     }
     let dist = config.distance.filter(|&d| d > 0.0)
-        .unwrap_or_else(|| default_distance(config.fov, radius));
+        .unwrap_or_else(|| default_distance(config.fov, radius) / config.zoom);
     maquette_core::math::orbit_position(pivot, Vec3::from(config.up), config.azimuth, config.elevation, dist)
 }
 

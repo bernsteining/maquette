@@ -259,6 +259,8 @@ const GLTF_SCHEMA = [
     { k: "elevation", label: "Elevation °", help: "Vertical orbit angle, in degrees.", t: "num", def: 20, when: s => s._cam === "spherical" },
     { k: "distance",  label: "Distance (0 = auto)", help: "Camera distance from the center; 0 = auto-fit.", t: "num", def: 0,
       omitIf: v => v === 0, when: s => s._cam === "spherical" },
+    { k: "zoom",      label: "Zoom", help: "Move closer than the automatic framing (2 = twice as close).", t: "num", def: 1,
+      omitIf: v => v === 1, when: s => s._cam === "spherical" },
     { k: "center",     label: "Look-at", help: "Look-at target point.",          t: "vec", def: [0, 0, 0] },
     { k: "up",         label: "Up", help: "Up direction. Bunny/most OBJ models are Y-up (0,1,0).",               t: "vec", def: [0, 1, 0] },
     { k: "fov",        label: "Field of view °", help: "Vertical field of view in degrees (perspective only).",  t: "num", def: 40 },
