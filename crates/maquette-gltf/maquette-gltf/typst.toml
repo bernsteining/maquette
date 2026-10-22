@@ -3,10 +3,10 @@ name = "maquette-gltf"
 version = "0.1.0"
 entrypoint = "maquette-gltf.typ"
 authors = ["bernsteining"]
-repository = "https://github.com/bernsteining/maquette"
+repository = "https://github.com/bernsteining/maquette/tree/master/crates/maquette-gltf"
 homepage = "https://bernsteining.github.io/maquette/?model=tokyo.glb"
 license = "MIT"
-description = "Render glTF 2.0 assets (.gltf / .glb) as raster images in Typst."
+description = "Render glTF 2.0 assets (.gltf / .glb) as raster images."
 keywords = [
   "3D",
   "glTF",
@@ -23,5 +23,6 @@ disciplines = [
   "architecture",
   "computer-science",
   "design",
+  "drawing",
   "engineering",
 ]

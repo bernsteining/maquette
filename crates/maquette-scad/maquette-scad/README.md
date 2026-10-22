@@ -1,14 +1,14 @@
-<p align="center"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/docs/logo-scad.svg" width="180" alt="maquette-scad logo"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/bernsteining/maquette/maquette-scad-v0.1.0/docs/logo-scad.svg" width="180" alt="maquette-scad logo"></p>
 
 # maquette-scad
 
 [![Typst Universe](https://img.shields.io/badge/Typst%20Universe-maquette--scad-239dad)](https://typst.app/universe/package/maquette-scad)
 [![Live demo](https://img.shields.io/badge/demo-live-4f46e5)](https://bernsteining.github.io/maquette/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 Render OpenSCAD files in Typst with `maquette-scad`. 
 
-Load `.scad` files, or use the `scadyst` DSL to render them with [maquette](https://github.com/bernsteining/maquette). 
+Load `.scad` files, or use the Typst DSL to render them with [maquette](https://github.com/bernsteining/maquette). 
 
 **[Try it live →](https://bernsteining.github.io/maquette/?a=__scad__)**  edit SCAD source, orbit the result, tweak the render, and copy the generated Typst code snippet.
 
@@ -56,7 +56,7 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 </td>
-<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-logo.png?v=5" width="300" alt="OpenSCAD logo compiled from source" /></a></td>
+<td><a href="https://bernsteining.github.io/maquette/?model=openscad-logo.scad&azimuth=219&elevation=33&up=%5B0%2C1%2C0%5D&fov=40&zoom=1.2&color=%22%23f9d72c%22&specular=0&cull_backface=false&background=%22none%22" title="Open in the live demo"><img src="https://raw.githubusercontent.com/bernsteining/maquette/maquette-scad-v0.1.0/examples/readme/scad-logo.png" width="300" alt="OpenSCAD logo compiled from source" /></a></td>
 </tr>
 <tr><th colspan="2" align="left">2. DSL</th></tr>
 <tr>
@@ -83,7 +83,7 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 </td>
-<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/readme/scad-dsl.png?v=4" width="300" alt="CSG cube built with the Typst DSL" /></td>
+<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/maquette-scad-v0.1.0/examples/readme/scad-dsl.png" width="300" alt="CSG cube built with the Typst DSL" /></td>
 </tr>
 <tr><th colspan="2" align="left">3. Multiple OpenSCAD files</th></tr>
 <tr>
@@ -105,7 +105,7 @@ rotate([0, 90, 0]) rod(hole, len);
 ```
 
 </td>
-<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/docs/cyclone-example.png?v=3" width="300" alt="Cyclone-PCB-Factory CNC mill, a full multi-file OpenSCAD project" /></td>
+<td><img src="https://raw.githubusercontent.com/bernsteining/maquette/maquette-scad-v0.1.0/docs/cyclone-example.png" width="300" alt="Cyclone-PCB-Factory CNC mill, a full multi-file OpenSCAD project" /></td>
 </tr>
 </table>
 
@@ -113,7 +113,7 @@ The Cyclone example is the [Cyclone-PCB-Factory](https://github.com/carlosgs/Cyc
 
 ## Rendering & options
 
-`render-scad` and `render-scad-tree` apply the web-demo defaults (matte, two-sided, smooth) and forward every other argument to maquette's `render-ply`, so camera, lights, shading, specular, SSAO, shadows and colour maps all work (see the [maquette README](https://github.com/bernsteining/maquette/blob/master/crates/maquette/maquette/README.md)). One exception: `color:`/`materials:` are ignored — an OpenSCAD model carries its own per-face colours (`color()`, or the default yellow), so recolour with `color()` in the SCAD/DSL.
+`render-scad` and `render-scad-tree` apply the web-demo defaults (matte, two-sided, smooth) and forward every other argument to maquette's `render-ply`, so camera, lights, shading, specular, SSAO, shadows and colour maps all work (see the [maquette README](https://github.com/bernsteining/maquette/blob/v0.2.0/crates/maquette/maquette/README.md)). One exception: `color:`/`materials:` are ignored — an OpenSCAD model carries its own per-face colours (`color()`, or the default yellow), so recolour with `color()` in the SCAD/DSL.
 
 Shading is a free choice: the default is **smooth and matte**; `shading: "gooch"` gives a warm/cool **technical-diagram** style; spreading the `openscad-view` preset mimics OpenSCAD's own **flat-shaded** preview.
 
@@ -121,8 +121,8 @@ For full control, `scadypst`, `compile-scad` and `compile-scad-tree` return the 
 
 ## Documentation
 
-* [docs/maquette-scad-documentation.pdf](https://github.com/bernsteining/maquette/blob/master/docs/maquette-scad-documentation.pdf) 
-* [`FIDELITY.md`](FIDELITY.md) tracks exact OpenSCAD language coverage 
+* [docs/maquette-scad-documentation.pdf](https://github.com/bernsteining/maquette/blob/maquette-scad-v0.1.0/docs/maquette-scad-documentation.pdf) 
+* [`FIDELITY.md`](https://github.com/bernsteining/maquette/blob/maquette-scad-v0.1.0/crates/maquette-scad/FIDELITY.md) tracks exact OpenSCAD language coverage 
 
 ## How it's built
 

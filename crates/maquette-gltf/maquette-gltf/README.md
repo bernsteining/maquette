@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/docs/logo-gltf.svg" width="180" alt="maquette-gltf logo"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/bernsteining/maquette/maquette-gltf-v0.1.0/docs/logo-gltf.svg" width="180" alt="maquette-gltf logo"></p>
 
 # maquette-gltf
 
@@ -14,7 +14,7 @@ Everything runs as a single WASM plugin.
 
 **[Try it live in your browser →](https://bernsteining.github.io/maquette/)** drag to orbit, tweak every setting, and copy the generated Typst code.
 
-See the [documentation](https://github.com/bernsteining/maquette/blob/master/docs/maquette-gltf-documentation.pdf) for examples of every feature.
+See the [documentation](https://github.com/bernsteining/maquette/blob/maquette-gltf-v0.1.0/docs/maquette-gltf-documentation.pdf) for examples of every feature.
 
 ## Example
 
@@ -25,10 +25,9 @@ See the [documentation](https://github.com/bernsteining/maquette/blob/master/doc
 #render-gltf(read("assets/helmet.glb", encoding: none),
   azimuth: 30,
   elevation: 15,
-  ibl: (environment: "studio", intensity: 1.2),
+  ibl: (intensity: 1.2),
   tone_mapping: "aces",
-  ssao: true,
-  width: 480)
+  ssao: true)
 ```
 
 For a split `.gltf` (with external `.bin` / textures), give the path plus a `read:` lambda and the wrapper discovers and reads the sidecars for you:
@@ -45,7 +44,7 @@ For a split `.gltf` (with external `.bin` / textures), give the path plus a `rea
 #render-gltf(model, read: none, ..config, width: auto, height: auto)
 ```
 
-Renders a glTF/GLB asset to a raster image. `model` is either the **bytes** of a self-contained `.glb` (`read("m.glb", encoding: none)`) or a **path** to a `.gltf`, in which case you must also pass `read: p => read(p, encoding: none)` so the wrapper can read the external `.bin` and image sidecars. Configuration is passed as named arguments (or a single positional dictionary). Recognised keys include `camera`, `lights`, `ibl`, `shadows`, `ssao`, `antialias`, `tone_mapping`, `background`, `ground`, `variant`, and `time` (for animated models).
+Renders a glTF/GLB asset to a raster image. `model` is either the **bytes** of a self-contained `.glb` (`read("m.glb", encoding: none)`) or a **path** to a `.gltf`, in which case you must also pass `read: p => read(p, encoding: none)` so the wrapper can read the external `.bin` and image sidecars. Configuration is passed as named arguments or a positional dictionary. Recognised keys include `camera`, `azimuth`, `elevation`, `zoom`, `light_dir`, `ibl`, `shadows`, `ground`, `ssao`, `antialias`, `tone_mapping`, `background`, `material_variant`, and `animation_index` / `time` for animated models. Named `width` / `height` set the image's size on the page; inside the dictionary they set its resolution in pixels.
 
 ### `get-gltf-info`
 
@@ -57,4 +56,4 @@ Returns scene metadata (triangle count, bounding box, center, radius, `max_anima
 
 ## Output
 
-Raster **PNG** only: glTF's PBR materials and textures are sampled per pixel. Set `width` / `height` for resolution and `antialias` for antialiasing, with the same levels as `maquette`: `0` off, `1` FXAA, `2`/`3` 2×/4× supersampling, `4` (default) and `5` FXAA on top of 2×/4× supersampling.
+Raster **PNG** only: glTF's PBR materials and textures are sampled per pixel. Set `width` / `height` in the configuration dictionary for resolution and `antialias` for antialiasing, with the same levels as `maquette`: `0` off, `1` FXAA, `2`/`3` 2×/4× supersampling, `4` (default) and `5` FXAA on top of 2×/4× supersampling.
