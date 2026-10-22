@@ -111,14 +111,6 @@ rotate([0, 90, 0]) rod(hole, len);
 
 The Cyclone example is the [Cyclone-PCB-Factory](https://github.com/carlosgs/Cyclone-PCB-Factory).
 
-## Rendering & options
-
-`render-scad` and `render-scad-tree` apply the web-demo defaults (matte, two-sided, smooth) and forward every other argument to maquette's `render-ply`, so camera, lights, shading, specular, SSAO, shadows and colour maps all work (see the [maquette README](https://github.com/bernsteining/maquette/blob/v0.2.0/crates/maquette/maquette/README.md)). One exception: `color:`/`materials:` are ignored — an OpenSCAD model carries its own per-face colours (`color()`, or the default yellow), so recolour with `color()` in the SCAD/DSL.
-
-Shading is a free choice: the default is **smooth and matte**; `shading: "gooch"` gives a warm/cool **technical-diagram** style; spreading the `openscad-view` preset mimics OpenSCAD's own **flat-shaded** preview.
-
-For full control, `scadypst`, `compile-scad` and `compile-scad-tree` return the PLY bytes directly, to hand to `render-ply` yourself.
-
 ## Documentation
 
 * [docs/maquette-scad-documentation.pdf](https://github.com/bernsteining/maquette/blob/maquette-scad-v0.1.0/docs/maquette-scad-documentation.pdf) 
