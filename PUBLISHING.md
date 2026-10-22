@@ -8,7 +8,7 @@ How each piece of the maquette family ships. Nothing here publishes automaticall
 
 ## Native CLI → GitHub Releases (dist)
 
-`crates/maquette-cli` ships as prebuilt binaries + installers via [dist](https://opensource.axo.dev/cargo-dist/) (`dist-workspace.toml`, `.github/workflows/release.yml`). Cut a release:
+`crates/maquette-cli` ships as prebuilt binaries + installers via [dist](https://axodotdev.github.io/cargo-dist/) (`dist-workspace.toml`, `.github/workflows/release.yml`). Cut a release:
 
 ```sh
 git tag v0.1.4 && git push --tags

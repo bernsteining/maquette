@@ -17,7 +17,7 @@ Part of the [maquette](https://github.com/bernsteining/maquette) family (sibling
 
 ## Usage
 
-Model reference: [Little Tokyo](https://sketchfab.com/3d-models/little-tokyo-diorama-6072d34e02454743a4a0f4d219c2c62c)
+Model reference: [Littlest Tokyo](https://www.artstation.com/artwork/1AGwX) by Glen Fox (CC BY 4.0)
 
 <table>
 <tr>

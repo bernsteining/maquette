@@ -1,6 +1,6 @@
 # maquette-core
 
-Format-agnostic render primitives shared by the [maquette](../../maquette/README.md) plugin family. Not a plugin itself — this crate is a Rust **rlib** that the plugin cdylibs statically link.
+Format-agnostic render primitives shared by the [maquette](../maquette/maquette/README.md) plugin family. Not a plugin itself — this crate is a Rust **rlib** that the plugin cdylibs statically link.
 
 Nothing in here knows about STL, OBJ, PLY, glTF, or OpenSCAD. It knows about triangles, textures, shadow maps, and how to turn all of that into an RGBA framebuffer.
 
@@ -29,9 +29,9 @@ Nothing in here knows about STL, OBJ, PLY, glTF, or OpenSCAD. It knows about tri
 
 ## Who uses it
 
-- [`maquette`](../../maquette/README.md) — STL/OBJ/PLY plugin. Uses `rasterizer`, `texture`, `color`, `fxaa`, `ssao`.
+- [`maquette`](../maquette/maquette/README.md) — STL/OBJ/PLY plugin. Uses `rasterizer`, `texture`, `color`, `fxaa`, `ssao`.
 - [`maquette-gltf`](../maquette-gltf/README.md) — glTF 2.0 plugin. Uses the whole surface, especially `ibl` (HDR environments), `shadow` (per-light PCF/PCSS), and the SIMD rasterizer + texture sampler.
-- [`maquette-scad`](../maquette-scad/README.md) — OpenSCAD plugin. Uses none of it directly (it emits geometry for the other two).
+- [`maquette-scad`](../maquette-scad/maquette-scad/README.md) — OpenSCAD plugin. Uses none of it directly (it emits geometry for the other two).
 
 ## Not a public API
 

@@ -18,8 +18,8 @@ https://github.com/user-attachments/assets/ae7657b1-dd55-4dc3-af3f-5b66d8f2b51b
 | Package | What it renders |
 |---|---|
 | **[maquette](crates/maquette/maquette/README.md)** | [STL](https://en.wikipedia.org/wiki/STL_(file_format)) / [OBJ](https://en.wikipedia.org/wiki/Wavefront_.obj_file) / [PLY](https://en.wikipedia.org/wiki/PLY_(file_format))|
-| **[maquette-gltf](crates/maquette-gltf/README.md)** | [glTF](https://www.khronos.org/gltf/) 2.0 (`.glb` / `.gltf`) |
-| **[maquette-scad](crates/maquette-scad/README.md)** | [.scad](https://openscad.org/) |
+| **[maquette-gltf](crates/maquette-gltf/maquette-gltf/README.md)** | [glTF](https://www.khronos.org/gltf/) 2.0 (`.glb` / `.gltf`) |
+| **[maquette-scad](crates/maquette-scad/maquette-scad/README.md)** | [.scad](https://openscad.org/) |
 
 # Usage
 

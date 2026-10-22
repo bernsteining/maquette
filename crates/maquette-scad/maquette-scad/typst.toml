@@ -6,7 +6,7 @@ authors = ["bernsteining"]
 repository = "https://github.com/bernsteining/maquette/tree/master/crates/maquette-scad"
 homepage = "https://bernsteining.github.io/maquette/?model=openscad-logo.scad"
 license = "GPL-3.0-or-later"
-description = "Render OpenSCAD (.scad) models as raster or SVG images."
+description = "Render OpenSCAD (.scad) models."
 keywords = [
   "3D",
   "OpenSCAD",

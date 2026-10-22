@@ -10,7 +10,7 @@ make cli                              # → target/release/maquette
 cargo install --path crates/maquette-cli
 ```
 
-Prebuilt binaries + `curl … | sh` / PowerShell installers ship via [dist](https://opensource.axo.dev/cargo-dist/) on tagged releases.
+Prebuilt binaries + `curl … | sh` / PowerShell installers ship via [dist](https://axodotdev.github.io/cargo-dist/) on tagged releases.
 
 ## Use
 
