@@ -1,385 +1,401 @@
-// Uses the local-namespace install (set up by `make gltf-build`) so the
-// wrapper's `plugin("maquette-gltf.wasm")` finds the freshly-built wasm
-// next to it. Falls back to the published `@preview/maquette-gltf:0.1.0`
-// once released.
 #import "@local/maquette-gltf:0.1.0": render-gltf, get-gltf-info
+#import "common.typ": *
 
-#import "@preview/zebraw:0.6.1": *
+#let fox   = read("/examples/data/gltf/fox.glb", encoding: none)
+#let tokyo = read("/examples/data/gltf/tokyo.glb", encoding: none)
+#let (r-gltf, i-gltf) = (render-gltf, get-gltf-info)
+#let render-gltf = wrap-render(r-gltf, paths: ("gltf/fox/Fox.gltf": "fox.glb"))
+#let get-gltf-info = wrap-info(i-gltf)
+#let fox = dm("fox.glb", fox)
+#let tokyo = dm("tokyo.glb", tokyo)
+#let studio = (background: none, ibl: (intensity: 1.2), ssao: true, zoom: 1.5)
+#let side = (width: 600, height: 300, azimuth: 90, elevation: 8)
 
-#set page(margin: 1.5em, footer: context grid(
-  columns: (1fr, 1fr),
-  align(left, text(size: 7.5pt, fill: luma(120))[maquette-gltf Documentation]),
-  align(right, text(size: 7.5pt, fill: luma(120), counter(page).display())),
-))
-#set par(justify: true)
-#show: zebraw.with(lang: false, numbering: false)
+#let scope = (render-gltf: render-gltf, get-gltf-info: get-gltf-info, studio: studio, side: side, fox: fox, tokyo: tokyo)
+#let sect(body) = block(breakable: false, width: 100%, body)
 
-// The plugin wrapper needs a `read:` lambda for split-glTF paths (Typst
-// packages can't reach the caller's project directly; see the wrapper
-// header). Bind it once here and reuse across every example.
-#let R = p => read(p, encoding: none)
+#show: doc.with(name: "maquette-gltf", scope: scope, stacked: true)
 
-// Model bindings. `.glb` files are self-contained → pre-read as bytes at doc
-// scope (no `read:` lambda needed downstream). Split `.gltf` files reference
-// external `.bin`/textures by URI, so those stay as path strings and every
-// call site pairs them with `read: R`.
-#let helmet     = read("/examples/data/gltf/helmet.blg", encoding: none)
-#let boombox    = read("/examples/data/gltf/boombox.glb", encoding: none)
-#let fox        = read("/examples/data/gltf/fox.glb", encoding: none)
-#let toycar     = read("/examples/data/gltf/toycar.glb", encoding: none)
-#let cesiumman  = read("/examples/data/gltf/cesiumman.glb", encoding: none)
-#let dt-test    = read("/examples/data/gltf/DiffuseTransmissionTest/DiffuseTransmissionTest.glb", encoding: none)
-#let duck-split = "/examples/data/gltf/Duck/Duck.gltf"
-#let duck-quant = "/examples/data/gltf/Duck-quantized/Duck.gltf"
-#let duck-webp  = "/examples/data/gltf/Duck-webp/Duck.gltf"
-#let duck-ktx   = "/examples/data/gltf/Duck-ktx2/Duck.gltf"
-#let box-draco  = "/examples/data/gltf/Box-draco/Box.gltf"
-
-// Every example block is `#render-gltf(...)`: pass models by path (with `read: R`
-// for splits) or by bytes for `.glb`. Scope used by the `example` show rule below.
-#let doc-scope = (
-  render-gltf: render-gltf, get-gltf-info: get-gltf-info, R: R,
-  helmet: helmet, boombox: boombox, fox: fox, toycar: toycar, cesiumman: cesiumman,
-  duck-split: duck-split, duck-quant: duck-quant, duck-webp: duck-webp, duck-ktx: duck-ktx,
-  box-draco: box-draco, dt-test: dt-test,
+#cover(
+  [maquette-gltf],
+  [Render glTF 2.0 assets in Typst],
+  box(clip: true, radius: 44pt, image("logo-gltf.svg", width: 260pt)),
+  (
+    ("Source", "https://github.com/bernsteining/maquette"),
+    ("Typst Universe", "https://typst.app/universe/package/maquette-gltf"),
+    ("Live demo", "https://bernsteining.github.io/maquette/?model=tokyo.glb"),
+  ),
+  toml("/crates/maquette-gltf/maquette-gltf/typst.toml").package.version,
 )
 
-// Strip the imports + doc-side `let`s from example source so the eval'd version
-// picks up bindings from `doc-scope` (same trick as maquette-documentation.typ).
-#let filter-eval(text) = text.split("\n").filter(l =>
-  not l.starts-with("#import") and not l.starts-with("#let R ")
-).join("\n")
-
-// Highlight-line + column-ratio parser, same protocol as the main doc:
-//   // hl: 3, 5-7   → highlight lines 3, 5, 6, 7
-//   // cols: 2 1    → code:render column widths (default 1 1)
-#let parse-hl(text) = {
-  let lines = text.split("\n")
-  let hl = ()
-  let cols = (1, 1)
-  let code = ()
-  for line in lines {
-    let t = line.trim()
-    if t.starts-with("// hl:") {
-      for part in t.slice(6).trim().split(",") {
-        let p = part.trim()
-        if p.contains("-") {
-          let b = p.split("-")
-          for n in range(int(b.at(0)), int(b.at(1)) + 1) { hl.push(n) }
-        } else if p != "" { hl.push(int(p)) }
-      }
-    } else if t.starts-with("// cols:") {
-      let s = t.slice(8).trim().split(" ")
-      cols = (int(s.at(0)), int(s.at(1)))
-    } else { code.push(line) }
-  }
-  (code.join("\n"), hl, cols)
-}
-
-#show raw.where(lang: "example"): it => {
-  let (code, hl, cols) = parse-hl(it.text)
-  let eval-text = filter-eval(code)
-  grid(columns: (cols.at(0) * 1fr, cols.at(1) * 1fr), gutter: 1em,
-    zebraw(lang: false, numbering: false, highlight-lines: hl, raw(block: true, lang: "typst", code)),
-    align(center + horizon, eval(eval-text, mode: "markup", scope: doc-scope)),
-  )
-}
-
-#show raw.where(lang: "examplev"): it => {
-  let (code, hl, ..) = parse-hl(it.text)
-  let eval-text = filter-eval(code)
-  zebraw(lang: false, numbering: false, highlight-lines: hl, raw(block: true, lang: "typst", code))
-  align(center, eval(eval-text, mode: "markup", scope: doc-scope))
-}
-
-#v(1fr)
-#align(center)[
-  #text(font: "Libertinus Serif", size: 32pt, weight: "bold")[maquette-gltf]
-  #v(0.3em)
-  #text(size: 14pt, fill: gray)[Render glTF 2.0 assets in Typst]
-  #v(1.5em)
-  #text(size: 12pt, blue)[
-    #link("https://github.com/bernsteining/maquette")[github.com/bernsteining/maquette] · #link("https://bernsteining.github.io/maquette")[bernsteining.github.io/maquette]
-  ]
-  #render-gltf(helmet, read: R, width: 55%, camera: (2.5, 1.5, 2.5), center: (0, 0, 0), up: (0, 1, 0), fov: 40,
-    background: "#181820",
-    ground: (color: "#282838", size_scale: 3.0, roughness: 0.9),
-    ssao: (samples: 16, strength: 1.0),
-  )
-  #v(0.4em)
-  #text(size: 10pt, fill: luma(150))[Version #toml("/crates/maquette-gltf/maquette-gltf/typst.toml").package.version #h(0.4em)·#h(0.4em) #datetime.today().display("[month repr:long] [day], [year]")]
-]
-#v(1fr)
-
-#pagebreak(weak: true)
-
-#{
-  align(center, text(size: 20pt, weight: "bold", tracking: 2pt)[CONTENTS])
-  v(1em)
-  set text(size: 9pt)
-  set outline.entry(fill: repeat(text(fill: luma(180))[.#h(2pt)]))
-  show outline.entry.where(level: 1): it => {
-    v(0.4em); strong(it)
-  }
-  columns(2, gutter: 2em, outline(indent: 1.2em))
-}
-
-#pagebreak(weak: true)
+#contents()
 
 = Introduction
 
-*maquette-gltf* renders `.glb` and `.gltf` assets as images inside a Typst document. Two entry points:
+*maquette-gltf* renders glTF 2.0 files (`.glb`, `.gltf`) as images in your Typst document, with nothing to install.
 
-- *`render-gltf(model, ..options)`*: the render call. Returns a Typst `image`.
-- *`get-gltf-info(model, ..options)`*: returns a metadata dict (bbox, triangle count, animation length) without rendering.
+#demo-callout("https://bernsteining.github.io/maquette/?model=tokyo.glb",
+  [Load a glTF, orbit it, play its animation, adjust every option in this manual, and copy the Typst code.])
 
-Camera framing, background, shadows, ground plane, anti-aliasing and tone mapping are inherited unchanged from #link("maquette-documentation.pdf")[`maquette`]. This document only covers what `render-gltf` adds on top of that base; see the maquette manual for the shared options.
+It provides two functions:
 
-#pagebreak(weak: true)
+- *`render-gltf(model, ..options)`* renders the model as an image.
+- *`get-gltf-info(model)`* returns its size, triangle count and animation length.
 
-= Where to find sample glTF assets
-
-The examples below use models from Khronos's sample set (Damaged Helmet, Fox, CesiumMan, ToyCar). Any `.glb` or `.gltf` should work: compression, quantization and animations are handled transparently.
-
-- #link("https://github.com/KhronosGroup/glTF-Sample-Assets")[KhronosGroup/glTF-Sample-Assets]: the reference sample set. Every extension has a dedicated test asset.
-- #link("https://polyhaven.com/models")[Poly Haven Models]: CC0, glTF-native, with authored PBR materials.
-- #link("https://sketchfab.com/3d-models?features=downloadable")[Sketchfab] (downloadable filter): the largest general library.
-
-For the IBL section, HDR environment maps come from #link("https://polyhaven.com/hdris")[Poly Haven HDRIs] (CC0). Bundle one with your `.typ` and pass the bytes as `ibl: (hdr: ...)`.
+The examples use two models, the #link("https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox")[Fox] and the #link("https://www.artstation.com/artwork/1AGwX")[Littlest Tokyo]; credits are at the end.
 
 = Quickstart
 
-The entry point is `render-gltf`. A self-contained `.glb`, or a fully-embedded `.gltf`, is just bytes, so pass them straight in. This covers most Sketchfab downloads, Damaged Helmet, boombox, and so on.
+#sect[
+Read the model as bytes and pass it to `render-gltf` (left). The examples below reuse two settings: `studio`, a lighting look that fills the frame (right), and `side`, a wide side view for the Fox (below).
 
-#{
-  align(center)[
-    #raw(block: true, lang: "typ", "#import \"@preview/maquette-gltf:0.1.0\": render-gltf\n\n#render-gltf(read(\"helmet.glb\", encoding: none))")
-    #v(0.5em)
-    #render-gltf(helmet, read: R, width: 40%)
-  ]
-}
-
-= Split `.gltf` files
-
-A `.glb` (or a fully-embedded `.gltf`) is just bytes. A *split* `.gltf` that references external `.bin` buffers and image files needs a `read:` lambda: pass the path plus `read: p => read(p, encoding: none)` and the wrapper walks the JSON, reads every external URI through your lambda, and bundles them for the plugin, so you write zero filenames.
-
-#{
-  align(center)[
-    #raw(block: true, lang: "typ", "#render-gltf(\"assets/scene.gltf\", read: p => read(p, encoding: none))")
-    #v(0.5em)
-    #render-gltf(duck-split, read: R, width: 30%)
-  ]
-}
-
-The lambda is required because a Typst package can't reach your project's files on its own: `read()` inside the package resolves against the package's path, not your `.typ`.
-
-#pagebreak(weak: true)
-
-= Shared rendering config
-
-`camera`, `center`, `up`, `fov`, `azimuth`, `elevation`, `background`, `shadows`, `ground`, `ssao`, `antialias`, and `tone_mapping` all work exactly as they do on `render-obj` / `render-stl` / `render-ply`. See the #link("maquette-documentation.pdf")[maquette manual] for the full option surface.
-
-One glTF-only option: *`camera_auto_use`*. If the asset ships an authored camera, `render-gltf` uses it by default. Pass `camera_auto_use: false` to force your own framing arguments instead.
-
+#grid(columns: 2, gutter: 1em,
 ```example
-#render-gltf(helmet, read: R,
-  camera_auto_use: false,
-  camera: (0, 0, 3), up: (0, 1, 0), fov: 60,
+#import "@preview/maquette-gltf:0.1.0": render-gltf
+
+#let tokyo = read("tokyo.glb", encoding: none)
+#render-gltf(tokyo)
+```,
+```example
+// hl: 1-2
+#let studio = (background: none, ssao: true,
+  ibl: (intensity: 1.2), zoom: 1.5)
+#render-gltf(tokyo, ..studio)
+```,
 )
+]
+
+#sect[
+```example
+// hl: 1-2
+#let side = (width: 600, height: 300,
+  azimuth: 90, elevation: 8)
+#render-gltf(fox, side, ..studio,
+  zoom: 2.3, animation_index: 2)
 ```
+]
 
-#pagebreak(weak: true)
+= Config reference
 
-= Config Reference
+#sect[
+All optional; defaults shown.
 
-All parameters are optional; pass them as named arguments or a single dictionary. Defaults are shown below. `null` (JSON) or the string `"none"` clears an optional or disables a feature; for `background` that means transparent.
-
-#text(size: 9pt, raw(block: true, lang: "json", "{ // ── Viewport ──────────────────────────────────────────────────────
-  \"width\": 500,                                    // Output width in pixels
-  \"height\": 500,                                   // Output height in pixels
-  \"background\": \"#f0f0f0\",                          // Hex color; none, \"none\" or \"\" = transparent
+#text(size: 8.5pt, raw(block: true, lang: "json", "{ // ── Viewport ──────────────────────────────────────────────────────
+  \"width\": 500,                    // Output width in pixels
+  \"height\": 500,                   // Output height in pixels
+  \"background\": \"#f0f0f0\",         // Hex colour; none, \"none\" or \"\" = transparent
   // ── Camera ────────────────────────────────────────────────────────
-  \"camera\": null,                                  // Eye position [x, y, z]; null = orbit around the model
-  \"center\": [0, 0, 0],                             // Look-at target (overridden by auto_center)
-  \"up\": [0, 1, 0],                                 // Up direction (glTF is Y-up)
-  \"azimuth\": 30,                                   // Orbit horizontal angle (degrees)
-  \"elevation\": 20,                                 // Orbit vertical angle (degrees)
-  \"distance\": null,                                // Orbit distance from center; null = auto-fit
-  \"fov\": 45,                                       // Vertical field of view in degrees (1-179)
-  \"auto_center\": true,                             // Auto-center on the scene bounding box
-  \"auto_fit\": true,                                // Scale the model to fill the viewport
-  \"camera_name\": null,                             // Use an authored glTF camera by name
-  \"camera_index\": null,                            // Use an authored glTF camera by index
-  \"camera_auto_use\": true,                         // Auto-use the asset's first camera when present
-  \"scene_index\": null,                             // glTF scene selector; null = default scene
-  \"animation_index\": null,                         // Animation clip index; null = all clips stacked
-  // ── Shading & lighting ────────────────────────────────────────────
-  \"light_dir\": [1, 2, 3],                          // Key directional light vector
-  \"ambient\": 0.05,                                 // Constant ambient (0-1); ignored when ibl is set
-  \"cull_backface\": true,                           // Back-face culling
-  \"ibl\": null,                                     // Image-based lighting: true, or {sky, ground, intensity, rotation, hdr}
-  \"shadows\": null,                                 // Shadow maps: true, or {resolution, softness, bias, normal_bias, slope_bias, pcss_light_size (alias light_size)}
-  \"ground\": null,                                  // Shadow-catcher plane: true, or {color, size_scale, y, roughness}
+  \"camera\": null,                  // Eye position (x, y, z); null = orbit around the model
+  \"center\": [0, 0, 0],             // Look-at target (overridden by auto_center)
+  \"up\": [0, 1, 0],                 // Up direction (glTF is Y-up)
+  \"azimuth\": 30,                   // Orbit horizontal angle, degrees
+  \"elevation\": 20,                 // Orbit vertical angle, degrees
+  \"distance\": null,                // Orbit distance; null = fit the model
+  \"zoom\": 1.0,                     // Move closer than the automatic framing
+  \"fov\": 45,                       // Vertical field of view, degrees
+  \"auto_center\": true,             // Aim at the scene's bounding-box centre
+  \"auto_fit\": true,                // Frame the scene to fill the image
+  \"camera_auto_use\": true,         // Use the asset's first camera when it has one
+  \"camera_index\": null,            // Use an authored camera by index
+  \"camera_name\": null,             // Use an authored camera by name
+  \"scene_index\": null,             // Scene to render; null = the default scene
+  // ── Lighting ──────────────────────────────────────────────────────
+  \"light_dir\": [1, 2, 3],          // Key light direction when the asset has no lights
+  \"ambient\": 0.2,                  // Constant ambient (0-1); unused with ibl
+  \"ibl\": null,                     // true, or {intensity, sky, ground, rotation, hdr}
+  \"shadows\": null,                 // true, or {resolution, softness, light_size, bias, normal_bias, slope_bias}
+  \"ground\": null,                  // true, or {color, roughness, size_scale, y}
+  \"cull_backface\": true,           // Skip back faces of single-sided materials
   // ── Post-processing ───────────────────────────────────────────────
-  \"ssao\": null,                                    // Ambient occlusion: true, or {samples, radius, bias, strength, space}
-  \"antialias\": 4,                                  // 0: off, 1: FXAA, 2-3: SSAA x2/x4, 4-5: FXAA + SSAA x2/x4
-  \"tone_mapping\": \"\",                              // \"\", \"reinhard\", or \"aces\"
-  \"exposure\": 1.0,                                 // Exposure multiplier for tone mapping
+  \"ssao\": null,                    // true, or {samples, radius, bias, strength, space}
+  \"antialias\": 4,                  // 0 off, 1 FXAA, 2-3 SSAA x2/x4, 4-5 FXAA + SSAA x2/x4
+  \"tone_mapping\": \"\",              // \"\", \"reinhard\" or \"aces\"
+  \"exposure\": 1.0,                 // Light multiplier before tone mapping
+  // ── Animation and materials ───────────────────────────────────────
+  \"time\": 0.0,                     // Animation time, seconds
+  \"animation_index\": null,         // Animation to use (from 0); null = all together
+  \"material_variant\": 0,           // KHR_materials_variants index
   // ── Textures ──────────────────────────────────────────────────────
-  \"no_textures\": false,                            // Skip texture decode (fast draft mode)
-  \"texture_max_size\": null,                        // Cap decoded texture side in pixels; null = source size
-  // ── Animation & materials ─────────────────────────────────────────
-  \"time\": 0.0,                                     // Animation playback time, in seconds
-  \"material_variant\": 0                            // KHR_materials_variants index
+  \"texture_max_size\": null,        // Downsample textures to this side, pixels
+  \"no_textures\": false             // Skip textures (fast drafts)
 }"))
+]
 
-#pagebreak(weak: true)
+= Loading assets
 
-= Image-Based Lighting
-
-`ibl:` enables environment lighting. Without an `hdr` payload it uses a procedural sky/ground gradient.
-
-== Procedural IBL
-
-```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
-  background: "#181820",
-  ibl: (intensity: 1.2),
-)
-```
-
-== HDR environment
-
-Pass Radiance `.hdr` file bytes as `ibl.hdr`.
-
-```typ
-#render-gltf(helmet, read: R,
-  ibl: (intensity: 1.0, hdr: read("studio.hdr", encoding: none)),
-)
-```
-
-== IBL rotation
-
-`rotation` (radians) spins the environment around the up axis. Use it to align the environment's light direction to your camera composition.
+#sect[
+- *`.glb` files*: read with `encoding: none` and pass the bytes, as above.
+- *Split `.gltf` files*: pass the path and a `read:` function, which loads the `.bin` and texture files next to it.
 
 ```example
-#render-gltf(helmet, read: R,
-  camera: (2.5, 1.5, 2.5), up: (0, 1, 0), fov: 40,
-  background: "#181820",
-  ibl: (intensity: 1.2, rotation: 1.2),
-)
+// hl: 1-2
+#render-gltf("gltf/fox/Fox.gltf",
+  read: p => read(p, encoding: none),
+  side, ..studio, zoom: 2.3)
 ```
+]
 
-#pagebreak(weak: true)
+= Camera
 
-= Animations
+#sect[
+== Orbit
 
-`time:` (seconds) picks a sample point along the asset's animation. `get-gltf-info` reports `max_animation_time` so you can bound a scrub slider to the clip's real length.
+`azimuth` turns the camera around the model and `elevation` raises it, in degrees.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  azimuth: 120, elevation: 15)
+```,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  azimuth: -40, elevation: 50)
+```,
+)
+]
+
+#sect[
+== Zoom and lens
+
+`zoom` moves closer than the automatic framing. `fov` sets the lens angle in degrees: narrow flattens perspective, wide exaggerates it.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  zoom: 2.6)
+```,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  fov: 100, zoom: 2.2)
+```,
+)
+]
+
+#sect[
+== Explicit camera
+
+`camera`, `center` and `up` place the camera in scene coordinates; turn off `auto_center` and `auto_fit` to use them as given. Models with their own cameras use the first one; pick another with `camera_index`, or ignore them with `camera_auto_use: false`.
 
 ```example
-// cols: 1 1
-#render-gltf(fox,
-  camera: (120, 90, 180), center: (0, 40, 0), up: (0, 1, 0), fov: 40,
-  background: "#1a1a22",
-  ibl: (intensity: 1.3),
-  time: 0.5,
-  width: 45%,
-)
+// hl: 2-5
+#render-gltf(tokyo, (width: 600, height: 280), ..studio,
+  camera: (-60, 120, 640),
+  center: (-86, 5, -25),
+  up: (0, 0.989, -0.145),
+  auto_center: false, auto_fit: false)
 ```
+]
 
-When the asset ships multiple clips (idle / walk / run / …), pick one with `animation_index`.
+= Lighting
+
+#sect[
+== Key light and ambient
+
+Without `ibl`, `light_dir` points the main light and `ambient` adds a flat fill from 0 to 1.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 2
+#render-gltf(tokyo, zoom: 1.5,
+  light_dir: (-3, 2, 1), ambient: 0.1)
+```,
+```example
+// hl: 2
+#render-gltf(tokyo, zoom: 1.5,
+  light_dir: (3, 1, 2), ambient: 0.6)
+```,
+)
+]
+
+#sect[
+== Image-based lighting
+
+`ibl` lights the model from a surrounding environment, which suits physically based materials.
+
+- `intensity`, `sky` and `ground` colours, and `rotation` (radians) tune the built-in sky.
+- `hdr: read("studio.hdr", encoding: none)` uses a real environment map, such as the free ones on #link("https://polyhaven.com/hdris")[Poly Haven].
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  ibl: (intensity: 0.7))
+```,
+```example
+// hl: 2-3
+#render-gltf(tokyo, ..studio,
+  ibl: (sky: "#ffb070", ground: "#203050",
+    rotation: 2, intensity: 1.4))
+```,
+)
+]
+
+= Shadows and ground
+
+#sect[
+- *`shadows`*: `true`, or set `softness`, `resolution` (default 512) and `light_size`.
+- *`ground`*: a floor that catches them; set its `color`, `roughness` and `size_scale`.
 
 ```example
-#render-gltf(cesiumman,
-  camera: (2.5, 1, 2.5), center: (0, 0.9, 0), up: (0, 1, 0), fov: 30,
-  background: "#1a1a22",
-  ibl: (intensity: 1.3),
-  animation_index: 0,
-  time: 0.3,
-  width: 40%,
-)
+// hl: 3-4
+#render-gltf(fox, side, ..studio, zoom: 2,
+  elevation: 30, azimuth: 70,
+  shadows: (softness: 3),
+  ground: (color: "#c9ced8", size_scale: 8))
 ```
+]
 
-#pagebreak(weak: true)
+= Post-processing
 
-= Material variants
+#sect[
+== Ambient occlusion
 
-`material_variant:` (0-indexed) picks one of the alternate material sets an asset may ship.
+`ssao` darkens creases and contact areas, adding depth; `strength` sets how dark.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  ssao: false)
+```,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  ssao: (strength: 2.5))
+```,
+)
+]
+
+#sect[
+== Tone mapping and exposure
+
+Bright light clips to white. `tone_mapping` (`"reinhard"` or `"aces"`) compresses it smoothly; `exposure` brightens or darkens.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  ibl: (intensity: 3), tone_mapping: "")
+```,
+```example
+// hl: 2-3
+#render-gltf(tokyo, ..studio,
+  ibl: (intensity: 3), tone_mapping: "aces",
+  exposure: 1.2)
+```,
+)
+]
+
+#sect[
+== Anti-aliasing
+
+`antialias` smooths edges, from 0 (off) to 5 (best); the default is 4.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 2
+#render-gltf(fox, side, ..studio,
+  antialias: 0, zoom: 5)
+```,
+```example
+// hl: 2
+#render-gltf(fox, side, ..studio,
+  antialias: 5, zoom: 5)
+```,
+)
+]
+
+= Animation
+
+#sect[
+A glTF file can store animations: the Fox's file holds three, the Fox looking around, walking and running. A render is a still image, so two options choose what it shows:
+
+- *`animation_index`*: which animation to use, counted from 0. Without it, all of the file's animations are applied together.
+- *`time`*: which moment of that animation to show, in seconds from its start.
 
 ```example
-#render-gltf(toycar,
-  camera: (0.4, 0.3, 0.55), center: (0, 0.05, 0), up: (0, 1, 0), fov: 30,
-  background: "#181820",
-  ibl: (intensity: 1.4),
-  material_variant: 0,
-)
+// hl: 2
+#render-gltf(fox, side, ..studio, zoom: 2.3,
+  animation_index: 1, time: 0.4)
 ```
 
-= Diffuse transmission
+Stepping `time` gives the frames of the run:
 
-Assets using `KHR_materials_diffuse_transmission` render with the extension's back-lit contribution.
+```examplev
+// hl: 3
+#grid(columns: 2, gutter: 0.6em, ..range(4).map(i =>
+  render-gltf(fox, side, ..studio, zoom: 2.3,
+    animation_index: 2, time: i * 0.18)))
+```
+]
 
+= Textures
+
+#sect[
+For faster drafts, `texture_max_size` shrinks textures and `no_textures: true` skips them.
+
+#grid(columns: 2, gutter: 1em,
 ```example
-#render-gltf(dt-test,
-  camera: (1.5, 0.5, 1.5), center: (0, 0, 0), up: (0, 1, 0), fov: 40,
-  background: "#222",
-  ibl: (intensity: 1.0),
-  width: 90%,
-)
-```
-
-#pagebreak(weak: true)
-
-= Compressed and quantized assets
-
-These are decoded transparently, with no options to set. Renders identically to an uncompressed version of the same asset.
-
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  texture_max_size: 16)
+```,
 ```example
-#render-gltf(box-draco, read: R,
-  camera: (2, 1, 2), center: (0, 0, 0), up: (0, 1, 0), fov: 40,
-  background: "#333",
-  width: 30%,
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  no_textures: true)
+```,
 )
-```
+]
 
-#pagebreak(weak: true)
+= Output
 
-= Texture formats
+#sect[
+`width` and `height` in a dictionary set the image size in pixels; as named arguments they set its size on the page. `background` sets a colour, or `none` for transparent.
 
-PNG, JPEG, and WebP textures are decoded natively. KTX2 (Basis Universal) and AVIF fall back to a plain white texture: geometry renders correctly, but the material's albedo is lost. If your asset targets KTX2, pre-transcode with #link("https://gltf-transform.dev")[`gltf-transform`] to WebP or PNG.
-
+#grid(columns: 2, gutter: 1em,
 ```example
-#render-gltf(duck-ktx, read: R,
-  camera: (2.5, 1.5, 2.5), center: (0, 0, 0), up: (0, 1, 0), fov: 40,
-  background: "#333",
-  width: 40%,
+// hl: 2
+#render-gltf(tokyo, ..studio, zoom: 2.4,
+  (width: 600, height: 300), width: 100%)
+```,
+```example
+// hl: 2
+#render-gltf(tokyo, ..studio,
+  background: "#16181f")
+```,
 )
-```
-
-#pagebreak(weak: true)
+]
 
 = Metadata
 
-`get-gltf-info` returns a dict with the asset's bounding box, triangle count, and animation length, enough to drive an auto-frame calculation or a scrub slider without going through the render path.
+#sect[
+`get-gltf-info` returns the model's metrics without rendering it.
 
 ```example
-// cols: 2 1
-#let info = get-gltf-info(helmet, read: R)
-#{
-  raw(block: true, lang: "yml",
-    "triangles: " + str(info.triangles) + "\n" +
-    "bbox_min:  [" + info.bbox_min.map(x => str(calc.round(x, digits: 2))).join(", ") + "]\n" +
-    "bbox_max:  [" + info.bbox_max.map(x => str(calc.round(x, digits: 2))).join(", ") + "]\n" +
-    "center:    [" + info.center.map(x => str(calc.round(x, digits: 2))).join(", ") + "]\n" +
-    "radius:    " + str(calc.round(info.radius, digits: 2)) + "\n" +
-    "max_animation_time: " + str(info.max_animation_time)
-  )
-}
+#let info = get-gltf-info(fox)
+#let fmt(v) = if type(v) == array {
+  v.map(fmt).join(", ")
+} else { str(calc.round(v, digits: 1)) }
+#table(columns: 2, ..info.pairs()
+  .map(((k, v)) => (raw(k), fmt(v)))
+  .flatten())
 ```
+]
 
-#pagebreak(weak: true)
+= Model credits
 
-= Asset compatibility
-
-If your asset renders in a mainstream glTF viewer, it should render here. Textures use PNG / JPEG / WebP; KTX2 and AVIF fall back to a white texture (see the previous section). See `crates/maquette-gltf/README.md` for the full per-feature compliance matrix.
+#sect[
+#let src(url, body) = link(url, text(fill: blue, body))
+#ref-table(([Model], [Authors], [Licence]), (
+  (src("https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox")[Fox],
+    [PixelMannen (model), tomkranis (rigging and animation), AsoboStudio and scurest (glTF)],
+    [#src("https://creativecommons.org/publicdomain/zero/1.0/")[CC0 1.0], #src("https://creativecommons.org/licenses/by/4.0/")[CC BY 4.0]]),
+  (src("https://www.artstation.com/artwork/1AGwX")[Littlest Tokyo], [Glen Fox],
+    src("https://creativecommons.org/licenses/by/4.0/")[CC BY 4.0]),
+))
+]

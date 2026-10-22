@@ -1,626 +1,598 @@
 #import "@local/maquette-scad:0.1.0": *
 #import "@preview/maquette:0.2.0": render-ply
+#import "common.typ": doc, cover, contents, labelled, ref-table, demo-callout, demo-url, cfg-of, pct
+#import "@local/maquette-scad:0.1.0" as scad-lib
 
-#import "@preview/zebraw:0.6.1": *
-
-#set page(margin: 1.5em, footer: context grid(
-  columns: (1fr, 1fr),
-  align(left, text(size: 7.5pt, fill: luma(120))[maquette-scad Documentation]),
-  align(right, text(size: 7.5pt, fill: luma(120), counter(page).display())),
-))
-#set par(justify: true)
-#show heading: set block(sticky: true)
-#show: zebraw.with(lang: false, numbering: false)
-
-// A neutral shading preset every example uses so shots don't fight the
-// per-example composition. Accepts either raw PLY bytes (from `scadypst()`)
-// or an unbuilt expression tree (dict from `cube` / `difference` / etc.);
-// the latter gets auto-compiled so example code can skip `scadypst(...)`.
-#let show-part(part, ..args) = {
-  let ply = if type(part) == dictionary { scadypst(part) } else { part }
-  render-ply(ply,
-    color: "#4488cc",
-    shading: "gooch", gooch_warm: "#e8ceaa", gooch_cool: "#3a4a70",
-    camera: (40, 40, 40), up: (0, 0, 1), fov: 40, zoom: 1.2,
-    background: "#f7f7fa",
-    antialias: 2,
-    ..args,
-  )
+#let scad-num(x) = str(if type(x) == float { calc.round(x, digits: 5) } else { x }).replace("\u{2212}", "-")
+#let scad-val(v) = if type(v) == array { "[" + v.map(scad-val).join(", ") + "]" } else if type(v) == bool {
+  if v { "true" } else { "false" }
+} else if type(v) == str { "\"" + v + "\"" } else if type(v) == angle { scad-num(v.deg()) } else { scad-num(v) }
+#let to-scad(n) = {
+  let fa = if "fn" in n { ", $fn = " + str(n.fn) } else { "" }
+  let wrap(head, child) = { let c = to-scad(child); if c == none { none } else { head + " " + c } }
+  let group(head, children) = {
+    let cs = children.map(to-scad)
+    if none in cs { none } else { head + " { " + cs.join(" ") + " }" }
+  }
+  let op = n.op
+  if op == "cube" { "cube(" + scad-val(n.size) + ", center = " + scad-val(n.center) + ");" }
+  else if op == "sphere" { "sphere(" + scad-num(n.r) + fa + ");" }
+  else if op == "cylinder" {
+    let rs = if "r" in n { ", r = " + scad-num(n.r) } else { "" }
+    rs += if "r1" in n { ", r1 = " + scad-num(n.r1) } else { "" }
+    rs += if "r2" in n { ", r2 = " + scad-num(n.r2) } else { "" }
+    "cylinder(h = " + scad-num(n.h) + rs + ", center = " + scad-val(n.center) + fa + ");"
+  }
+  else if op == "polyhedron" { "polyhedron(" + scad-val(n.points) + ", " + scad-val(n.faces) + ");" }
+  else if op == "square" { "square(" + scad-val(n.size) + ", center = " + scad-val(n.center) + ");" }
+  else if op == "circle" { "circle(" + scad-num(n.r) + fa + ");" }
+  else if op == "ngon" { "circle(" + scad-num(n.r) + ", $fn = " + str(n.sides) + ");" }
+  else if op == "polygon" { "polygon(" + scad-val(n.points) + if "paths" in n { ", " + scad-val(n.paths) } else { "" } + ");" }
+  else if op == "star" {
+    let k = 2 * n.points
+    "polygon(" + scad-val(range(k).map(i => {
+      let r = if calc.even(i) { n.outer } else { n.inner }
+      let a = calc.pi * i / n.points
+      (r * calc.cos(a), r * calc.sin(a))
+    })) + ");"
+  }
+  else if op == "text" { "text(" + scad-val(n.text) + ", size = " + scad-num(n.size) + ");" }
+  else if op == "linear_extrude" {
+    let o = "height = " + scad-num(n.h) + ", center = " + scad-val(n.center)
+    if "twist" in n { o += ", twist = " + scad-num(n.twist) }
+    if "scale" in n { o += ", scale = " + scad-val(n.scale) }
+    if "slices" in n { o += ", slices = " + str(n.slices) }
+    wrap("linear_extrude(" + o + ")", n.child)
+  }
+  else if op == "rotate_extrude" { wrap("rotate_extrude(angle = " + scad-num(n.angle) + fa + ")", n.child) }
+  else if op == "projection" { wrap("projection()", n.child) }
+  else if op == "slice" { wrap("projection(cut = true) translate([0, 0, " + scad-num(-n.z) + "])", n.child) }
+  else if op in ("translate", "scale", "mirror", "resize") { wrap(op + "(" + scad-val(n.v) + ")", n.child) }
+  else if op == "rotate" { wrap("rotate(" + scad-val(n.deg) + ")", n.child) }
+  else if op == "multmatrix" { wrap("multmatrix(" + scad-val(n.m) + ")", n.child) }
+  else if op == "offset" { wrap("offset(r = " + scad-num(n.d) + ")", n.child) }
+  else if op == "color" {
+    wrap("color(" + scad-val(n.rgb) + if "alpha" in n { ", alpha = " + scad-num(n.alpha) } else { "" } + ")", n.child)
+  }
+  else if op in ("union", "difference", "intersection", "hull", "minkowski") { group(op + "()", n.children) }
+  else { none }
 }
+#let scad-logo = read("openscad-logo.scad")
+#let compile-only = ("files", "bin", "font", "fn", "smooth-normals", "width", "height", "format")
+#let render-scad(model, ..args) = {
+  let out = scad-lib.render-scad(model, ..args)
+  let named = args.named()
+  let src = if type(model) == str { model } else if type(model) == dictionary { to-scad(model) } else { none }
+  if src == none or "files" in named or "bin" in named or "font" in named { return out }
+  if "fn" in named { src = "$fn = " + str(named.fn) + ";\n" + src }
+  let cfg = (specular: 0, cull_backface: false, scad_smooth_normals: named.at("smooth-normals", default: 30) != none)
+  for (k, v) in cfg-of(args) { if k not in compile-only { cfg.insert(k, v) } }
+  if src == scad-logo { link(demo-url("__scad__", cfg), out) }
+  else { link(demo-url("__scad__", cfg) + "&scad_src=" + pct(src), out) }
+}
+
+#let look = (up: (0, 0, 1), azimuth: 35, elevation: 25, projection: "orthographic",
+  background: none, ssao: true, zoom: 1.2)
+
+#let scope = (
+  render-ply: render-ply, render-scad: render-scad, render-scad-tree: render-scad-tree, image: image, look: look,
+  scadypst: scadypst, compile-scad: compile-scad, compile-scad-tree: compile-scad-tree,
+  scadypst-svg: scadypst-svg, compile-scad-svg: compile-scad-svg,
+  scadypst-info: scadypst-info, compile-scad-info: compile-scad-info,
+  scadypst-parts: scadypst-parts, compile-scad-parts: compile-scad-parts,
+  scadypst-raycast: scadypst-raycast, compile-scad-raycast: compile-scad-raycast,
+  scad-highlighting: scad-highlighting, openscad-view: openscad-view, import-mesh: import-mesh,
+  cube: cube, sphere: sphere, cylinder: cylinder, polyhedron: polyhedron,
+  square: square, circle: circle, ellipse: ellipse, polygon: polygon,
+  ngon: ngon, star: star, rounded-square: rounded-square, scad-text: scad-text,
+  linear-extrude: linear-extrude, rotate-extrude: rotate-extrude, projection: projection,
+  slice: slice, trim: trim, hull-pts: hull-pts, simplify: simplify, calculate-normals: calculate-normals,
+  translate: translate, rotate: rotate, scale: scale, mirror: mirror, multmatrix: multmatrix,
+  resize: resize, offset: offset, color: color,
+  union: union, difference: difference, intersection: intersection, hull: hull, minkowski: minkowski,
+  bunny: read("/examples/data/bunny.obj"),
+  font: read("/crates/maquette-scad/assets/DejaVuSans-Subset.ttf", encoding: none),
+)
+#let sect(body) = block(breakable: false, width: 100%, body)
 
 #let dsl-table(rows) = table(
   columns: (auto, 1fr),
   align: (left + horizon, left + horizon),
-  inset: (x: 7pt, y: 5pt),
+  inset: (x: 6pt, y: 3.5pt),
   stroke: none,
   fill: (_, y) => if y == 0 { luma(230) } else if calc.even(y) { luma(249) },
   table.header([*Signature*], [*Description*]),
-  ..rows.map(((s, d)) => (text(size: 8.5pt, raw(s)), text(size: 9.5pt, d))).flatten(),
+  ..rows.map(((s, d)) => (text(size: 7.5pt, raw(s)), text(size: 8.5pt, d))).flatten(),
 )
 
-// Scope shared with the `example` show rule so eval() sees the SCAD DSL +
-// render helper without re-importing per example.
-#let doc-scope = (
-  render-ply: render-ply, show-part: show-part, image: image,
-  scadypst: scadypst, compile-scad: compile-scad,
-  scadypst-svg: scadypst-svg, compile-scad-svg: compile-scad-svg,
-  scadypst-info: scadypst-info, compile-scad-info: compile-scad-info,
-  scadypst-parts: scadypst-parts, compile-scad-parts: compile-scad-parts,
-  cube: cube, sphere: sphere, cylinder: cylinder, polyhedron: polyhedron,
-  square: square, circle: circle, ellipse: ellipse, polygon: polygon,
-  ngon: ngon, star: star, rounded-square: rounded-square,
-  linear-extrude: linear-extrude, rotate-extrude: rotate-extrude, projection: projection,
-  slice: slice, trim: trim, "hull-pts": hull-pts,
-  simplify: simplify, "calculate-normals": calculate-normals,
-  "scadypst-raycast": scadypst-raycast, "compile-scad-raycast": compile-scad-raycast,
-  translate: translate, rotate: rotate, scale: scale, mirror: mirror,
-  resize: resize, offset: offset, color: color,
-  union: union, difference: difference, intersection: intersection,
-  hull: hull, minkowski: minkowski,
+#show: doc.with(name: "maquette-scad", scope: scope, stacked: true)
+
+#cover(
+  [maquette-scad],
+  [Render OpenSCAD in Typst],
+  box(clip: true, radius: 44pt, image("logo-scad.svg", width: 260pt)),
+  (
+    ("Source", "https://github.com/bernsteining/maquette"),
+    ("Typst Universe", "https://typst.app/universe/package/maquette-scad"),
+    ("Live demo", "https://bernsteining.github.io/maquette/?model=openscad-logo.scad"),
+  ),
+  toml("/crates/maquette-scad/maquette-scad/typst.toml").package.version,
 )
 
-// Same show-rule protocol as maquette-documentation.typ:
-//   // hl: 3, 5-7   → highlight lines
-//   // cols: 2 1    → code:render column ratio
-#let filter-eval(text) = text.split("\n").filter(l =>
-  not l.starts-with("#import")
-).join("\n")
-
-#let parse-hl(text) = {
-  let lines = text.split("\n")
-  let hl = ()
-  let cols = (1, 1)
-  let code = ()
-  for line in lines {
-    let t = line.trim()
-    if t.starts-with("// hl:") {
-      for part in t.slice(6).trim().split(",") {
-        let p = part.trim()
-        if p.contains("-") {
-          let b = p.split("-")
-          for n in range(int(b.at(0)), int(b.at(1)) + 1) { hl.push(n) }
-        } else if p != "" { hl.push(int(p)) }
-      }
-    } else if t.starts-with("// cols:") {
-      let s = t.slice(8).trim().split(" ")
-      cols = (int(s.at(0)), int(s.at(1)))
-    } else { code.push(line) }
-  }
-  (code.join("\n"), hl, cols)
-}
-
-#show raw.where(lang: "example"): it => {
-  let (code, hl, cols) = parse-hl(it.text)
-  let eval-text = filter-eval(code)
-  grid(columns: (cols.at(0) * 1fr, cols.at(1) * 1fr), gutter: 1em,
-    zebraw(lang: false, numbering: false, highlight-lines: hl, raw(block: true, lang: "typst", code)),
-    align(center + horizon, eval(eval-text, mode: "markup", scope: doc-scope)),
-  )
-}
-
-#show raw.where(lang: "examplev"): it => {
-  let (code, hl, ..) = parse-hl(it.text)
-  let eval-text = filter-eval(code)
-  zebraw(lang: false, numbering: false, highlight-lines: hl, raw(block: true, lang: "typst", code))
-  align(center, eval(eval-text, mode: "markup", scope: doc-scope))
-}
-
-#v(1fr)
-#align(center)[
-  #image("/examples/readme/scad-logo.png", width: 46%)
-  #v(0.8em)
-  #text(font: "Libertinus Serif", size: 32pt, weight: "bold")[maquette-scad]
-  #v(0.3em)
-  #text(size: 14pt, fill: gray)[Parametric CAD in Typst, via OpenSCAD + Manifold]
-  #v(1.2em)
-  #text(size: 12pt, blue)[
-    #link("https://typst.app/universe/package/maquette-scad")[typst.app/universe/package/maquette-scad] \
-    #link("https://github.com/bernsteining/maquette")[github.com/bernsteining/maquette] \
-    #link("https://bernsteining.github.io/maquette")[bernsteining.github.io/maquette]
-  ]
-  #v(0.6em)
-  #text(size: 10pt, fill: luma(150))[Version 0.1.0 #h(0.4em)·#h(0.4em) #datetime.today().display("[month repr:long] [day], [year]")]
-]
-#v(1fr)
-
-#pagebreak()
-
-#{
-  align(center, text(size: 20pt, weight: "bold", tracking: 2pt)[CONTENTS])
-  v(1em)
-  set text(size: 9pt)
-  set outline.entry(fill: repeat(text(fill: luma(180))[.#h(2pt)]))
-  show outline.entry.where(level: 1): it => {
-    v(0.4em); strong(it)
-  }
-  columns(2, gutter: 2em, outline(indent: 1.2em))
-}
-
-#v(1.5em)
+#contents()
 
 = Introduction
 
-*maquette-scad* builds 3D models right inside your Typst document. You write the geometry, it compiles, and the render lands in your PDF. There is no OpenSCAD to install and nothing to run on the side.
+*maquette-scad* compiles OpenSCAD models and renders them in Typst documents. It runs entirely inside Typst as a WebAssembly plugin; no OpenSCAD installation is required.
 
-There are two ways to describe a model. The first is the DSL: you build the shape from Typst helpers such as `cube`, `sphere`, `difference` and `translate`, and reach for Typst's own `for`, `range` and `calc` whenever the geometry is procedural. The second is to pass the text of an existing `.scad` file, libraries and all.
+#demo-callout("https://bernsteining.github.io/maquette/?model=openscad-logo.scad",
+  [Edit OpenSCAD code and render options in the browser, then copy the matching Typst code.])
 
-Either way you get a watertight mesh, which the Manifold kernel guarantees, and `maquette` renders it. `render-scad` does both steps in a single call. When a shape is flat, the `-svg` variants skip the rasterizer and write 2D vector output straight out.
+Models can be provided in two forms:
 
-You can try all of this in the browser at #link("https://bernsteining.github.io/maquette")[bernsteining.github.io/maquette]. Edit the SCAD, orbit the result, adjust the render, and copy the Typst it generates.
+- *OpenSCAD source*: the contents of a `.scad` file, including the libraries it uses.
+- *Typst DSL*: functions such as `cube`, `difference` and `translate`, combined with Typst expressions for procedural geometry.
 
-This document is the API reference: what each helper takes, what the compile calls return, and how to hand in sidecar files. Camera, lighting and post-processing belong to `maquette`, so see its #link("maquette-documentation.pdf")[manual] for those. For the OpenSCAD language itself, see the #link("https://openscad.org/documentation.html")[OpenSCAD Users Manual].
-
-= Where to find sample `.scad` files
-
-The DSL examples in this document build their geometry inline, so you need no external source to follow along. If you want to try the `compile-scad(read("..."))` path, `.scad` files are easy to find:
-
-- #link("https://github.com/openscad/openscad/tree/master/examples")[openscad/openscad `examples/`] is the set that ships with the OpenSCAD editor.
-- #link("https://github.com/BelfrySCAD/BOSL2")[BOSL2] is a large utility library with hundreds of documented fragments.
-- #link("https://www.thingiverse.com/tag:openscad")[Thingiverse (openscad tag)] is a community archive; many entries ship the `.scad` alongside the `.stl`.
+`render-scad` compiles a model and renders it in a single call. Rendering is performed by maquette; camera, lighting and post-processing options are described in the #link("maquette-documentation.pdf")[maquette manual].
 
 = Quickstart
 
-`render-scad` compiles and renders in one call. Pass it a DSL tree or a `.scad` path, followed by any of maquette's render options.
+#sect[
+`render-scad` takes OpenSCAD source as its first argument, followed by render options (left). The remaining examples use a shared `look` preset: Z axis up, three-quarter orthographic view, transparent background (right).
 
-```typ
-#import "@preview/maquette-scad:0.1.0": cube, difference, render-scad, sphere
-
-#render-scad(
-  difference(
-    cube(20, center: true),
-    sphere(12, fn: 48),
-  ),
-  camera: (40, 40, 40),
-  up: (0, 0, 1),
-)
-```
-
-`render-scad` also takes source text. It is the same call, with a `.scad` file in place of a tree:
-
-```typ
+#grid(columns: 2, gutter: 1em,
+```example
 #import "@preview/maquette-scad:0.1.0": render-scad
 
-#render-scad(read("model.scad"))
-```
+#render-scad(read("openscad-logo.scad"),
+  azimuth: 219, elevation: 33, up: (0, 1, 0),
+  zoom: 1.3)
+```,
+```example
+// hl: 1-3
+#let look = (up: (0, 0, 1), azimuth: 35, elevation: 25,
+  projection: "orthographic", background: none,
+  ssao: true, zoom: 1.2)
+#render-scad(difference(cube(20, center: true),
+  sphere(12.5, fn: 64)), ..look)
+```,
+)
+]
 
-One call compiles and renders; no `maquette` import. Examples below use a `show-part` wrapper so the code can focus on geometry.
+= Config reference
 
-= Config Reference
-
-`render-scad` takes a few compile options, then forwards every other named argument to maquette's `render-ply`. All are optional; defaults are shown.
+#sect[
+All parameters are optional. Default values are shown.
 
 #text(size: 9pt, raw(block: true, lang: "json", "{ // ── Compile options (maquette-scad) ───────────────────────────────
-  \"fn\": 32,                                        // Default $fn segment count; a per-primitive fn: overrides it
-  \"smooth-normals\": 30,                            // Whole-mesh crease/sharp angle (deg) for smooth normals; none = faceted
-                                                    //   (same threshold as the calculate-normals tree-op's sharp_angle)
-  \"files\": {},                                     // Multi-file .scad parts: { \"path\": bytes } (or pass a read: lambda)
-  \"bin\": {},                                       // Binary meshes for import(): { \"name\": bytes }
-  \"font\": null                                     // TTF/OTF bytes for text(); null = bundled DejaVu Sans
+  \"fn\": 32,                // Default $fn segment count; a primitive's own fn: wins
+  \"smooth-normals\": 30,    // Crease angle (degrees) for smooth shading; none = faceted
+  \"files\": {},             // Sources for include/use: { \"path\": text }
+  \"bin\": {},               // Meshes for import(): { \"name\": bytes }
+  \"font\": null,            // TTF/OTF bytes for text(); null = built-in DejaVu Sans
+  // ── Render options (maquette) ─────────────────────────────────────
+  // camera, azimuth, elevation, up, fov, zoom, background, color, shading,
+  // lights, shadows, ssao, outline, antialias, …: see the maquette manual.
+  // render-scad changes two defaults: specular: 0, cull_backface: false.
 }"))
+]
 
-Every other argument forwards to maquette's `render-ply`: `camera`, `azimuth`, `elevation`, `up`, `fov`, `zoom`, `background`, `color`, `shading`, `lights`, `shadows`, `ssao`, and the rest. See the #link("maquette-documentation.pdf")[maquette manual] for that full option surface. `render-scad` overrides two of its defaults to suit CAD facets: `specular: 0` and `cull_backface: false` (matte and two-sided).
+= Compile options
 
-= Building geometry with `scadypst`
+#sect[
+== `fn`: curve resolution
 
-`scadypst(tree)` walks a tree of Typst dicts and returns PLY bytes. Each helper such as `cube`, `sphere` or `translate` builds a node, and nothing runs until `scadypst` receives the whole tree.
+`fn` sets the default number of segments used to approximate circles and spheres, equivalent to OpenSCAD's `$fn`. A primitive's own `fn` argument takes precedence.
 
-Because the tree is Typst code, iteration and arithmetic come from Typst. Here a `..for` spread inside `union` places twelve spheres on a ring:
+#grid(columns: 3, gutter: 1em,
+```example
+// hl: 2
+#render-scad(sphere(12), ..look,
+  fn: 8)
+```,
+```example
+// hl: 2
+#render-scad(sphere(12), ..look,
+  fn: 36)
+```,
+```example
+// hl: 2
+#render-scad(sphere(12), ..look,
+  fn: 96)
+```,
+)
+]
+
+#sect[
+== `smooth-normals`: shading across facets
+
+`smooth-normals` sets the crease angle, in degrees, used for smooth shading. Edges between faces that meet at a sharper angle stay hard. The default is 30; `none` renders flat facets.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 3
+#render-scad(difference(cube(18, center: true),
+  sphere(11.5, fn: 16)), ..look,
+  smooth-normals: none)
+```,
+```example
+// hl: 3
+#render-scad(difference(cube(18, center: true),
+  sphere(11.5, fn: 16)), ..look,
+  smooth-normals: 30)
+```,
+)
+]
+
+#sect[
+== `bin` and `files`: meshes and libraries
+
+`bin` provides the STL and OBJ meshes loaded by `import()`; imported meshes can be used in boolean operations (left). `files` provides the sources loaded by `include` and `use` (right). Both are dictionaries keyed by file name.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 3, 6
+#render-scad(difference(
+    scale((300, 300, 300), rotate((90, 0, 0),
+      import-mesh("bunny.obj"))),
+    translate((20, 0, 30), cube((40, 80, 80), center: true)),
+  ),
+  bin: ("bunny.obj": bunny), ..look, azimuth: 60, zoom: 0.9)
+```,
+```example
+// hl: 3-4
+#render-scad("use <shapes.scad>
+  rounded(20, 4);",
+  files: ("shapes.scad": "module rounded(s, r) minkowski()
+    { cube(s - 2 * r, center = true); sphere(r); }"), ..look)
+```,
+)
+]
+
+#sect[
+== `font`: text
+
+`scad-text` generates glyph outlines from the font passed as `font`, a TTF or OTF file read as bytes. DejaVu Sans is used when no font is given. Text outlines are ordinary 2D shapes: they can be extruded, coloured and used in boolean operations.
 
 ```example
-// cols: 2 1
+// hl: 1, 4-5, 8
+#let font = read("DejaVuSans.ttf", encoding: none)
+#let raised(c, pos, h, body) = color(c, translate(pos, linear-extrude(h, body)))
+#render-scad(union(
+  difference(color((0.14, 0.38, 0.6), linear-extrude(4, rounded-square(84, 32, 6))),
+    translate((10, 5, 3), linear-extrude(2, scad-text("render OpenSCAD", size: 5)))),
+  raised((0.97, 0.55, 0.15), (10, 13, 4), 3, scad-text("Typst", size: 13)),
+  raised((0.98, 0.85, 0.25), (70, 18, 4), 5, star(5, 7, 3)),
+), font: font, (width: 1200, height: 440), antialias: 5,
+  ..look, azimuth: 215, elevation: 45, zoom: 1.7)
+```
+]
+
+= Render options
+
+#sect[
+Other arguments are passed to maquette's renderer (left). The `openscad-view` preset reproduces the OpenSCAD preview (right).
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 3-4
+#render-scad(read("openscad-logo.scad"),
+  azimuth: 219, elevation: 33, up: (0, 1, 0),
+  background: "#202430", ssao: true,
+  outline: (width: 1.5, color: "#000000"))
+```,
+```example
+// hl: 2
+#render-scad(read("openscad-logo.scad"),
+  ..openscad-view,
+  azimuth: 219, elevation: 33, up: (0, 1, 0))
+```,
+)
+]
+
+= Building with the DSL
+
+#sect[
+== Trees and Typst control flow
+
+DSL functions return Typst values, so models can be built with Typst loops and arithmetic.
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 1-4
 #let ring = union(..for i in range(12) {
-  let a = i * 30
-  let r = 20
-  (translate(
-    (calc.cos(a * 1deg) * r, calc.sin(a * 1deg) * r, 0),
-    sphere(3, fn: 24),
-  ),)
+  let a = i * 30deg
+  (translate((20 * calc.cos(a),
+    20 * calc.sin(a), 0), sphere(3)),)
 })
-#show-part(scadypst(ring))
-```
-
-The variadic ops (`union`, `difference`, `hull`, `intersection`) accept `..items`, so you can spread a Typst `for` block to feed them a computed list.
-
-== DSL reference
-
-Every helper takes Typst-native named arguments, as in `cube(20, center: true)`. The signatures below list positional arguments first, then named ones. `fn: N` sets the segment count for that primitive.
-
-=== 3D primitives
-
-#dsl-table((
-  ("cube(size, center: false)", [`size` is a number for a uniform box, or a 3-array `(x, y, z)`.]),
-  ("sphere(r, fn: none)", [A sphere of radius `r`.]),
-  ("cylinder(h, r: none, r1: none, r2: none, center: false, fn: none)", [Pass `r` for a straight cylinder, or `r1` and `r2` for a cone or frustum.]),
-  ("polyhedron(points, faces)", [A raw mesh: `points` is `((x, y, z), …)`, `faces` is `((i, j, k, …), …)`.]),
-))
-
-=== 2D primitives (extrusion sources)
-
-#dsl-table((
-  ("square(size, center: false)", [A rectangle; `size` is a number or `(w, h)`.]),
-  ("circle(r, fn: none)", [A circle of radius `r`.]),
-  ("ellipse(w, h, fn: none)", [An ellipse of width `w` and height `h`.]),
-  ("polygon(points, paths: none)", [An arbitrary 2D shape. `paths` lists index-rings into `points`; the first ring is the outer boundary, the rest are holes.]),
-  ("ngon(sides, r, fn: none)", [A regular polygon.]),
-  ("star(points, outer, inner)", [An n-pointed star.]),
-  ("rounded-square(w, h, r, fn: none)", [A rectangle with radius-`r` corners.]),
-  ("scad-text(str, size: 10)", [Glyph outlines from the font passed to `scadypst()`'s `font:` argument.]),
-  ("import-mesh(file)", [References an STL or OBJ passed via `scadypst()`'s `bin:` dict.]),
-))
-
-=== 2D → 3D lifting (and 3D → 2D)
-
-#dsl-table((
-  ("linear-extrude(h, child, center: false, twist: 0, scale: 1, slices: none)", [Extrudes a 2D shape to height `h`. `twist` is degrees over the full height; `scale` is a taper from 0 to 1, or an `(sx, sy)` pair.]),
-  ("rotate-extrude(child, angle: 360, fn: none)", [Revolves a 2D profile (living in the +x half-plane) around the z-axis.]),
-  ("projection(child)", [Flattens a 3D solid to its 2D shadow on the Z=0 plane.]),
-))
-
-=== Transforms (2D or 3D)
-
-#dsl-table((
-  ("translate(v, child)", [`v` is a 2- or 3-vector.]),
-  ("rotate(deg, child)", [Euler degrees `(x, y, z)`, or a single number for a 2D rotation.]),
-  ("scale(v, child)", [Per-axis scale.]),
-  ("mirror(v, child)", [Reflect across a plane whose normal is `v`.]),
-  ("multmatrix(m, child)", [A 4×4 (or 4×3) affine matrix: the escape hatch for anything the named transforms cannot express.]),
-  ("resize(v, child)", [Non-uniform scale to fit a target bounding box.]),
-  ("offset(d, child)", [Grow (`d > 0`) or shrink (`d < 0`) a 2D shape by `d`.]),
-  ("color(rgb, child, alpha: none)", [`rgb` is a 3-array of 0–1 floats, or a 4-array `(r, g, b, a)`. See _Colours and alpha_ below.]),
-))
-
-=== Booleans and hulls
-
-#dsl-table((
-  ("union(..items)", [Combine every child into one solid.]),
-  ("difference(..items)", [The first child minus all the rest.]),
-  ("intersection(..items)", [Keep only the region shared by every child.]),
-  ("hull(..items)", [Convex hull of the union (3D).]),
-  ("hull-pts(points)", [Convex hull of a raw 3D point set (a list of `(x, y, z)` triples), for when you have coordinates rather than geometry to wrap.]),
-  ("minkowski(..items)", [Minkowski sum (3D).]),
-))
-
-These are all variadic, so a `..` spread over a Typst `for` block feeds them a computed list of children.
-
-=== Plane operations
-
-#dsl-table((
-  ("slice(child, z: 0)", [A horizontal cross-section of a 3D solid at the given Z, returned as a 2D shape (pipe into `scadypst-svg(..)`). Unlike `projection(..)`, it does not union every slice.]),
-  ("trim(child, normal, offset: 0)", [Cuts with a plane, keeping the half where `dot(pos, normal) ≥ offset`. Exact, and cheaper than the "difference() with a giant cube" trick.]),
-  ("simplify(child, epsilon: 0.01)", [Douglas–Peucker vertex reduction for 2D and 3D. Its own section has a before/after count.]),
-  ("calculate-normals(child, sharp_angle: 60)", [Attaches per-vertex normals for smooth shading; the crease-angle threshold keeps sharp edges crisp. 3D only, and visible only under `shading: "smooth"`.]),
-))
-
+#render-scad(ring, ..look)
+```,
 ```example
-// cols: 2 1
-#show-part(scadypst(
-  trim(sphere(10, fn: 64), (0, 0, 1))
-))
-```
+// hl: 1-3
+#let stairs = union(..range(16).map(i =>
+  rotate((0, 0, i * 24), translate(
+    (4, -1.5, i * 1.6), cube((10, 3, 1))))),
+  cylinder(26, r: 2))
+#render-scad(stairs, ..look)
+```,
+)
+]
 
+#sect[
+== Primitives and extrusions
+
+Primitives, 2D shapes and extrusions follow OpenSCAD's names and parameters.
+
+#grid(columns: 2, gutter: 1em,
+```example
+#render-scad(union(cube(10),
+  translate((18, 5, 5), sphere(6)),
+  translate((-12, 5, 0),
+    cylinder(14, r1: 6, r2: 2))),
+  ..look)
+```,
+```example
+#render-scad(linear-extrude(30,
+  star(6, 14, 8), twist: 90,
+  slices: 40), ..look)
+```,
+```example
+#render-scad(rotate-extrude(
+  translate((12, 0), circle(5)),
+  fn: 96), ..look)
+```,
+```example
+#render-scad(projection(sphere(10)) ,
+  ..look)
+```,
+)
+]
+
+#sect[
+== Booleans and hulls
+
+`difference` subtracts every following child from the first. `hull` computes the convex hull of its children, and `minkowski` their Minkowski sum.
+
+#grid(columns: 2, gutter: 1em,
+```example
+#render-scad(difference(
+  cube(16, center: true),
+  sphere(10.5)), ..look)
+```,
+```example
+#render-scad(intersection(
+  cube(16, center: true),
+  sphere(10.5)), ..look)
+```,
+```example
+#render-scad(hull(cube(16, center: true),
+  translate((16, 0, 0), sphere(5))),
+  ..look)
+```,
+```example
+#render-scad(minkowski(
+  cube(10, center: true),
+  sphere(3)), ..look)
+```,
+)
+]
+
+#sect[
 == Colours and alpha
 
-Colours propagate through boolean operations. The emitted PLY carries per-vertex RGB and `render-ply` picks it up automatically. Any part without a `color()` wrapper inherits the render config's `color:` argument.
+`color` takes RGB components in the range 0–1. An optional fourth component sets the opacity (right). Uncoloured parts use OpenSCAD's default yellow.
 
+#grid(columns: 2, gutter: 1em,
 ```example
-#show-part(
-  scadypst(union(
-    color((0.9, 0.3, 0.3), cube(10, center: true)),
-    color((0.3, 0.7, 0.4), translate((15, 0, 0), sphere(6, fn: 32))),
-  )),
-  color: none,
-)
-```
-
-Alpha is supported. Two equivalent forms:
-
-```typc
-color((0.9, 0.35, 0.35, 0.5), child)              // RGBA in one 4-array
-color((0.9, 0.35, 0.35), child, alpha: 0.5)       // RGB + separate alpha
-```
-
-Interior geometry shows through translucent subtrees, so a coloured cover can reveal the shape's internal features.
-
-== The `scadypst()` compile call
-
-```typc
-scadypst(node, bin: (:), font: none, fn: 32)
-```
-
-- *`node`*: the tree returned by any DSL helper, usually a top-level `union` or `difference`, or a single primitive.
-- *`bin`*: a dict of sidecar bytes referenced by `import-mesh(file)`. The keys match the string passed to `import-mesh`, and the values are `read("path", encoding: none)`.
-- *`font`*: TTF or OTF bytes for `scad-text(...)`. One font per compile.
-- *`fn`*: the default `$fn` for the whole compile. A per-primitive `fn:` overrides it.
-
-It returns the same PLY `bytes` that `compile-scad` returns, ready to pass to `render-ply`.
-
-== Name clashes with Typst built-ins
-
-A glob-import (`#import "..": *`) shadows seven of Typst's own functions:
-
-`scale`, `rotate`, `circle`, `square`, `ellipse`, `polygon`, `color`. (Additionally, the OpenSCAD `text` primitive is re-exported as `scad-text` to avoid shadowing `#text`.)
-
-Two ways around it:
-
-```typ
-// Option 1: namespace the plugin
-#import "@preview/maquette-scad:0.1.0"
-#let part = maquette-scad.scadypst(
-  maquette-scad.difference(
-    maquette-scad.cube(20, center: true),
-    maquette-scad.sphere(12, fn: 48),
-  )
-)
-
-// Option 2: glob-import the plugin's `scad-*` aliases
-#import "@preview/maquette-scad:0.1.0": scad-color, scad-scale, scad-rotate, scad-circle, scad-square, scad-ellipse, scad-polygon
-```
-
-Both leave Typst's own `#text` / `#circle` / … intact. The `scad-*` aliases live alongside the unprefixed names, so you can mix approaches within one document.
-
-= Compiling `.scad` sources with `compile-scad`
-
-For a standalone `.scad` file, one call is enough:
-
-```typ
-#render-scad(read("part.scad"))
-```
-
-Real-world `.scad` files rarely stand alone: they `use` / `include` a library, `import` an STL or OBJ for a fastener, or ship a font for embossed text. The wasm sandbox has no filesystem, so every sidecar is passed explicitly as bytes:
-
-```typ
-#compile-scad(read("main.scad"),
-  files: (
-    "utils.scad":                     read("utils.scad"),
-    "gears.scad":                     read("gears.scad"),
-    "MCAD/nuts_and_bolts.scad":       read("MCAD/nuts_and_bolts.scad"),
-  ),
-  bin: (
-    "mount.stl":                      read("mount.stl", encoding: none),
-  ),
-  font: read("logo.ttf", encoding: none),
-  fn: 48,
-  trace: "trace.log",
-)
-```
-
-Options:
-
-- *`source`* (positional string): the `.scad` text, almost always `read("path.scad")`.
-- *`files`* (dict): resolves every `use <name>` and `include <name>` in the source. The keys are the exact names the `.scad` uses, and nested paths like `MCAD/foo.scad` are keys with slashes.
-- *`bin`* (dict): sidecar mesh files referenced by `import()`. The keys match the `import` argument. STL and OBJ are recognised; DXF, 3MF and AMF are not.
-- *`font`* (bytes): a TTF or OTF file used by `text()`. One font per compile.
-- *`fn`* (int): the default `$fn` for this compile. Any per-primitive `fn:` overrides it.
-- *`trace`* (string): dumps the evaluator trace to this path. It helps when a nested `for` or `module` is not producing what you expected.
-
-= Inspection: `scadypst-info` / `compile-scad-info`
-
-Returns a Typst dict with the final geometry's stats without building
-the PLY. Useful for laying parts out by their real size, annotating a
-document with computed volumes, or failing early if a compile produced
-empty geometry.
-
-Fields: `bbox_min`, `bbox_max`, `center`, `radius`, `volume`,
-`surface_area`, `num_tri`, `num_vert`, `genus`.
-
+// hl: 2, 4
+#render-scad(union(
+  color((0.85, 0.3, 0.3), cube(16,
+    center: true)),
+  sphere(6),
+  color((0.3, 0.65, 0.4), translate(
+    (14, 0, 0), sphere(5))),
+), ..look)
+```,
 ```example
-// cols: 2 1
-#let info = scadypst-info(cube(20, center: true))
-#raw(block: true, lang: "yml",
-  "volume:       " + str(info.volume) + " mm³\n" +
-  "surface_area: " + str(info.surface_area) + " mm²\n" +
-  "num_tri:      " + str(info.num_tri) + "\n" +
-  "bbox_min:     " + repr(info.bbox_min) + "\n" +
-  "bbox_max:     " + repr(info.bbox_max)
+// hl: 2
+#render-scad(union(
+  color((0.85, 0.3, 0.3, 0.45), cube(16,
+    center: true)),
+  sphere(6),
+  color((0.3, 0.65, 0.4), translate(
+    (14, 0, 0), sphere(5))),
+), ..look)
+```,
 )
-```
+]
 
-`compile-scad-info(src, files: (:), bin: (:), font: none, fn: 32)` is
-the `.scad`-source variant with the same return shape.
+#sect[
+== Reference
 
-= Decomposing: `scadypst-parts` / `compile-scad-parts`
-
-Splits the final geometry into its connected components via
-`Manifold::decompose()` and returns each as its own PLY. The return
-type is `array<bytes>`; each element is renderable via `render-ply` in
-isolation.
-
-Useful for laying out multiple pieces separately (laser-cut sheet
-layouts, exploded-view annotations, per-part BOM tables).
-
-```example
-// cols: 2 1
-#let parts = scadypst-parts(union(
-  translate((0, 0, 0),  cube(4, center: true)),
-  translate((10, 0, 0), cube(4, center: true)),
-  translate((20, 0, 0), cube(4, center: true)),
-))
-Got #parts.len() parts:
-#for p in parts {
-  show-part(p, width: 25%)
-  h(0.3em)
-}
-```
-
-`compile-scad-parts(src, files: (:), bin: (:), font: none, fn: 32)` is
-the `.scad`-source variant.
-
-= Vertex reduction: `simplify(child, epsilon)`
-
-Collapses edges shorter than `epsilon`, measured in the input's units. It is a Douglas-Peucker style pass that strips micro-detail from booleans, or slims a mesh before you ship it through PLY or SVG.
-
-It is dimension-agnostic: pass a 2D shape (`CrossSection`) or a 3D solid (`Manifold`), and the op dispatches on the child.
-
-```example
-// cols: 2 1
-#let ring = union(..range(64).map(i => {
-  let a = i * 360deg / 64
-  translate((calc.cos(a) * 10, calc.sin(a) * 10),
-    circle(1.2, fn: 8))
-}))
-#let ring-info   = scadypst-info(ring)
-#let simple-info = scadypst-info(simplify(ring, epsilon: 0.5))
-#raw(block: true, lang: "yml",
-  "before → num_tri: " + str(ring-info.num_tri) + "\n" +
-  "after  → num_tri: " + str(simple-info.num_tri)
-)
-```
-
-`epsilon` is in model units: keep it tiny for a fine mesh, and make it generous when you want to knock a curve down to a coarse polyline.
-
-= Smooth shading: `calculate-normals(child, sharp_angle)`
-
-Attaches per-vertex normals to a 3D solid so maquette can smooth-shade
-curved surfaces while keeping crisp edges. Adjacent faces whose
-dihedral angle exceeds `sharp_angle` (degrees) stay sharp, and the rest
-blend. Run it after the final booleans and hulls, since those discard any
-existing normals.
-
-The effect only shows under smooth shading. `openscad-view` is flat by
-design, so switch `shading: "smooth"` (and drop `openscad-view`) for
-the render call.
-
-```example
-// cols: 1 1
-#let part = calculate-normals(
-  difference(sphere(10, fn: 24), cube(12, center: true)),
-  sharp_angle: 30,
-)
-#render-ply(scadypst(part),
-  width: 3.5cm, shading: "smooth",
-  azimuth: 30, elevation: 25)
-```
-
-Lower `sharp_angle` = more edges classed as sharp (crisp box corners).
-Higher = more edges smoothed (softer curves).
-
-== Two ways to add smooth normals
-
-`calculate-normals` (above) is a *tree op*: it smooths whatever
-subtree it wraps. Use it when only one region of a bigger model
-should render smooth, say the sphere but not the cube parts.
-
-The end-call helpers `scadypst(..., smooth-normals: 30)` and
-`compile-scad(..., smooth-normals: 30)` are the *whole-scene*
-shortcut: they run the same `calculate_normals` pass on the final
-mesh right before it's serialized. Same output, less typing when
-you want the entire model smoothed:
-
-```typ
-// tree-op form: smooths just the sphere
-scadypst(union(
-  calculate-normals(sphere(10, fn: 24), sharp_angle: 30),
-  translate((15, 0, 0), cube(6, center: true)),
+#dsl-table((
+  ("cube(size, center: false)", [Box; `size` is a number or `(x, y, z)`.]),
+  ("sphere(r, fn: none)", [Sphere of radius `r`.]),
+  ("cylinder(h, r:, r1:, r2:, center:, fn:)", [Cylinder, or a cone with `r1` and `r2`.]),
+  ("polyhedron(points, faces)", [Raw mesh.]),
+  ("square / circle / ellipse / polygon", [2D shapes; `polygon(points, paths:)` takes holes.]),
+  ("ngon / star / rounded-square", [Regular polygon, star, rounded rectangle.]),
+  ("scad-text(str, size: 10)", [Glyph outlines from the compile's `font`.]),
+  ("import-mesh(file)", [An STL or OBJ passed in `bin`.]),
+  ("linear-extrude(h, child, twist:, scale:, slices:)", [Extrude 2D to 3D, optionally twisted and tapered.]),
+  ("rotate-extrude(child, angle: 360, fn:)", [Revolve a 2D profile around Z.]),
+  ("projection(child) / slice(child, z:)", [3D to 2D: shadow, or cross-section at `z`.]),
+  ("translate / rotate / scale / mirror / resize", [Transforms; `rotate` takes Euler degrees.]),
+  ("multmatrix(m, child) / offset(d, child)", [Affine matrix; grow or shrink a 2D shape.]),
+  ("union / difference / intersection", [Booleans; `difference` subtracts the rest from the first.]),
+  ("hull / minkowski / hull-pts(points)", [Convex hull, Minkowski sum, hull of points.]),
+  ("trim(child, normal, offset:)", [Cut with a plane.]),
+  ("simplify(child, epsilon:)", [Vertex reduction (2D and 3D).]),
+  ("calculate-normals(child, sharp_angle:)", [Smooth normals for one subtree.]),
+  ("color(rgb, child, alpha:)", [Colour and transparency.]),
 ))
 
-// end-call form: smooths everything
-scadypst(my-model, smooth-normals: 30)
-compile-scad(read("part.scad"), smooth-normals: 30)
-```
+Importing the package with `*` shadows Typst's built-in `scale`, `rotate`, `circle`, `square`, `ellipse`, `polygon` and `color`. Each has a `scad-` prefixed alias, such as `scad-color`, for use alongside the built-ins.
+]
 
-Either way, the render call needs a smooth shading mode
-(`shading: "smooth"`) to actually consume the normals.
+= Compiling `.scad` sources
 
-= Ray casting: `scadypst-raycast` / `compile-scad-raycast`
-
-Fires a segment from `origin` to `end` at the evaluated geometry and
-returns an array of hits sorted by distance:
-
-```
-(
-  ( face_id: <int>, distance: <float>,
-    position: (x, y, z), normal: (x, y, z) ),
-  ..
-)
-```
-
-Use it to sample a terrain height under an XY coordinate, pick the
-face at a screen click, or check line-of-sight between two points.
-Empty array means the segment missed.
+#sect[
+`compile-scad` compiles OpenSCAD source to a PLY mesh without rendering it. The mesh can then be rendered several times with maquette's `render-ply` for the cost of a single compilation.
 
 ```example
-// cols: 2 1
-#let part = union(
-  cube(10, center: true),
-  translate((0, 0, 12), sphere(5, fn: 32)),
-)
-#let hits = scadypst-raycast(part,
-  (0, 0, 30), (0, 0, -30))
-#raw(block: true, lang: "yml",
-  "hits: " + str(hits.len()) + "\n" +
-  hits.map(h =>
-    "  d=" + str(calc.round(h.distance, digits: 2)) +
-    "  z=" + str(calc.round(h.position.at(2), digits: 2))
-  ).join("\n")
-)
+// hl: 3-4
+#import "@preview/maquette:0.2.0": render-ply
+
+#let ply = compile-scad(
+  read("scad/gear.scad"))
+#grid(columns: 2, gutter: 0.5em,
+  render-ply(ply, ..look),
+  render-ply(ply, ..look, elevation: 80))
 ```
+]
 
-`compile-scad-raycast(src, origin, end, files: (:), bin: (:), font: none, fn: 32)`
-is the `.scad`-source variant.
+= Syntax highlighting
 
-= Direct 2D → SVG: `scadypst-svg` / `compile-scad-svg`
+#sect[
+The `scad-highlighting` show rule enables OpenSCAD syntax highlighting in `scad` code blocks.
 
-For sources that resolve to a 2D shape (`circle`, `square`, `polygon`,
-`text`, hulls of 2D things, `offset`, `slice`, `projection`), the plugin
-can emit an SVG document directly, with no maquette in the loop and no
-rasterizer. The result is resolution-independent, Inkscape-editable,
-and laser-cutter-ready.
+````examplev
+#show: scad-highlighting
+```scad
+module rod(d, h) cylinder(h, d = d, center = true);
+difference() { sphere(d = 50); rod(25, 62.5); }
+```
+````
+]
 
-Errors if the tree resolves to a 3D solid.
+= Multi-file projects
+
+#sect[
+`render-scad-tree` compiles a project from its entry file, resolving `include` and `use` statements relative to `root`. Files are loaded through the `read` function, which must be defined in your document. The project below has three files: a main file, a plate and a bolt.
 
 ```example
-// cols: 2 1
-#image(scadypst-svg(difference(
-  union(
-    circle(10, fn: 64),
-    translate((14, 0), square(20, center: true)),
-  ),
-  circle(4, fn: 48),
-)), width: 65%)
-```
-
-`slice(child, z: 0)` composes cleanly with `-svg`: 3D model → horizontal
-cross-section → vector contour, in one call.
-
-```example
-// cols: 2 1
-#image(scadypst-svg(slice(sphere(10, fn: 64), z: 4)), width: 60%)
-```
-
-`compile-scad-svg(src, ...)` is the `.scad`-source variant.
-
-= Multi-file projects: `compile-scad-tree`
-
-A project split across many files with `use <..>` and `include <..>` compiles in one call. `compile-scad-tree` reads the entry file and follows its include graph for you, so there is no file list to maintain:
-
-```typ
-#import "@preview/maquette-scad:0.1.0": openscad-view, render-scad-tree
-
-#render-scad-tree(
-  "Cyclone.scad",
-  root: "cyclone-src/",
+// hl: 1-3
+#render-scad-tree("main.scad", (width: 600, height: 400),
+  root: "scad/tree/",
   read: p => read(p),
-  ..openscad-view,
-  azimuth: 35,
-  elevation: 20,
-  up: (0, 0, 1),
-  background: none,
-)
+  ..look, azimuth: 30, elevation: 35)
 ```
+]
 
-`root` is the source folder joined onto each discovered path, and `entry` is the top file inside it. Pass a `read:` lambda scoped to your document, `read: p => read(p)`, so the sources are read from *your* project; a package's own `read()` cannot reach your files. The whole Cyclone-PCB-Factory below, all 69 files, comes from that single call:
+= Inspecting geometry
 
-#figure(
-  image("cyclone-example.png", width: 88%),
-  caption: [The full Cyclone-PCB-Factory from one `compile-scad-tree` call.],
+#sect[
+== Metrics
+
+`scadypst-info` returns the model's bounding box, volume, surface area and mesh statistics.
+
+```example
+#let info = scadypst-info(difference(
+  cube(20, center: true), sphere(12.5, fn: 64)))
+#table(columns: 2,
+  ..("volume", "surface_area", "num_tri", "genus")
+    .map(k => (raw(k), str(calc.round(info.at(k), digits: 1))))
+    .flatten())
+```
+]
+
+#sect[
+== Parts
+
+`scadypst-parts` splits a model into its disconnected components and returns one mesh per component.
+
+```example
+// hl: 1
+#let parts = scadypst-parts(union(..range(3).map(i =>
+  translate((i * 12, 0, 0), cube(6, center: true)))))
+#grid(columns: parts.len(), gutter: 0.5em,
+  ..parts.map(p => render-ply(p, ..look)))
+```
+]
+
+#sect[
+== Ray casting
+
+`scadypst-raycast` intersects the segment from `origin` to `end` with the model and returns the distance and position of each hit.
+
+```example
+#let hits = scadypst-raycast(union(cube(10, center: true),
+  translate((0, 0, 12), sphere(5))), (0, 0, 30), (0, 0, -30))
+#table(columns: 2, [*distance*], [*z*],
+  ..hits.map(h => (str(calc.round(h.distance, digits: 2)),
+    str(calc.round(h.position.at(2), digits: 2)))).flatten())
+```
+]
+
+#sect[
+== Simplifying and smoothing
+
+`simplify` removes detail smaller than `epsilon` (left). `calculate-normals` applies smooth shading to a single subtree (right).
+
+#grid(columns: 2, gutter: 1em,
+```example
+// hl: 2
+#render-scad(simplify(sphere(12, fn: 64),
+  epsilon: 2), ..look, smooth-normals: none)
+```,
+```example
+// hl: 2
+#render-scad(union(calculate-normals(
+  sphere(9, fn: 24), sharp_angle: 30),
+  translate((15, 0, 0), sphere(6, fn: 24))),
+  ..look, smooth-normals: none)
+```,
 )
+]
 
-Need the files as a dict instead (to edit one before compiling)? `scad-collect(entry, root:)` returns `path → source` for `compile-scad(main, files: …)`.
+= 2D output as SVG
 
-= What `compile-scad` accepts
+#sect[
+`scadypst-svg` exports 2D shapes as SVG, which stays sharp at any scale. Combined with `slice`, it produces vector cross-sections of solids.
 
-If your `.scad` source works in the OpenSCAD editor, it should work here; the evaluator covers everything a typical file uses. The known gaps are `surface()` (heightmap import), `import()` of DXF, and the `$vpr` / `$vpt` / `$vpd` / `$vpf` viewport variables. Adaptive tessellation from `$fa` / `$fs` *is* supported (defaults `$fa = 12`, `$fs = 2`), alongside `$fn` and the per-primitive `fn:` override. Any external STL or OBJ mesh referenced by `import()` must be routed through the `bin:` argument, since the plugin has no filesystem access.
+#grid(columns: 2, gutter: 1em,
+```example
+#image(scadypst-svg(difference(
+  union(circle(10, fn: 64),
+    translate((14, 0), square(20,
+      center: true))),
+  circle(4, fn: 48))), width: 90%)
+```,
+```example
+// hl: 1
+#image(scadypst-svg(slice(
+  sphere(10, fn: 64), z: 4)),
+  width: 60%)
+```,
+)
+]
 
-The exhaustive per-feature tracker lives at `crates/maquette-scad/FIDELITY.md`.
+= A whole machine
 
-*Two wasm modules cooperate.* `maquette-scad.wasm` (this crate) compiles geometry to PLY. `maquette.wasm` renders it. They exchange nothing but the PLY blob, so you can also feed a `scadypst(...)` output into `maquette-gltf` (wrapped in a minimal `.gltf`) when you want PBR shading on procedural geometry.
+#sect[
+The #link("https://github.com/carlosgs/Cyclone-PCB-Factory", text(fill: blue)[Cyclone PCB Factory]) is an open-source, 3D-printable CNC mill. Its source tree contains 66 `.scad` files, including the MCAD, obiscad and Write libraries. `render-scad-tree` compiles the complete assembly in about two minutes; a low `fn` reduces compilation time.
+
+```example
+// hl: 1-3
+#render-scad-tree("Cyclone.scad",
+  root: "scad/cyclone/", read: p => read(p), fn: 8,
+  (width: 1000, height: 900), ..look, azimuth: 215, zoom: 1.3)
+```
+]
+
+= Credits
+
+#sect[
+#let src(url, body) = link(url, text(fill: blue, body))
+#ref-table(([Model], [Authors], [Licence]), (
+  (src("https://github.com/carlosgs/Cyclone-PCB-Factory")[Cyclone PCB Factory], [Carlosgs and contributors],
+    src("https://creativecommons.org/licenses/by-sa/4.0/")[CC BY-SA 4.0]),
+  (src("https://github.com/openscad/MCAD")[MCAD], [OpenSCAD contributors],
+    src("https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html")[LGPL 2.1]),
+  (src("https://github.com/Obijuan/obiscad")[obiscad], [Juan González-Gómez (Obijuan)],
+    src("https://www.gnu.org/licenses/gpl-3.0.html")[GPL]),
+  (src("https://www.thingiverse.com/thing:16193")[Write.scad], [HarlanDMii],
+    src("https://creativecommons.org/licenses/by/3.0/")[CC BY 3.0]),
+  (src("https://graphics.stanford.edu/data/3Dscanrep/")[Stanford Bunny], [Stanford Computer Graphics Laboratory], [Free for research]),
+))
+]

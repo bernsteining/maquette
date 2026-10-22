@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/docs/logo-scad.svg" width="180" alt="maquette-scad logo"></p>
+
 # maquette-scad
 
 [![Typst Universe](https://img.shields.io/badge/Typst%20Universe-maquette--scad-239dad)](https://typst.app/universe/package/maquette-scad)

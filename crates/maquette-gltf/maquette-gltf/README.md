@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/bernsteining/maquette/master/docs/logo-gltf.svg" width="180" alt="maquette-gltf logo"></p>
+
 # maquette-gltf
 
 [![Typst Universe](https://img.shields.io/badge/Typst%20Universe-maquette--gltf-239dad)](https://typst.app/universe/package/maquette-gltf)
