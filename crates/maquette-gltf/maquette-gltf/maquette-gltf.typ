@@ -172,7 +172,7 @@
 /// Render a glTF or GLB model to a raster image.
 ///
 /// 🔗 *Frame the camera, lighting and animation visually in the live web demo,
-/// then copy the generated code:* https://bernsteining.github.io/maquette/
+/// then copy the generated code:* https://bernsteining.github.io/maquette/?model=tokyo.glb
 ///
 /// `model` accepts either a path string or bytes:
 ///   - `"assets/scene.gltf"` (with `read: p => read(p, encoding: none)`) —
@@ -208,7 +208,7 @@
 /// framing or driving an animation slider.
 ///
 /// 🔗 *Explore models interactively in the live web demo:*
-/// https://bernsteining.github.io/maquette/
+/// https://bernsteining.github.io/maquette/?model=tokyo.glb
 ///
 /// Same `model` polymorphism and `read:` handshake as `render-gltf`.
 /// -> dictionary

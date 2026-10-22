@@ -162,7 +162,7 @@
 /// the tree from `cube`, `sphere`, `difference`, `translate`, and so on.
 ///
 /// 🔗 *Preview geometry and render settings in the live web demo:*
-/// https://bernsteining.github.io/maquette/
+/// https://bernsteining.github.io/maquette/?model=openscad-logo.scad
 ///
 /// - node (dictionary): the tree returned by any DSL helper.
 /// -> bytes
@@ -271,7 +271,7 @@
 /// Compile `.scad` source text to PLY bytes, to hand to maquette's `render-ply`.
 ///
 /// 🔗 *Preview a `.scad` model and its render in the live web demo:*
-/// https://bernsteining.github.io/maquette/
+/// https://bernsteining.github.io/maquette/?model=openscad-logo.scad
 ///
 /// - src (str): the `.scad` text, usually `read("part.scad")`.
 /// - files (dictionary): `use`/`include` sources, name → contents.
@@ -303,7 +303,7 @@
 /// `include` graph from `entry`. Pass a `read:` lambda scoped to your document
 /// so the plugin can open your files.
 ///
-/// 🔗 *Live web demo:* https://bernsteining.github.io/maquette/
+/// 🔗 *Live web demo:* https://bernsteining.github.io/maquette/?model=openscad-logo.scad
 ///
 /// - entry (str): the top `.scad` file inside `root`.
 /// - root (str): the folder joined onto each discovered path.
@@ -339,7 +339,7 @@
 /// source text such as `read("part.scad")`.
 ///
 /// 🔗 *Build your model and dial in the render visually in the live web demo,
-/// then copy the generated code:* https://bernsteining.github.io/maquette/
+/// then copy the generated code:* https://bernsteining.github.io/maquette/?model=openscad-logo.scad
 ///
 /// - model (dictionary, str, bytes): a DSL node, or `.scad` source text.
 /// - ..args (arguments): forwarded to maquette's `render-ply` (camera, shading, background, …).
@@ -361,7 +361,7 @@
 /// document so the plugin can open the project's files.
 ///
 /// 🔗 *Preview and tweak the render in the live web demo:*
-/// https://bernsteining.github.io/maquette/
+/// https://bernsteining.github.io/maquette/?model=openscad-logo.scad
 ///
 /// - entry (str): the top `.scad` file inside `root`.
 /// - read (function): a reader scoped to your project, `p => read(p)`.
