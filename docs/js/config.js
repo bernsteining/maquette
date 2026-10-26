@@ -29,12 +29,19 @@ function buildConfig() {
   return c;
 }
 
+const kebab = (k) => k.replace(/_/g, "-");
+const mapKeys = (v, f) => Array.isArray(v) ? v.map(x => mapKeys(x, f))
+  : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [f(k), mapKeys(x, f)]))
+  : v;
+
 function buildTypst() {
   const gltf = model._gltf;
   const fn = gltf ? "render-gltf"
     : ({ obj: "render-obj", stl: "render-stl", ply: "render-ply" }[model._ext] || "render-obj");
+  const kb = gltf || model.scad;
   const P = [];
-  const push = (k, v) => P.push(`${k}: ${v}`);
+  const push = (k, v) => P.push(`${kb ? kebab(k) : k}: ${v}`);
+  const fmtK = (v) => fmtT(kb ? mapKeys(v, kebab) : v);
   for (const f of visibleFields()) {
     if (f.noExport || f.k === "_cam" || f.k === "width" || f.k === "height" || !exportable(f)) continue;
     if (!gltf) {
@@ -47,16 +54,16 @@ function buildTypst() {
     switch (f.t) {
       case "grp": {
         if (f.toggle && !state[f.k].__on) break;
-        if (f.build === "clip") { push(f.k, fmtT(group(f, "cfg"))); break; }
+        if (f.build === "clip") { push(f.k, fmtK(group(f, "cfg"))); break; }
         if (f.build === "turntable") { const s = state[f.k]; push("turntable", s.elevation === f.def.elevation ? num(s.iterations) : fmtT({ iterations: s.iterations, elevation: s.elevation })); break; }
         const d = group(f, "diff");
-        if (Object.keys(d).length === 0) { if (f.toggle) push(f.k, f.bool ? "true" : fmtT(group(f, "cfg"))); break; }
-        push(f.k, fmtT(d));
+        if (Object.keys(d).length === 0) { if (f.toggle) push(f.k, f.bool ? "true" : fmtK(group(f, "cfg"))); break; }
+        push(f.k, fmtK(d));
         break;
       }
       case "views": if (state.views.length) push("views", fmtT(state.views)); break;
       case "palette": if (state[f.k].length) push(f.k, fmtT(state[f.k])); break;
-      case "lights": if (state.lights.length) push("lights", fmtT(state.lights)); break;
+      case "lights": if (state.lights.length) push("lights", fmtK(state.lights)); break;
       case "map": {
         const rows = state[f.k].filter(r => r[0]);
         if (!rows.length) break;
@@ -67,13 +74,13 @@ function buildTypst() {
           : `(\n    ${entries.join(",\n    ")},\n  )`);
         break;
       }
-      default: if (!eq(state[f.k], f.typstDef ?? f.def)) push(f.k, fmtT(state[f.k]));
+      default: if (!eq(state[f.k], f.typstDef ?? f.def)) push(f.k, fmtK(state[f.k]));
     }
   }
   if (outputFormat === "svg") P.push('format: "svg"');
   const body = P.length ? `#${fn}(model,\n  ${P.join(",\n  ")},\n)` : `#${fn}(model)`;
   if (model.scad) {
-    const skip = new Set(["specular: 0", "cull_backface: false", `color: "#f9d72c"`]);
+    const skip = new Set(["specular: 0", "cull-backface: false", `color: "#f9d72c"`]);
     const args = P.filter(s => !skip.has(s));
     if (!state.scad_smooth_normals) args.unshift("smooth-normals: none");
     const inner = args.length
@@ -188,9 +195,10 @@ function parseTypst(code) {
   for (const a of args) {
     const i = a.indexOf(":");
     if (i < 0) continue;
-    const key = a.slice(0, i).trim();
-    if (!/^[A-Za-z_][\w-]*$/.test(key)) continue;
-    cfg[key] = parseTypstValue(a.slice(i + 1));
+    const key = a.slice(0, i).trim().replace(/-/g, "_");
+    if (!/^[A-Za-z_]\w*$/.test(key)) continue;
+    const val = parseTypstValue(a.slice(i + 1));
+    cfg[key] = topFields()[key]?.t === "map" ? val : mapKeys(val, (k) => k.replace(/-/g, "_"));
   }
   return cfg;
 }
