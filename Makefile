@@ -202,6 +202,31 @@ package: wasm gltf-wasm
 	@echo "== refreshed publish dirs =="
 	@for d in $(MAQ_PKG_DIR) $(GLTF_PKG_DIR) $(SCAD_PKG_DIR); do echo "$$d:"; ls $$d | sed 's/^/  /'; done
 
+PACKAGES_REPO ?= ../packages
+PKG_CHECK_DIR = target/package-check
+PKG_DIRS = $(MAQ_PKG_DIR) $(GLTF_PKG_DIR) $(SCAD_PKG_DIR)
+pkg-name = $$(sed -n 's/^name *= *"\(.*\)"/\1/p' $(1)/typst.toml)
+pkg-version = $$(sed -n 's/^version *= *"\(.*\)"/\1/p' $(1)/typst.toml)
+package-check:
+	rm -rf target/package-check/packages target/package-check/dist
+	@set -e; for d in $(PKG_DIRS); do \
+	  n=$(call pkg-name,$$d); v=$(call pkg-version,$$d); \
+	  mkdir -p $(PKG_CHECK_DIR)/packages/preview/$$n; \
+	  cp -r $$d $(PKG_CHECK_DIR)/packages/preview/$$n/$$v; \
+	done
+	@status=0; for d in $(PKG_DIRS); do \
+	  n=$(call pkg-name,$$d); v=$(call pkg-version,$$d); \
+	  echo "== typst-package-check @preview/$$n:$$v"; \
+	  (cd $(PKG_CHECK_DIR)/packages && typst-package-check check @preview/$$n:$$v) || status=1; \
+	done; exit $$status
+	rm -rf target/package-check/bundler
+	git -C $(PACKAGES_REPO) fetch -q origin main
+	git -C $(PACKAGES_REPO) archive origin/main bundler | tar -x -C $(PKG_CHECK_DIR)
+	grep -q '^\[workspace\]' $(PKG_CHECK_DIR)/bundler/Cargo.toml || printf '\n[workspace]\n' >> $(PKG_CHECK_DIR)/bundler/Cargo.toml
+	CARGO_TARGET_DIR=$(CURDIR)/target/package-check-bundler cargo build --release --quiet --manifest-path $(PKG_CHECK_DIR)/bundler/Cargo.toml
+	cd $(PKG_CHECK_DIR) && $(CURDIR)/target/package-check-bundler/release/bundler
+	@echo "== package-check passed"
+
 # --- local quality gates (mirrored by the pre-commit hook and CI) ---
 # The wasm-only crates are linted for the wasm target (their SIMD code only
 # compiles there); scad builds natively, so it and the tests run native.
@@ -233,4 +258,4 @@ install-hooks:
 	git config core.hooksPath .githooks
 	@echo "git hooks path set to .githooks — pre-commit active (skip with git commit --no-verify)"
 
-.PHONY: serve wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint lint-js test check install-hooks cli cli-install
+.PHONY: package-check serve wasm build harness doc doc-maquette doc-gltf doc-scad docs demo-assets demo scad-wasm scad-build gltf-wasm gltf-build lint lint-js test check install-hooks cli cli-install
