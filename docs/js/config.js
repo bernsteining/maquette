@@ -38,7 +38,7 @@ function buildTypst() {
   const gltf = model._gltf;
   const fn = gltf ? "render-gltf"
     : ({ obj: "render-obj", stl: "render-stl", ply: "render-ply" }[model._ext] || "render-obj");
-  const kb = gltf || model.scad;
+  const kb = !model._mol;
   const P = [];
   const push = (k, v) => P.push(`${kb ? kebab(k) : k}: ${v}`);
   const fmtK = (v) => fmtT(kb ? mapKeys(v, kebab) : v);
@@ -67,7 +67,7 @@ function buildTypst() {
       case "map": {
         const rows = state[f.k].filter(r => r[0]);
         if (!rows.length) break;
-        const entries = rows.map(([n, v]) => `"${n}": ${fmtT(f.rich ? hlCollapse(v) : v)}`);
+        const entries = rows.map(([n, v]) => `"${n}": ${fmtK(f.rich ? hlCollapse(v) : v)}`);
         const oneLine = `(${entries.join(", ")})`;
         push(f.k, oneLine.length + f.k.length + 4 <= 80
           ? oneLine
@@ -103,7 +103,7 @@ function buildTypst() {
       + `#let data = read("${model._molSrcPath}", encoding: none)\n\n`
       + `#molfig.render(\n  data,\n${allArgs.join(",\n")},\n)`;
   }
-  return `#import "@preview/maquette:0.2.0": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
+  return `#import "@preview/maquette:0.2.1": ${fn}\n\n#let model = read("${model.name}", encoding: none)\n\n${body}`;
 }
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -198,7 +198,10 @@ function parseTypst(code) {
     const key = a.slice(0, i).trim().replace(/-/g, "_");
     if (!/^[A-Za-z_]\w*$/.test(key)) continue;
     const val = parseTypstValue(a.slice(i + 1));
-    cfg[key] = topFields()[key]?.t === "map" ? val : mapKeys(val, (k) => k.replace(/-/g, "_"));
+    const snake = (k) => k.replace(/-/g, "_");
+    cfg[key] = topFields()[key]?.t === "map" && val && typeof val === "object" && !Array.isArray(val)
+      ? Object.fromEntries(Object.entries(val).map(([n, x]) => [n, mapKeys(x, snake)]))
+      : mapKeys(val, snake);
   }
   return cfg;
 }
