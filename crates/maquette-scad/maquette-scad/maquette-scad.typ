@@ -348,7 +348,11 @@
   let out = (:)
   for (k, x) in v {
     let s = k.replace("-", "_")
-    out.insert(s, if s in keep { x } else { _snake-keys(x) })
+    out.insert(s, if s in keep and type(x) == dictionary {
+      let parts = (:)
+      for (name, y) in x { parts.insert(name, _snake-keys(y)) }
+      parts
+    } else { _snake-keys(x) })
   }
   out
 } else if type(v) == array { v.map(x => _snake-keys(x)) } else { v }

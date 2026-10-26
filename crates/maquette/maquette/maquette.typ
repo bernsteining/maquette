@@ -2,6 +2,19 @@
 
 #let maquette-plugin = plugin("maquette.wasm")
 
+#let _snake-keys(v, keep: ()) = if type(v) == dictionary {
+  let out = (:)
+  for (k, x) in v {
+    let s = k.replace("-", "_")
+    out.insert(s, if s in keep and type(x) == dictionary {
+      let parts = (:)
+      for (name, y) in x { parts.insert(name, _snake-keys(y)) }
+      parts
+    } else { _snake-keys(x) })
+  }
+  out
+} else if type(v) == array { v.map(x => _snake-keys(x)) } else { v }
+
 #let _parse-args(args, extra: (:)) = {
   // Extract display args (not part of render config)
   let named = args.named()
@@ -22,6 +35,7 @@
       config.insert(k, v)
     }
   }
+  config = _snake-keys(config, keep: ("highlight", "materials"))
   // Wrapper-supplied config (e.g. auto-discovered `.mtl` text). An explicit
   // user value in `args` always wins over the auto-discovered one.
   for (k, v) in extra {
