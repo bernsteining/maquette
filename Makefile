@@ -11,7 +11,7 @@ TYPST_LOCAL ?= $(HOME)/Library/Application Support/typst/packages/local
 else
 TYPST_LOCAL ?= $(or $(XDG_DATA_HOME),$(HOME)/.local/share)/typst/packages/local
 endif
-MAQ_LOCAL = $(TYPST_LOCAL)/maquette/0.2.0
+MAQ_LOCAL = $(TYPST_LOCAL)/maquette/0.2.1
 
 # Path remaps so no build-machine paths (home, cargo registry, rustup toolchain)
 # leak into the wasm. Overridable — CI passes its container-specific prefixes.
@@ -31,7 +31,7 @@ wasm:
 	@[ -n "$$CI" ] || cp $(WASM_OUT) docs/maquette.wasm
 
 # Local: build + install into the typst local package dir. Copies the
-# whole package (wasm + typst.toml + .typ) so `@local/maquette:0.2.0`
+# whole package (wasm + typst.toml + .typ) so `@local/maquette:0.2.1`
 # resolves — otherwise a bare wasm sits there without the manifest and
 # typst can't find the entry .typ.
 build: wasm

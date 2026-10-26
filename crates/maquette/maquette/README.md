@@ -12,7 +12,7 @@ Everything runs as a single WASM plugin, with focus on speed.
 
 **[Try it live in your browser →](https://bernsteining.github.io/maquette/)** drag to orbit, tweak every setting, and copy the generated Typst code. It runs the exact same WASM as the plugin, fully client-side. Because your browser JIT-compiles the WASM (Typst runs it in an interpreter), the demo is dramatically faster to iterate on.
 
-Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.2.0/docs/maquette-documentation.pdf) to see examples of all the features.
+Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.2.1/docs/maquette-documentation.pdf) to see examples of all the features.
 
 > **Download models to try it out:** [Sketchfab](https://sketchfab.com/feed)
 
@@ -26,7 +26,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 <td>
 
 ```typst
-#import "@preview/maquette:0.2.0": render-obj
+#import "@preview/maquette:0.2.1": render-obj
 #let bunny = read("examples/data/bunny.obj", encoding: none)
 
 #render-obj(bunny,
@@ -45,7 +45,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 
 </td>
 <td>
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/sss_bunny.png" width="100%" alt="Back-lit Stanford bunny with subsurface scattering" />
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.1/examples/sss_bunny.png" width="100%" alt="Back-lit Stanford bunny with subsurface scattering" />
 </td>
 </tr>
 </table>
@@ -55,21 +55,21 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 <table>
 <tr>
 <td align="center" width="50%">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/gallery_multiview.svg" width="100%" alt="Multi-view grid" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.1/examples/gallery_multiview.svg" width="100%" alt="Multi-view grid" /><br/>
 <sub><b>Multi-view grid</b> — front / right / top / isometric on one sheet</sub>
 </td>
 <td align="center" width="50%">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/gallery_groups.png" width="100%" alt="Per-group appearance" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.1/examples/gallery_groups.png" width="100%" alt="Per-group appearance" /><br/>
 <sub><b>Per-group appearance</b> — per-part colour, stroke &amp; opacity from OBJ groups</sub>
 </td>
 </tr>
 <tr>
 <td align="center">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/gallery_scalar.png" width="100%" alt="Scalar color map" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.1/examples/gallery_scalar.png" width="100%" alt="Scalar color map" /><br/>
 <sub><b>Scalar color map</b> — a math expression <code>f(x,y,z)</code> over a custom palette</sub>
 </td>
 <td align="center">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/gallery_clip.png" width="100%" alt="Clipping plane" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.1/examples/gallery_clip.png" width="100%" alt="Clipping plane" /><br/>
 <sub><b>Clipping plane</b> — a mathematical cut opens the model to its interior</sub>
 </td>
 </tr>
