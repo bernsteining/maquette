@@ -89,12 +89,12 @@
 
 // Attach per-vertex normals to a 3D solid so maquette can smooth-shade
 // curved surfaces while keeping crisp edges. Adjacent faces whose dihedral
-// angle exceeds `sharp_angle` (degrees) stay sharp; the rest blend. Pipe
+// angle exceeds `sharp-angle` (degrees) stay sharp; the rest blend. Pipe
 // AFTER final booleans/hulls — CSG ops discard the normals. Effect only
 // shows under smooth shading (`shading: "smooth"`), not `openscad-view`
 // (which is flat by design).
-#let calculate-normals(child, sharp_angle: 60) = (
-  op: "calculate_normals", child: child, sharp_angle: sharp_angle,
+#let calculate-normals(child, sharp-angle: 60) = (
+  op: "calculate_normals", child: child, sharp_angle: sharp-angle,
 )
 
 // ---- transforms (2D or 3D) ----
@@ -344,6 +344,21 @@
 /// - model (dictionary, str, bytes): a DSL node, or `.scad` source text.
 /// - ..args (arguments): forwarded to maquette's `render-ply` (camera, shading, background, …).
 /// -> content
+#let _snake-keys(v, keep: ()) = if type(v) == dictionary {
+  let out = (:)
+  for (k, x) in v {
+    let s = k.replace("-", "_")
+    out.insert(s, if s in keep { x } else { _snake-keys(x) })
+  }
+  out
+} else if type(v) == array { v.map(x => _snake-keys(x)) } else { v }
+
+#let _render-args(args) = {
+  let keep = ("highlight", "materials")
+  let pos = args.pos().map(p => if type(p) == dictionary { _snake-keys(p, keep: keep) } else { p })
+  arguments(..pos, .._snake-keys(args.named(), keep: keep))
+}
+
 #let render-scad(model, files: (:), bin: (:), font: none, fn: 32, smooth-normals: 30, ..args) = {
   import "@preview/maquette:0.2.0": render-ply
   // `model` is a DSL node (dict) or `.scad` source text. No `color:` default:
@@ -353,7 +368,7 @@
   } else {
     compile-scad(model, files: files, bin: bin, font: font, fn: fn, smooth-normals: smooth-normals)
   }
-  render-ply(ply, specular: 0, cull_backface: false, ..args)
+  render-ply(ply, specular: 0, cull_backface: false, .._render-args(args))
 }
 
 /// Compile a whole multi-file `.scad` project and render it in one call
@@ -373,7 +388,7 @@
     compile-scad-tree(entry, root: root, read: read, bin: bin, font: font, fn: fn, trace: trace, smooth-normals: smooth-normals),
     specular: 0,
     cull_backface: false,
-    ..args,
+    .._render-args(args),
   )
 }
 

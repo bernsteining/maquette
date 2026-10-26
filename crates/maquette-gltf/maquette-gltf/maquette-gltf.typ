@@ -143,6 +143,12 @@
   }
 }
 
+#let _snake-keys(v) = if type(v) == dictionary {
+  let out = (:)
+  for (k, x) in v { out.insert(k.replace("-", "_"), _snake-keys(x)) }
+  out
+} else if type(v) == array { v.map(_snake-keys) } else { v }
+
 #let _parse-args(args) = {
   let named = args.named()
   let width = named.at("width", default: auto)
@@ -159,7 +165,7 @@
     }
   }
   (
-    cfg: bytes(json.encode(config)),
+    cfg: bytes(json.encode(_snake-keys(config))),
     width: width,
     height: height,
   )

@@ -26,7 +26,7 @@ See the [documentation](https://github.com/bernsteining/maquette/blob/maquette-g
   azimuth: 30,
   elevation: 15,
   ibl: (intensity: 1.2),
-  tone_mapping: "aces",
+  tone-mapping: "aces",
   ssao: true)
 ```
 
