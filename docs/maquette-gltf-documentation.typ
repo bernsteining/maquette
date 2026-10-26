@@ -78,7 +78,7 @@ Read the model as bytes and pass it to `render-gltf` (left). The examples below 
 = Config reference
 
 #sect[
-All optional; defaults shown.
+All optional; defaults shown. Names are written in kebab-case; snake_case also works.
 
 #text(size: 8.5pt, raw(block: true, lang: "json", "{ // ── Viewport ──────────────────────────────────────────────────────
   \"width\": 500,                    // Output width in pixels

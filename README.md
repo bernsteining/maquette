@@ -29,7 +29,7 @@ https://github.com/user-attachments/assets/ae7657b1-dd55-4dc3-af3f-5b66d8f2b51b
 <td>
 
 ```typst
-#import "@preview/maquette:0.2.0": render-obj
+#import "@preview/maquette:0.2.1": render-obj
 
 #render-obj(
   read("bunny.obj"),
@@ -104,8 +104,8 @@ rotate([0, 90, 0]) rod(hole, len);
   camera: (-71.915, 159.083, 1026.801),
   center: (-86, 5, -25),
   up: (0, 0.989, -0.145),
-  auto_center: false,
-  auto_fit: false,
+  auto-center: false,
+  auto-fit: false,
   background: "#182028",
   shadows: true,
   ssao: true,

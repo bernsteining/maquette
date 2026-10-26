@@ -1,4 +1,4 @@
-#import "@local/maquette:0.2.0": render-stl, render-obj, render-ply, get-stl-info, get-obj-info, get-ply-info
+#import "@local/maquette:0.2.1": render-stl, render-obj, render-ply, get-stl-info, get-obj-info, get-ply-info
 
 #import "@preview/zebraw:0.6.1": *
 
@@ -31,7 +31,7 @@
   zoom: 1.25, pan: (0, 0.08),
   color: "#7d8590", specular: 0.6, shininess: 48,
   fresnel: 0.3,
-  ambient: 0.4, light_dir: (2, 3, 2.5),
+  ambient: 0.4, light-dir: (2, 3, 2.5),
 )
 
 // ── Demo deep-links ──────────────────────────────────────────────────────
@@ -72,9 +72,21 @@
   m
 }
 #let alias-key(k) = key-alias.at(k, default: k)
+#let snake-keys(v, keep: ()) = if type(v) == dictionary {
+  let out = (:)
+  for (k, x) in v {
+    let s = k.replace("-", "_")
+    out.insert(s, if s in keep and type(x) == dictionary {
+      let parts = (:)
+      for (name, y) in x { parts.insert(name, snake-keys(y)) }
+      parts
+    } else { snake-keys(x) })
+  }
+  out
+} else if type(v) == array { v.map(x => snake-keys(x)) } else { v }
 #let demo-url(name, cfg) = {
   let parts = (alias-key("model") + "=" + pct(name),)
-  for (k, v) in cfg {
+  for (k, v) in snake-keys(cfg, keep: ("highlight", "materials")) {
     if k in ("width", "height", "format") { continue }   // display-only, not demo config
     let vs = if v == none { "none" } else if type(v) == str { v } else { str(json.encode(v, pretty: false)) }
     parts.push(alias-key(k) + "=" + pct(vs))
@@ -112,7 +124,7 @@
 #let teapot = dm("teapot.obj", teapot)
 #let crankshaft = dm("crankshaft.obj", crankshaft)
 #let city = dm("city.obj", city)
-#let street = (camera: (0, 6, 0), center: (17, 2, 11), up: (0, 1, 0), auto_center: false, auto_fit: false, cull_backface: false)
+#let street = (camera: (0, 6, 0), center: (17, 2, 11), up: (0, 1, 0), auto-center: false, auto-fit: false, cull-backface: false)
 #let skull-brain = dm("brain_skull.obj", skull-brain)
 #let rubi = dm("rubi_blender.ply", rubi)
 #let rubi_scan = dm("rubi_scan.ply", rubi_scan)
@@ -233,7 +245,7 @@ Import a render function, read a model file, and call it. That's it.
 
 #grid(columns: (1fr, 0.72fr), gutter: 1em,
   [
-    #raw(block: true, lang: "typ", "#import \"@preview/maquette:0.2.0\": render-stl\n\n#let cube = read(\"data/cube.stl\", encoding: none)\n#render-stl(cube)")
+    #raw(block: true, lang: "typ", "#import \"@preview/maquette:0.2.1\": render-stl\n\n#let cube = read(\"data/cube.stl\", encoding: none)\n#render-stl(cube)")
     #text(size: 9pt)[*For STL & PLY: Always read with `encoding: none`.* 
     
     Here the cube is facing the camera, so it draws a square. 
@@ -267,19 +279,19 @@ Here we're drawing a square pyramid inline, hence the different aspect because o
 
 = Config Reference
 
-All parameters are optional, defaults are shown below.
+All parameters are optional, defaults are shown below. Names are written in kebab-case; snake_case also works.
 
 #text(size: 8.5pt, raw(block: true, lang: "json", "{ // ── Camera & Viewport ─────────────────────────────────────────────
   \"camera\": null,                                  // Camera position in world space (Cartesian); overrides azimuth/elevation
   \"azimuth\": 0,                                    // Spherical camera: horizontal angle in degrees
   \"elevation\": 0,                                  // Spherical camera: vertical angle in degrees
   \"distance\": null,                                // Spherical camera: distance from center (null = 3× bounding radius)
-  \"center\": [0, 0, 0],                             // Look-at target (overridden by auto_center)
+  \"center\": [0, 0, 0],                             // Look-at target (overridden by auto-center)
   \"up\": [0, 0, 1],                                 // Up direction vector
   \"fov\": 45,                                       // Vertical FOV in degrees (perspective only)
   \"projection\": \"perspective\",                     // \"perspective\", \"orthographic\", \"isometric\" ...
-  \"auto_center\": true,                             // Auto-center on model bounding box
-  \"auto_fit\": true,                                // Scale model to fill viewport
+  \"auto-center\": true,                             // Auto-center on model bounding box
+  \"auto-fit\": true,                                // Scale model to fill viewport
   \"zoom\": 1.0,                                     // Multiplier on auto-fit scale (>1 zooms in)
   \"pan\": [0, 0],                                   // Screen-space recentring [right, up] as viewport fraction
   \"width\": 500,                                    // Output width in pixels
@@ -288,50 +300,50 @@ All parameters are optional, defaults are shown below.
   // ── Appearance ────────────────────────────────────────────────────
   \"color\": \"#4488cc\",                              // Model fill color (hex)
   \"stroke\": {\"color\": \"none\", \"width\": 0},         // Triangle edge stroke (or just \"#hex\")
-  \"light_dir\": [1, 2, 3],                          // Key light direction (default follows the camera)
+  \"light-dir\": [1, 2, 3],                          // Key light direction (default follows the camera)
   \"ambient\": 0.15,                                 // Ambient light intensity (0-1)
   \"mode\": \"solid\",                                 // \"solid\", \"wireframe\", \"solid+wireframe\", \"x-ray\"
-  \"xray_opacity\": 0.1,                             // Front-face opacity for x-ray mode (0-1)
-  \"cull_backface\": true,                           // Back-face culling and one-sided lighting
+  \"xray-opacity\": 0.1,                             // Front-face opacity for x-ray mode (0-1)
+  \"cull-backface\": true,                           // Back-face culling and one-sided lighting
   \"wireframe\": {\"color\": \"\", \"width\": 1.0},        // Wireframe edges (or just \"#hex\")
   \"smooth\": true,                                  // Gouraud smooth shading (best with PNG)
   \"specular\": 0.2,                                 // Specular highlight intensity (0-1)
   \"shininess\": 32,                                 // Specular exponent (higher = tighter)
-  \"gamma_correction\": true,                        // Compute lighting in linear sRGB space
+  \"gamma-correction\": true,                        // Compute lighting in linear sRGB space
   \"fresnel\": {\"intensity\": 0.3, \"power\": 5},       // Fresnel rim lighting (or just 0.3)
   \"sss\": false,                                    // true or {intensity, power, distortion}
   \"opacity\": 1.0,                                  // Global opacity (0-1)
-  \"lights\": [],                                    // [{type, vector, color, intensity, size, cast_shadow}]
-  \"tone_mapping\": {\"method\": \"\", \"exposure\": 1.0}, // HDR tone mapping (or just \"aces\")
+  \"lights\": [],                                    // [{type, vector, color, intensity, size, cast-shadow}]
+  \"tone-mapping\": {\"method\": \"\", \"exposure\": 1.0}, // HDR tone mapping (or just \"aces\")
   \"shading\": \"\",                                   // \"blinn-phong\" (default), \"gooch\", \"cel\", \"flat\", \"normal\", \"unlit\"
-  \"gooch_warm\": \"#ffcc44\",                         // Gooch warm tone color
-  \"gooch_cool\": \"#4466cc\",                         // Gooch cool tone color
-  \"cel_bands\": 4,                                  // Number of cel-shading bands
+  \"gooch-warm\": \"#ffcc44\",                         // Gooch warm tone color
+  \"gooch-cool\": \"#4466cc\",                         // Gooch cool tone color
+  \"cel-bands\": 4,                                  // Number of cel-shading bands
   \"materials\": {},                                 // OBJ material map: { \"name\": \"#hex\" }
   \"mtl\": \"\",                                       // OBJ material library text (render-obj finds it from mtllib)
   \"highlight\": {},                                 // OBJ group highlight: \"#hex\" or {color, specular, ...}
   // ── Annotations ─────────────────────────────────────────────────
-  \"annotations\": false,                            // true or {groups, color, font_size, offset}
+  \"annotations\": false,                            // true or {groups, color, font-size, offset}
   // ── Color Mapping ─────────────────────────────────────────────────
-  \"color_map\": \"\",                                 // \"overhang\", \"curvature\", \"scalar\", or \"\" (off)
-  \"color_map_palette\": [],                         // Custom hex color gradient (curvature/scalar)
-  \"scalar_function\": \"\",                           // Math expression for scalar mode: \"sqrt(x*x+y*y+z*z)\"
-  \"color_map_property\": \"\",                        // PLY vertex property to use as the scalar in scalar mode
-  \"vertex_smoothing\": 4,                           // Smooth color values across vertices (0-4)
-  \"overhang_angle\": 45,                            // Overhang threshold in degrees
+  \"color-map\": \"\",                                 // \"overhang\", \"curvature\", \"scalar\", or \"\" (off)
+  \"color-map-palette\": [],                         // Custom hex color gradient (curvature/scalar)
+  \"scalar-function\": \"\",                           // Math expression for scalar mode: \"sqrt(x*x+y*y+z*z)\"
+  \"color-map-property\": \"\",                        // PLY vertex property to use as the scalar in scalar mode
+  \"vertex-smoothing\": 4,                           // Smooth color values across vertices (0-4)
+  \"overhang-angle\": 45,                            // Overhang threshold in degrees
   // ── Outlines ──────────────────────────────────────────────────────
   \"outline\": false,                                // true or {color, width, threshold}
   // ── Effects ───────────────────────────────────────────────────────
-  \"ground_shadow\": false,                          // true or {opacity, color}
-  \"shadows\": false,                                // Cast/self shadows: true or {per_pixel, softness, color, omni, ...}
+  \"ground-shadow\": false,                          // true or {opacity, color}
+  \"shadows\": false,                                // Cast/self shadows: true or {per-pixel, softness, color, omni, ...}
   \"clip\": null,                                    // Cut plane: (a,b,c,d) or {from|axis|normal, depth, keep, cap, hatch}
   \"explode\": 0,                                    // Exploded view factor
   \"decimate\": 0,                                   // Mesh simplification 0-1 (higher = fewer triangles)
-  \"point_size\": 0,                                 // Point cloud: kNN radius, or splat radius if point_splat (0 = auto)
-  \"point_neighbors\": 12,                           // Point cloud: neighbors per point (higher = fewer holes)
-  \"point_boundary\": 60,                            // Point cloud: cut connections across a normal jump > this angle°
-  \"point_denoise\": false,                          // Point cloud: edge-preserving colour clean-up for crisper regions
-  \"point_splat\": false,                            // Point cloud: draw points as round splats instead of reconstructing
+  \"point-size\": 0,                                 // Point cloud: kNN radius, or splat radius if point-splat (0 = auto)
+  \"point-neighbors\": 12,                           // Point cloud: neighbors per point (higher = fewer holes)
+  \"point-boundary\": 60,                            // Point cloud: cut connections across a normal jump > this angle°
+  \"point-denoise\": false,                          // Point cloud: edge-preserving colour clean-up for crisper regions
+  \"point-splat\": false,                            // Point cloud: draw points as round splats instead of reconstructing
   \"antialias\": 4,                                  // 0: off, 1: FXAA, 2-3: SSAA x2/x4, 4-5: FXAA + SSAA x2/x4
   \"ssao\": false,                                   // true or {samples, radius, bias, strength, space}
   \"bloom\": false,                                  // true or {threshold, intensity, radius}
@@ -341,10 +353,10 @@ All parameters are optional, defaults are shown below.
   // ── Multi-View ────────────────────────────────────────────────────
   \"views\": null,                                   // Named views: [\"front\", \"right\", \"top\", ...]
   \"turntable\": {\"iterations\": 0, \"elevation\": 40}, // Turntable views (or just 6)
-  \"grid_labels\": true,                             // Show labels on multi-view grids
+  \"grid-labels\": true,                             // Show labels on multi-view grids
   // ── Diagnostics ───────────────────────────────────────────────────
   \"debug\": false,                                  // Overlay model metadata
-  \"debug_color\": \"#cc2222\"                         // Debug text color
+  \"debug-color\": \"#cc2222\"                         // Debug text color
 }"))
 
 #pagebreak(weak: true)
@@ -394,7 +406,7 @@ The cube looks like a flat square from this angle. Let's learn how to change the
 
 == #link("https://en.wikipedia.org/wiki/Cartesian_coordinate_system")[Cartesian coordinates]
 
-Change the camera position and where it points to using cartesian coordinates with `camera:(x,y,z)` and `center:(x,y,z)`. As you may have noticed with previous examples, maquette finds the model's bounding box automatically and points the camera at its centre (that is `auto_center: true`, the default), so most of the time no `center` is needed. Set `auto_center: false` to aim at the explicit `center` you provide instead.
+Change the camera position and where it points to using cartesian coordinates with `camera:(x,y,z)` and `center:(x,y,z)`. As you may have noticed with previous examples, maquette finds the model's bounding box automatically and points the camera at its centre (that is `auto-center: true`, the default), so most of the time no `center` is needed. Set `auto-center: false` to aim at the explicit `center` you provide instead.
 
 ```example
 // hl: 4-5
@@ -428,7 +440,7 @@ Instead of placing the camera with Cartesian `(x, y, z)` coordinates, you can us
 
 Two settings shape the perspective camera: `distance`, how far the camera sits from the model's centre (default: 3× the radius of its bounding sphere), and `fov`, the vertical angle the image covers, in degrees (default `45`).
 
-With `auto_fit: true` (the default), the whole model always stays in the image: the view is never narrower than what it takes to show the model's bounding sphere from top to bottom. A smaller `fov` therefore enlarges the model only until that sphere fills the frame height; to go further, use `zoom` (below). `distance` changes the perspective itself: up close, nearby parts look much larger than distant ones, while from far away the model looks flatter. Set `auto_fit: false` to use `fov` exactly as given; nothing then keeps the model in frame, so parts of it can be cropped.
+With `auto-fit: true` (the default), the whole model always stays in the image: the view is never narrower than what it takes to show the model's bounding sphere from top to bottom. A smaller `fov` therefore enlarges the model only until that sphere fills the frame height; to go further, use `zoom` (below). `distance` changes the perspective itself: up close, nearby parts look much larger than distant ones, while from far away the model looks flatter. Set `auto-fit: false` to use `fov` exactly as given; nothing then keeps the model in frame, so parts of it can be cropped.
 
 #let _fov(cfg, cap) = align(center + bottom)[
   #render-obj(teapot, (up: (0, 1, 0), azimuth: 30, ..cfg))
@@ -439,20 +451,20 @@ With `auto_fit: true` (the default), the whole model always stays in the image: 
   _fov((:), "default"),
   _fov((fov: 20), "fov: 20"),
   _fov((distance: 6), "distance: 6"),
-  _fov((auto_fit: false, fov: 25), "auto_fit: false, fov: 25"),
+  _fov((auto-fit: false, fov: 25), "auto-fit: false, fov: 25"),
 )
 
 == Framing: Zoom & Pan
 
-`auto_fit` frames the model's bounding sphere, which is larger than a flat or elongated model, so the model often sits in generous margins. `zoom` and `pan` reframe the picture without moving the camera, so the perspective stays the same:
+`auto-fit` frames the model's bounding sphere, which is larger than a flat or elongated model, so the model often sits in generous margins. `zoom` and `pan` reframe the picture without moving the camera, so the perspective stays the same:
 
 - *`zoom`* enlarges the image around its centre (default `1`; `2` doubles the size). Whatever no longer fits is cropped.
 - *`pan: (x, y)`* then moves the model across the image, in fractions of its width and height (default `(0, 0)`): `(0.1, 0)` moves it right by a tenth of the width, and a positive `y` moves it up.
 
 #let _framing(z, p, cap) = align(center + bottom)[
   #render-obj(teapot, up: (0, 1, 0),
-    specular: 0.5, tone_mapping: "aces",
-    ambient: 0.35, light_dir: (2, 3, 2.5), zoom: z, pan: p, width: 100%)
+    specular: 0.5, tone-mapping: "aces",
+    ambient: 0.35, light-dir: (2, 3, 2.5), zoom: z, pan: p, width: 100%)
   #v(-0.4em)
   #text(size: 8.5pt, fill: luma(90), raw(cap))
 ]
@@ -474,7 +486,7 @@ The parallel projections below draw triangle edges with `stroke: (color, width)`
 
 ```typst
 #let street = (camera: (0, 6, 0), center: (17, 2, 11), up: (0, 1, 0),
-  auto_center: false, auto_fit: false, cull_backface: false)
+  auto-center: false, auto-fit: false, cull-backface: false)
 ```
 
 #grid(columns: (1fr, 1fr), column-gutter: 2em, row-gutter: 1.5em,
@@ -664,8 +676,8 @@ The parallel projections below draw triangle edges with `stroke: (color, width)`
       camera: (0, 4, 0),
       center: (0, 100, 0),
       up: (1, 0, 0),
-      auto_center: false,
-      auto_fit: false,
+      auto-center: false,
+      auto-fit: false,
       fov: 210,
       zoom: 1.6,
       projection: "tiny-planet",
@@ -680,7 +692,7 @@ The parallel projections below draw triangle edges with `stroke: (color, width)`
 
 == #link("https://en.wikipedia.org/wiki/Shading#Ambient_lighting")[Ambient] & Light Direction
 
-The `ambient` parameter (0--1) controls how much light reaches surfaces regardless of their orientation. Low values create dramatic contrast; high values flatten the shading. The `light_dir` vector points toward the light. When unset, it follows the camera: the light comes from above, slightly to one side of the viewer, whatever the model's orientation.
+The `ambient` parameter (0--1) controls how much light reaches surfaces regardless of their orientation. Low values create dramatic contrast; high values flatten the shading. The `light-dir` vector points toward the light. When unset, it follows the camera: the light comes from above, slightly to one side of the viewer, whatever the model's orientation.
 
 #grid(columns: (1fr, 1fr, 1fr), gutter: 1em,
   align(center)[
@@ -790,7 +802,7 @@ Add Blinn-Phong specular highlights with the `specular` parameter (0--1). The `s
       zoom: 1.5,
       width: 400,
       height: 400,
-      light_dir: (1,6,-7),
+      light-dir: (1,6,-7),
     ))
   ],
   align(center)[
@@ -799,7 +811,7 @@ Add Blinn-Phong specular highlights with the `specular` parameter (0--1). The `s
       up: (0, 1, 0),
       zoom: 1.5,
       specular: 0.6,
-      light_dir: (1,6,-7),
+      light-dir: (1,6,-7),
       shininess: 32,
       width: 400,
       height: 400,
@@ -811,16 +823,16 @@ Add Blinn-Phong specular highlights with the `specular` parameter (0--1). The `s
 
 == #link("https://en.wikipedia.org/wiki/Gamma_correction")[Gamma Correction]
 
-By default (`gamma_correction: true`), colors are converted to linear space before shading and back to sRGB afterward. This produces physically accurate lighting: midtones brighten, dark areas gain detail, and specular highlights blend smoothly. Disabling it (`gamma_correction: false`) computes lighting directly in sRGB, which is faster but produces harsher contrast and less natural results.
+By default (`gamma-correction: true`), colors are converted to linear space before shading and back to sRGB afterward. This produces physically accurate lighting: midtones brighten, dark areas gain detail, and specular highlights blend smoothly. Disabling it (`gamma-correction: false`) computes lighting directly in sRGB, which is faster but produces harsher contrast and less natural results.
 
 #grid(columns: (1fr, 1fr), gutter: 1em,
   align(center)[
-    *Without (`gamma_correction: false`)*
+    *Without (`gamma-correction: false`)*
     #render-obj(teapot, (
       up: (0, 1, 0),
       specular: 0.6,
       shininess: 32,
-      gamma_correction: false,
+      gamma-correction: false,
       width: 400,
       height: 400,
       zoom: 1.5,
@@ -877,13 +889,13 @@ Fresnel rim lighting brightens edges where the surface curves away from the came
 
 == Multi-Light <multi-light>
 
-By default, a single white directional light shines from `light_dir`. The `lights` array replaces it with any number of lights. Each light has a `type` (default `directional`), a `vector`, a `color`, an `intensity` and a `cast_shadow` flag. The type decides what `vector` means:
+By default, a single white directional light shines from `light-dir`. The `lights` array replaces it with any number of lights. Each light has a `type` (default `directional`), a `vector`, a `color`, an `intensity` and a `cast-shadow` flag. The type decides what `vector` means:
 
 - *`directional`*: parallel rays, like sunlight. `vector` points toward the light.
 - *`positional`*: a point light at position `vector`. Its brightness falls off with the square of the distance; `intensity` is the brightness at the model's center (or at the edge of its bounding sphere, for a light inside it), so the same value works in any units.
 - *`area`*: a disk light at position `vector` with radius `size`, which softens its highlight and shadow, see #link(<area-lights>)[Area Lights]. It falls off with distance like a positional light, but shines only from the face turned toward the model's center: it weakens at grazing angles and lights nothing behind it.
 
-Surfaces facing away from a light receive none of its direct light, only ambient. With `cull_backface: false`, which renders the inside of open meshes, surfaces are lit from both sides instead.
+Surfaces facing away from a light receive none of its direct light, only ambient. With `cull-backface: false`, which renders the inside of open meshes, surfaces are lit from both sides instead.
 
 ```example
 // hl: 8-21
@@ -917,9 +929,9 @@ Set a light's `type` to `area` and give it a `size` to make it a *disk area ligh
 
 #let _area(sz, cap) = align(center + bottom)[
   #render-obj(bunny, up: (0, 1, 0), azimuth: 180, distance: 0.19,
-    color: "#b05a3c", specular: 1.0, shininess: 80, fresnel: 0.2, tone_mapping: "aces", ambient: 0.22,
+    color: "#b05a3c", specular: 1.0, shininess: 80, fresnel: 0.2, tone-mapping: "aces", ambient: 0.22,
     lights: ((type: "area", vector: (4, 7, 5), size: sz, color: "#fff", intensity: 2.4),),
-    shadows: (per_pixel: true), width: 95%)
+    shadows: (per-pixel: true), width: 95%)
   #v(-0.4em)
   #text(size: 8.5pt, fill: luma(90), raw(cap))
 ]
@@ -934,12 +946,12 @@ As `size` grows, the sharp specular glint spreads into a soft sheen and shadow e
 #text(size: 8.5pt)[```typ
 lights: ((type: "area", vector: (4, 7, 5), size: 1.5,
           color: "#fff", intensity: 2.4),),
-shadows: (per_pixel: true),
+shadows: (per-pixel: true),
 ```]
 
 == #link("https://en.wikipedia.org/wiki/Tone_mapping")[Tone Mapping]
 
-When multiple bright lights, strong specular, or fresnel push color values above 1.0, the default behavior hard-clips them to white, creating flat, washed-out highlights. Tone mapping compresses these HDR values gracefully, preserving detail and color in bright areas. Two operators are available: `"reinhard"` (simple, neutral) and `"aces"` (filmic, higher contrast). Use `tone_mapping: (method: "aces", exposure: 1.5)` for full control, or just `tone_mapping: "aces"` for the method alone.
+When multiple bright lights, strong specular, or fresnel push color values above 1.0, the default behavior hard-clips them to white, creating flat, washed-out highlights. Tone mapping compresses these HDR values gracefully, preserving detail and color in bright areas. Two operators are available: `"reinhard"` (simple, neutral) and `"aces"` (filmic, higher contrast). Use `tone-mapping: (method: "aces", exposure: 1.5)` for full control, or just `tone-mapping: "aces"` for the method alone.
 
 #let tm-lights = (
   (type: "directional", vector: (1, 2, 1), color: "#ffaa66", intensity: 2.0),
@@ -959,11 +971,11 @@ When multiple bright lights, strong specular, or fresnel push color values above
   ],
   align(center)[
     *Reinhard*
-    #render-obj(bunny, tm-base + (tone_mapping: "reinhard"))
+    #render-obj(bunny, tm-base + (tone-mapping: "reinhard"))
   ],
   align(center)[
     *ACES*
-    #render-obj(bunny, tm-base + (tone_mapping: "aces"))
+    #render-obj(bunny, tm-base + (tone-mapping: "aces"))
   ],
 )
 
@@ -1018,7 +1030,7 @@ The `shading` parameter selects the lighting model, to configure the lights beha
     === #link("https://en.wikipedia.org/wiki/Cel_shading")[Cel]
     Toon shading with discrete color bands.
 
-    Control steps with `cel_bands`.
+    Control steps with `cel-bands`.
     #render-obj(bunny, (
       up: (0, 1, 0),
       azimuth: 180, distance: 0.25,
@@ -1030,12 +1042,12 @@ The `shading` parameter selects the lighting model, to configure the lights beha
     === #link("https://en.wikipedia.org/wiki/Gooch_shading")[Gooch]
     Warm-to-cool non-photorealistic shading.
 
-    Customize with `gooch_warm` and `gooch_cool`.
+    Customize with `gooch-warm` and `gooch-cool`.
     #render-obj(bunny, (
       up: (0, 1, 0),
       azimuth: 180, distance: 0.25,
       specular: 0.4,
-      shading: "gooch", gooch_warm: "#ffcc44", gooch_cool: "#2255ff",
+      shading: "gooch", gooch-warm: "#ffcc44", gooch-cool: "#2255ff",
     ))
   ]
 )
@@ -1094,13 +1106,13 @@ Colors vertices based on local surface curvature, the rate at which the surface 
   distance: 0.25,
   ambient: 0.3,
   specular: 0.5,
-  vertex_smoothing: 4,
-  color_map: "curvature",
+  vertex-smoothing: 4,
+  color-map: "curvature",
   width: 70%,
 )
 ```
 
-You might have noticed the appearance of a `vertex_smoothing` setting in the previous render. This parameter allows to smoothen the color distribution across vertices, otherwise the color looks flaky, as you can see with `vertex_smoothing: 0`:
+You might have noticed the appearance of a `vertex-smoothing` setting in the previous render. This parameter allows to smoothen the color distribution across vertices, otherwise the color looks flaky, as you can see with `vertex-smoothing: 0`:
 
 ```example
 // hl: 7-8
@@ -1110,15 +1122,15 @@ You might have noticed the appearance of a `vertex_smoothing` setting in the pre
   distance: 0.25,
   ambient: 0.3,
   specular: 0.5,
-  color_map: "curvature",
-  vertex_smoothing: 0,
+  color-map: "curvature",
+  vertex-smoothing: 0,
   width: 70%,
 )
 ```
 
 == Overhang Map
 
-Faces steeper than `overhang_angle` (relative to vertical) are highlighted in red, while supported faces remain green. This directly maps to where a 3D printer would need support structures.
+Faces steeper than `overhang-angle` (relative to vertical) are highlighted in red, while supported faces remain green. This directly maps to where a 3D printer would need support structures.
 
 ```example
 // hl: 7-8
@@ -1128,8 +1140,8 @@ Faces steeper than `overhang_angle` (relative to vertical) are highlighted in re
   distance: 0.25,
   ambient: 0.3,
   specular: 0.5,
-  color_map: "overhang",
-  overhang_angle: 45,
+  color-map: "overhang",
+  overhang-angle: 45,
   width: 70%,
 )
 ```
@@ -1138,7 +1150,7 @@ Faces steeper than `overhang_angle` (relative to vertical) are highlighted in re
 
 == Scalar Function
 
-Color vertices based on a user-defined mathematical function `f(x,y,z)`. The `scalar_function` expression is evaluated at each vertex position, producing scalar values that are automatically normalized to `[0, 1]` (min value → 0, max value → 1), then linearly interpolated through the `color_map_palette` color stops. If no palette is specified, the default blue → cyan → green → yellow → red gradient is used. Per-vertex colors are interpolated across triangle faces for smooth results.
+Color vertices based on a user-defined mathematical function `f(x,y,z)`. The `scalar-function` expression is evaluated at each vertex position, producing scalar values that are automatically normalized to `[0, 1]` (min value → 0, max value → 1), then linearly interpolated through the `color-map-palette` color stops. If no palette is specified, the default blue → cyan → green → yellow → red gradient is used. Per-vertex colors are interpolated across triangle faces for smooth results.
 
 The expression can use:
 
@@ -1172,8 +1184,8 @@ Some examples:
   distance: 0.25,
   ambient: 0.3,
   specular: 0.5,
-  color_map: "scalar",
-  scalar_function: "smoothstep(-0.1, 0.1, x)",
+  color-map: "scalar",
+  scalar-function: "smoothstep(-0.1, 0.1, x)",
 )
 ```
 
@@ -1185,9 +1197,9 @@ Some examples:
   distance: 0.25,
   ambient: 0.3,
   specular: 0.5,
-  color_map: "scalar",
-  scalar_function: "sin(x*60)*cos(y*60) + sin(y*60)*cos(z*60) + sin(z*60)*cos(x*60)",
-  color_map_palette: (
+  color-map: "scalar",
+  scalar-function: "sin(x*60)*cos(y*60) + sin(y*60)*cos(z*60) + sin(z*60)*cos(x*60)",
+  color-map-palette: (
     "#1a0533",
     "#6b2fa0",
     "#e85d75",
@@ -1233,7 +1245,7 @@ maquette handles PLY files in ASCII and binary (little/big-endian) formats. PLY 
 
 PLY files can also contain clouds of points. 3D scanning apps usually allow to export in such a format. 
 
-By default it reconstructs a surface with #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN]. Set `point_splat: true` to instead draw each point *as a round splat*.
+By default it reconstructs a surface with #link("https://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm")[k-NN]. Set `point-splat: true` to instead draw each point *as a round splat*.
 
 #grid(columns: (1fr, 1fr), gutter: 1.2em,
 [
@@ -1242,8 +1254,8 @@ By default it reconstructs a surface with #link("https://en.wikipedia.org/wiki/K
 #let rubi_scan = read("rubi_scan.ply", encoding: none)
 
 #render-ply(rubi_scan,
-  point_neighbors: 10,
-  point_boundary: 70,
+  point-neighbors: 10,
+  point-boundary: 70,
   azimuth: -197,
   elevation: 20.5,
   up: (0, 1, 0),
@@ -1258,8 +1270,8 @@ By default it reconstructs a surface with #link("https://en.wikipedia.org/wiki/K
 #let rubi_scan = read("rubi_scan.ply", encoding: none)
 
 #render-ply(rubi_scan,
-  point_splat: true,
-  point_size: 0.01,
+  point-splat: true,
+  point-size: 0.01,
   azimuth: -197,
   elevation: 20.5,
   up: (0, 1, 0),
@@ -1358,7 +1370,7 @@ Groups not listed keep their default appearance.
     \"shininess\": 64,         // Specular exponent (overrides global)
     \"ambient\": 0.3,          // Ambient light 0-1 (overrides global)
     \"stroke\": \"#000000\",     // Triangle edge stroke color
-    \"stroke_width\": 1.0,     // Triangle edge stroke width
+    \"stroke-width\": 1.0,     // Triangle edge stroke width
     \"opacity\": 0.5,          // Transparency 0-1 (0=invisible, 1=opaque)
     \"label\": \"Piston A\",     // Annotation text (default: the group name)
     )
@@ -1418,7 +1430,7 @@ Instead of a plain color, pass a dictionary with specific appearance overrides t
     Model__Crankshaft:
       (color: "#cc0000", 
        stroke: "#ffffff", 
-       stroke_width: 0.5),
+       stroke-width: 0.5),
     Model__Piston_A: (color: "#88ccff", opacity: 0.3),
     Model__Piston_C: (color: "#88ccff", opacity: 0.3),
     Model__Piston_D: (color: "#88ccff", opacity: 0.3),
@@ -1430,7 +1442,7 @@ Instead of a plain color, pass a dictionary with specific appearance overrides t
 
 Annotate OBJ groups by drawing a leader line from each group's centroid to a text label.
 
-Pass `annotations: true` to label all groups with default styling, or pass an object to customize. The `groups` field filters to specific groups; `color`, `font_size`, and `offset` control appearance. A group's `label` in `highlight` replaces its name in the annotation text, while `groups` still matches the group name.
+Pass `annotations: true` to label all groups with default styling, or pass an object to customize. The `groups` field filters to specific groups; `color`, `font-size`, and `offset` control appearance. A group's `label` in `highlight` replaces its name in the annotation text, while `groups` still matches the group name.
 
 ```example
 // hl: 7-17
@@ -1449,7 +1461,7 @@ Pass `annotations: true` to label all groups with default styling, or pass an ob
        "Model__Piston_E", 
        "Model__Piston_F"),
     color: "#ffffff",
-    font_size: 12,
+    font-size: 12,
     offset: 45,
   ),
   background: "#222222"
@@ -1479,7 +1491,7 @@ Nothing new, since it's the default mode we saw earlier, but it allows me to int
 
 (`mode: "x-ray"`) creates transparent front-facing surfaces. Back-facing surfaces remain fully opaque.
 
-Adjust transparency with `xray_opacity` (default 0.1 opacity).
+Adjust transparency with `xray-opacity` (default 0.1 opacity).
 
 Ideal for examining joints, internal components, nested geometry, and embedded models.
 
@@ -1495,7 +1507,7 @@ Our previous skull model now unveils its inner brain!
     "Skull": (color: "#e8e8e8"),
     "Brain": (color: "#ee69b4"),
   ),
-  xray_opacity: 0.3,
+  xray-opacity: 0.3,
   mode: "x-ray",
 )
 ```
@@ -1515,7 +1527,7 @@ It's a great occasion to showcase SVG output, no rasterization artifacts and kin
 #render-obj(teapot,
   up: (0, 1, 0),
   distance: 8,
-  auto_fit: false,
+  auto-fit: false,
   background: "#ffffff",
   wireframe: (color: "#cc3333", width: 0.1),
   mode: "wireframe",
@@ -1548,14 +1560,14 @@ Here ```typc antialias: 3``` should be set, wireframe's strokes benefit from ant
 
 == Ground Shadow
 
-A ground shadow is cast by projecting every triangle onto the ground plane along the light direction. Pass `ground_shadow: true` for defaults, or customize:
+A ground shadow is cast by projecting every triangle onto the ground plane along the light direction. Pass `ground-shadow: true` for defaults, or customize:
 
 ```example
 // hl: 4
 #render-stl(cube,
   camera: (3, 2, 2),
-  light_dir: (1, -1, 3),
-  ground_shadow: (opacity: 0.35, color: "#2244aa"),
+  light-dir: (1, -1, 3),
+  ground-shadow: (opacity: 0.35, color: "#2244aa"),
   width: 50%,
 )
 ```
@@ -1571,19 +1583,19 @@ A ground shadow is cast by projecting every triangle onto the ground plane along
   stroke: none,
   fill: (_, y) => if y == 0 { luma(235) } else if calc.odd(y) { luma(248) },
   table.header([*Option*], [*Default*], [*What it does*]),
-  [`per_pixel`], [`false`], [Sample shadows per fragment instead of per vertex, for crisp edges on low-poly and CAD models. PNG only, \~2.5× the cost, and required by `light_size` and `color` below.],
-  [`light_size`], [`0`], [Light radius in world units (alias `pcss_light_size`); area lights use their own `size` instead. Any value `> 0` enables the #link("https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf")[PCSS] soft shadows described above: sharp where parts touch, blurring with distance.],
+  [`per-pixel`], [`false`], [Sample shadows per fragment instead of per vertex, for crisp edges on low-poly and CAD models. PNG only, \~2.5× the cost, and required by `light-size` and `color` below.],
+  [`light-size`], [`0`], [Light radius in world units (alias `pcss-light-size`); area lights use their own `size` instead. Any value `> 0` enables the #link("https://developer.download.nvidia.com/shaderlibrary/docs/shadow_PCSS.pdf")[PCSS] soft shadows described above: sharp where parts touch, blurring with distance.],
   [`color`], [`""`], [Hex tint for the shadowed regions instead of darkening toward neutral grey (e.g. a cool blue).],
   [`strength`], [`1.0`], [How dark shadows go, from `0` (none) to `1` (removes all direct light).],
   [`softness`], [`1`], [#link("https://en.wikipedia.org/wiki/Shadow_mapping")[PCF] (percentage-closer filtering) blur radius, in #link("https://en.wikipedia.org/wiki/Texel_(graphics)")[texels]: `0` = hard edges, `1` = 3×3, higher = softer everywhere.],
   [`resolution`], [`512`], [Shadow-map size per light (res × res texels). Higher is sharper but slower to build.],
   [`omni`], [`false`], [Render six cube-map faces so a positional light *inside* the geometry casts in every direction. \~6× the cost.],
   [`bias`], [`0.0008`], [Constant depth-compare bias, the baseline fix for shadow acne (self-shadowing speckle).],
-  [`normal_bias`], [`2.0`], [Offsets the sample along the surface normal (in texels); the primary acne fix.],
-  [`slope_bias`], [`1.0`], [Adds extra bias on surfaces lit at a grazing angle, where acne is worst.],
+  [`normal-bias`], [`2.0`], [Offsets the sample along the surface normal (in texels); the primary acne fix.],
+  [`slope-bias`], [`1.0`], [Adds extra bias on surfaces lit at a grazing angle, where acne is worst.],
 )
 
-`cast_shadow` is a per-light option, set inside the `lights` array (see #link(<multi-light>)[Multi-Light]), not a `shadows` one.
+`cast-shadow` is a per-light option, set inside the `lights` array (see #link(<multi-light>)[Multi-Light]), not a `shadows` one.
 
 #grid(columns: (1fr, 1fr), column-gutter: 1.2em,
   align(center)[
@@ -1592,9 +1604,9 @@ A ground shadow is cast by projecting every triangle onto the ground plane along
     #text(size: 8pt, fill: luma(90), raw("shadows: false (default)"))
   ],
   align(center)[
-    #render-obj(crankshaft, ..settings, shadows: (per_pixel: true, light_size: 8, softness: 2, resolution: 1024), width: 88%)
+    #render-obj(crankshaft, ..settings, shadows: (per-pixel: true, light-size: 8, softness: 2, resolution: 1024), width: 88%)
     #v(-0.3em)
-    #text(size: 8pt, fill: luma(90), raw("shadows: (per_pixel: true, light_size: 8, …)"))
+    #text(size: 8pt, fill: luma(90), raw("shadows: (per-pixel: true, light-size: 8, …)"))
   ],
 )
 
@@ -1856,7 +1868,7 @@ Wrapping the plane in a dict lets you add `cap: false`, which leaves the cross-s
     ("Skull": (color: "#e8e8e8"), 
      "Brain": (color: "#ff69b4")),
   clip: (plane: (2, -1, 0, 1), cap: false),
-  cull_backface: false,
+  cull-backface: false,
 )
 ```
 
@@ -1929,8 +1941,8 @@ The `decimate` strength runs from `0` (off, default) to `1` (most aggressive): a
     // center + orthographic + no auto-fit means decimation is the only thing
     // that changes between renders (no perspective distortion, uniform scale).
     up: (0, 1, 0), azimuth: 180,
-    auto_center: false, center: (-0.0168, 0.1102, -0.0015),
-    auto_fit: false, projection: "orthographic", distance: 0.20,
+    auto-center: false, center: (-0.0168, 0.1102, -0.0015),
+    auto-fit: false, projection: "orthographic", distance: 0.20,
     mode: "solid+wireframe", antialias: 2,
     decimate: strength,
     width: 520, height: 520,
@@ -1967,21 +1979,21 @@ Render multiple named views in a single image, similar to an engineering drawing
 // hl: 2-3
 #render-obj(teapot,
   views: ("front", "right", "top", "isometric"),
-  grid_labels: true,
-  cull_backface: false,
+  grid-labels: true,
+  cull-backface: false,
 )
 ```
 
 == Turntable
 
-Automatically generates a grid of views evenly spaced around the model at a fixed elevation angle. Use `turntable: (iterations: 6, elevation: 40)` or just `turntable: 6` for the number of views. View labels showing the azimuth angle are displayed by default; set `grid_labels: false` to hide them.
+Automatically generates a grid of views evenly spaced around the model at a fixed elevation angle. Use `turntable: (iterations: 6, elevation: 40)` or just `turntable: 6` for the number of views. View labels showing the azimuth angle are displayed by default; set `grid-labels: false` to hide them.
 
 ```example
 // hl: 2-3
 #render-obj(teapot,
   turntable: (iterations: 6, elevation: 40),
-  grid_labels: true,
-  cull_backface: false,
+  grid-labels: true,
+  cull-backface: false,
 )
 ```
 
@@ -1989,7 +2001,7 @@ Automatically generates a grid of views evenly spaced around the model at a fixe
 
 = Debug
 
-`debug: true` overlays model metadata (triangle count, bounding box, camera position) directly on its canvas. The overlay text is drawn in `debug_color` (default `#cc2222`); set it to keep the labels legible against your model or background.
+`debug: true` overlays model metadata (triangle count, bounding box, camera position) directly on its canvas. The overlay text is drawn in `debug-color` (default `#cc2222`); set it to keep the labels legible against your model or background.
 
 It also renders lights as octahedrons of the color they emit, to allow placing lights seamlessly around your model. Area lights (those with a `size`) are drawn instead as a disk of that radius, facing the model, so you can gauge their extent.
 

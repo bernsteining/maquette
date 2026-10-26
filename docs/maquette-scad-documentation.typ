@@ -162,7 +162,7 @@ Models can be provided in two forms:
 = Config reference
 
 #sect[
-All parameters are optional. Default values are shown.
+All parameters are optional. Default values are shown. Names are written in kebab-case; snake_case also works.
 
 #text(size: 9pt, raw(block: true, lang: "json", "{ // ── Compile options (maquette-scad) ───────────────────────────────
   \"fn\": 32,                // Default $fn segment count; a primitive's own fn: wins
