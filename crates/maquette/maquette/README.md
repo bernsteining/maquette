@@ -12,7 +12,7 @@ Everything runs as a single WASM plugin, with focus on speed.
 
 **[Try it live in your browser →](https://bernsteining.github.io/maquette/)** drag to orbit, tweak every setting, and copy the generated Typst code. It runs the exact same WASM as the plugin, fully client-side. Because your browser JIT-compiles the WASM (Typst runs it in an interpreter), the demo is dramatically faster to iterate on.
 
-Check the [documentation](https://github.com/bernsteining/maquette/blob/master/docs/maquette-documentation.pdf) to see examples of all the features.
+Check the [documentation](https://github.com/bernsteining/maquette/blob/v0.2.0/docs/maquette-documentation.pdf) to see examples of all the features.
 
 > **Download models to try it out:** [Sketchfab](https://sketchfab.com/feed)
 
@@ -45,7 +45,7 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 
 </td>
 <td>
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/sss_bunny.png?v=2" width="100%" alt="Back-lit Stanford bunny with subsurface scattering" />
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/sss_bunny.png" width="100%" alt="Back-lit Stanford bunny with subsurface scattering" />
 </td>
 </tr>
 </table>
@@ -55,53 +55,22 @@ A back-lit Stanford bunny: a red point light placed *inside* the model glows thr
 <table>
 <tr>
 <td align="center" width="50%">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_multiview.svg?v=2" width="100%" alt="Multi-view grid" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/gallery_multiview.svg" width="100%" alt="Multi-view grid" /><br/>
 <sub><b>Multi-view grid</b> — front / right / top / isometric on one sheet</sub>
 </td>
 <td align="center" width="50%">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_groups.png?v=4" width="100%" alt="Per-group appearance" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/gallery_groups.png" width="100%" alt="Per-group appearance" /><br/>
 <sub><b>Per-group appearance</b> — per-part colour, stroke &amp; opacity from OBJ groups</sub>
 </td>
 </tr>
 <tr>
 <td align="center">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_scalar.png?v=3" width="100%" alt="Scalar color map" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/gallery_scalar.png" width="100%" alt="Scalar color map" /><br/>
 <sub><b>Scalar color map</b> — a math expression <code>f(x,y,z)</code> over a custom palette</sub>
 </td>
 <td align="center">
-<img src="https://raw.githubusercontent.com/bernsteining/maquette/master/examples/gallery_clip.png?v=3" width="100%" alt="Clipping plane" /><br/>
+<img src="https://raw.githubusercontent.com/bernsteining/maquette/v0.2.0/examples/gallery_clip.png" width="100%" alt="Clipping plane" /><br/>
 <sub><b>Clipping plane</b> — a mathematical cut opens the model to its interior</sub>
 </td>
 </tr>
 </table>
-
-Once again, the [documentation](https://github.com/bernsteining/maquette/blob/master/docs/maquette-documentation.pdf) has many examples covering all the features offered by `maquette`.
-
-## Functions
-
-### `render-stl` / `render-obj` / `render-ply`
-
-```typst
-#render-stl(read("model.stl", encoding: none), ..config, width: auto, height: auto, format: "png")
-#render-obj(obj-data, ..config, width: auto, height: auto, format: "png")
-#render-ply(read("model.ply", encoding: none), ..config, width: auto, height: auto, format: "png")
-```
-
-Renders a 3D model. Data must be read with `encoding: none` (required for binary STL/PLY, optional for OBJ). Configuration parameters are passed as named arguments (e.g. `color: "#c0ffee"`), or bundled into a single dictionary passed positionally (`render-stl(data, (color: "#c0ffee"))`) — both are equivalent. Any parameter set to `none` falls back to its default. `width`/`height`/`format` control display sizing and output format; set `format: "svg"` for vector output.
-
-> **Read PLY & STL models with `encoding: none`.** This hands maquette the raw file bytes. Binary STL/PLY — and any file with non-UTF-8 bytes — otherwise fail Typst's default UTF-8 `read()` with a *"file is not valid UTF-8"* error. `encoding: none` avoids that and works for every format (OBJ included), so it's the pattern to use everywhere.
-
-### `get-stl-info` / `get-obj-info` / `get-ply-info`
-
-```typst
-#let info = get-stl-info(stl-data)
-#let info = get-obj-info(obj-data)
-#let info = get-ply-info(ply-data)
-```
-
-Returns JSON with model metadata (triangle count, vertex count, bounding box, groups).
-
-## Output Formats
-
-- **PNG** (default): Z-buffer rasterized. Best for high-poly models and smooth shading. Set `width`/`height` for resolution and `antialias` for supersampling.
-- **SVG** (`format: "svg"`): Vector output via painter's algorithm. Best for low-to-medium poly models. Supports debug overlays and silhouette outlines.
