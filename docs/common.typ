@@ -147,9 +147,14 @@
   m
 }
 #let alias-key(k) = key-alias.at(k, default: k)
+#let snake-keys(v) = if type(v) == dictionary {
+  let out = (:)
+  for (k, x) in v { out.insert(k.replace("-", "_"), snake-keys(x)) }
+  out
+} else if type(v) == array { v.map(snake-keys) } else { v }
 #let demo-url(name, cfg) = {
   let parts = (alias-key("model") + "=" + pct(name),)
-  for (k, v) in cfg {
+  for (k, v) in snake-keys(cfg) {
     if k in ("width", "height", "format", "read") { continue }
     let vs = if v == none { "none" } else if type(v) == str { v } else { str(json.encode(v, pretty: false)) }
     parts.push(alias-key(k) + "=" + pct(vs))

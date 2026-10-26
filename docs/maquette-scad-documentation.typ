@@ -173,7 +173,7 @@ All parameters are optional. Default values are shown.
   // ── Render options (maquette) ─────────────────────────────────────
   // camera, azimuth, elevation, up, fov, zoom, background, color, shading,
   // lights, shadows, ssao, outline, antialias, …: see the maquette manual.
-  // render-scad changes two defaults: specular: 0, cull_backface: false.
+  // render-scad changes two defaults: specular: 0, cull-backface: false.
 }"))
 ]
 
@@ -427,7 +427,7 @@ Primitives, 2D shapes and extrusions follow OpenSCAD's names and parameters.
   ("hull / minkowski / hull-pts(points)", [Convex hull, Minkowski sum, hull of points.]),
   ("trim(child, normal, offset:)", [Cut with a plane.]),
   ("simplify(child, epsilon:)", [Vertex reduction (2D and 3D).]),
-  ("calculate-normals(child, sharp_angle:)", [Smooth normals for one subtree.]),
+  ("calculate-normals(child, sharp-angle:)", [Smooth normals for one subtree.]),
   ("color(rgb, child, alpha:)", [Colour and transparency.]),
 ))
 
@@ -538,7 +538,7 @@ difference() { sphere(d = 50); rod(25, 62.5); }
 ```example
 // hl: 2
 #render-scad(union(calculate-normals(
-  sphere(9, fn: 24), sharp_angle: 30),
+  sphere(9, fn: 24), sharp-angle: 30),
   translate((15, 0, 0), sphere(6, fn: 24))),
   ..look, smooth-normals: none)
 ```,

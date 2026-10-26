@@ -71,7 +71,7 @@ Read the model as bytes and pass it to `render-gltf` (left). The examples below 
 #let side = (width: 600, height: 300,
   azimuth: 90, elevation: 8)
 #render-gltf(fox, side, ..studio,
-  zoom: 2.3, animation_index: 2)
+  zoom: 2.3, animation-index: 2)
 ```
 ]
 
@@ -86,38 +86,38 @@ All optional; defaults shown.
   \"background\": \"#f0f0f0\",         // Hex colour; none, \"none\" or \"\" = transparent
   // ── Camera ────────────────────────────────────────────────────────
   \"camera\": null,                  // Eye position (x, y, z); null = orbit around the model
-  \"center\": [0, 0, 0],             // Look-at target (overridden by auto_center)
+  \"center\": [0, 0, 0],             // Look-at target (overridden by auto-center)
   \"up\": [0, 1, 0],                 // Up direction (glTF is Y-up)
   \"azimuth\": 30,                   // Orbit horizontal angle, degrees
   \"elevation\": 20,                 // Orbit vertical angle, degrees
   \"distance\": null,                // Orbit distance; null = fit the model
   \"zoom\": 1.0,                     // Move closer than the automatic framing
   \"fov\": 45,                       // Vertical field of view, degrees
-  \"auto_center\": true,             // Aim at the scene's bounding-box centre
-  \"auto_fit\": true,                // Frame the scene to fill the image
-  \"camera_auto_use\": true,         // Use the asset's first camera when it has one
-  \"camera_index\": null,            // Use an authored camera by index
-  \"camera_name\": null,             // Use an authored camera by name
-  \"scene_index\": null,             // Scene to render; null = the default scene
+  \"auto-center\": true,             // Aim at the scene's bounding-box centre
+  \"auto-fit\": true,                // Frame the scene to fill the image
+  \"camera-auto-use\": true,         // Use the asset's first camera when it has one
+  \"camera-index\": null,            // Use an authored camera by index
+  \"camera-name\": null,             // Use an authored camera by name
+  \"scene-index\": null,             // Scene to render; null = the default scene
   // ── Lighting ──────────────────────────────────────────────────────
-  \"light_dir\": [1, 2, 3],          // Key light direction when the asset has no lights
+  \"light-dir\": [1, 2, 3],          // Key light direction when the asset has no lights
   \"ambient\": 0.2,                  // Constant ambient (0-1); unused with ibl
   \"ibl\": null,                     // true, or {intensity, sky, ground, rotation, hdr}
-  \"shadows\": null,                 // true, or {resolution, softness, light_size, bias, normal_bias, slope_bias}
-  \"ground\": null,                  // true, or {color, roughness, size_scale, y}
-  \"cull_backface\": true,           // Skip back faces of single-sided materials
+  \"shadows\": null,                 // true, or {resolution, softness, light-size, bias, normal-bias, slope-bias}
+  \"ground\": null,                  // true, or {color, roughness, size-scale, y}
+  \"cull-backface\": true,           // Skip back faces of single-sided materials
   // ── Post-processing ───────────────────────────────────────────────
   \"ssao\": null,                    // true, or {samples, radius, bias, strength, space}
   \"antialias\": 4,                  // 0 off, 1 FXAA, 2-3 SSAA x2/x4, 4-5 FXAA + SSAA x2/x4
-  \"tone_mapping\": \"\",              // \"\", \"reinhard\" or \"aces\"
+  \"tone-mapping\": \"\",              // \"\", \"reinhard\" or \"aces\"
   \"exposure\": 1.0,                 // Light multiplier before tone mapping
   // ── Animation and materials ───────────────────────────────────────
   \"time\": 0.0,                     // Animation time, seconds
-  \"animation_index\": null,         // Animation to use (from 0); null = all together
-  \"material_variant\": 0,           // KHR_materials_variants index
+  \"animation-index\": null,         // Animation to use (from 0); null = all together
+  \"material-variant\": 0,           // KHR_materials_variants index
   // ── Textures ──────────────────────────────────────────────────────
-  \"texture_max_size\": null,        // Downsample textures to this side, pixels
-  \"no_textures\": false             // Skip textures (fast drafts)
+  \"texture-max-size\": null,        // Downsample textures to this side, pixels
+  \"no-textures\": false             // Skip textures (fast drafts)
 }"))
 ]
 
@@ -178,7 +178,7 @@ All optional; defaults shown.
 #sect[
 == Explicit camera
 
-`camera`, `center` and `up` place the camera in scene coordinates; turn off `auto_center` and `auto_fit` to use them as given. Models with their own cameras use the first one; pick another with `camera_index`, or ignore them with `camera_auto_use: false`.
+`camera`, `center` and `up` place the camera in scene coordinates; turn off `auto-center` and `auto-fit` to use them as given. Models with their own cameras use the first one; pick another with `camera-index`, or ignore them with `camera-auto-use: false`.
 
 ```example
 // hl: 2-5
@@ -186,7 +186,7 @@ All optional; defaults shown.
   camera: (-60, 120, 640),
   center: (-86, 5, -25),
   up: (0, 0.989, -0.145),
-  auto_center: false, auto_fit: false)
+  auto-center: false, auto-fit: false)
 ```
 ]
 
@@ -195,18 +195,18 @@ All optional; defaults shown.
 #sect[
 == Key light and ambient
 
-Without `ibl`, `light_dir` points the main light and `ambient` adds a flat fill from 0 to 1.
+Without `ibl`, `light-dir` points the main light and `ambient` adds a flat fill from 0 to 1.
 
 #grid(columns: 2, gutter: 1em,
 ```example
 // hl: 2
 #render-gltf(tokyo, zoom: 1.5,
-  light_dir: (-3, 2, 1), ambient: 0.1)
+  light-dir: (-3, 2, 1), ambient: 0.1)
 ```,
 ```example
 // hl: 2
 #render-gltf(tokyo, zoom: 1.5,
-  light_dir: (3, 1, 2), ambient: 0.6)
+  light-dir: (3, 1, 2), ambient: 0.6)
 ```,
 )
 ]
@@ -237,15 +237,15 @@ Without `ibl`, `light_dir` points the main light and `ambient` adds a flat fill 
 = Shadows and ground
 
 #sect[
-- *`shadows`*: `true`, or set `softness`, `resolution` (default 512) and `light_size`.
-- *`ground`*: a floor that catches them; set its `color`, `roughness` and `size_scale`.
+- *`shadows`*: `true`, or set `softness`, `resolution` (default 512) and `light-size`.
+- *`ground`*: a floor that catches them; set its `color`, `roughness` and `size-scale`.
 
 ```example
 // hl: 3-4
 #render-gltf(fox, side, ..studio, zoom: 2,
   elevation: 30, azimuth: 70,
   shadows: (softness: 3),
-  ground: (color: "#c9ced8", size_scale: 8))
+  ground: (color: "#c9ced8", size-scale: 8))
 ```
 ]
 
@@ -273,18 +273,18 @@ Without `ibl`, `light_dir` points the main light and `ambient` adds a flat fill 
 #sect[
 == Tone mapping and exposure
 
-Bright light clips to white. `tone_mapping` (`"reinhard"` or `"aces"`) compresses it smoothly; `exposure` brightens or darkens.
+Bright light clips to white. `tone-mapping` (`"reinhard"` or `"aces"`) compresses it smoothly; `exposure` brightens or darkens.
 
 #grid(columns: 2, gutter: 1em,
 ```example
 // hl: 2
 #render-gltf(tokyo, ..studio,
-  ibl: (intensity: 3), tone_mapping: "")
+  ibl: (intensity: 3), tone-mapping: "")
 ```,
 ```example
 // hl: 2-3
 #render-gltf(tokyo, ..studio,
-  ibl: (intensity: 3), tone_mapping: "aces",
+  ibl: (intensity: 3), tone-mapping: "aces",
   exposure: 1.2)
 ```,
 )
@@ -314,13 +314,13 @@ Bright light clips to white. `tone_mapping` (`"reinhard"` or `"aces"`) compresse
 #sect[
 A glTF file can store animations: the Fox's file holds three, the Fox looking around, walking and running. A render is a still image, so two options choose what it shows:
 
-- *`animation_index`*: which animation to use, counted from 0. Without it, all of the file's animations are applied together.
+- *`animation-index`*: which animation to use, counted from 0. Without it, all of the file's animations are applied together.
 - *`time`*: which moment of that animation to show, in seconds from its start.
 
 ```example
 // hl: 2
 #render-gltf(fox, side, ..studio, zoom: 2.3,
-  animation_index: 1, time: 0.4)
+  animation-index: 1, time: 0.4)
 ```
 
 Stepping `time` gives the frames of the run:
@@ -329,25 +329,25 @@ Stepping `time` gives the frames of the run:
 // hl: 3
 #grid(columns: 2, gutter: 0.6em, ..range(4).map(i =>
   render-gltf(fox, side, ..studio, zoom: 2.3,
-    animation_index: 2, time: i * 0.18)))
+    animation-index: 2, time: i * 0.18)))
 ```
 ]
 
 = Textures
 
 #sect[
-For faster drafts, `texture_max_size` shrinks textures and `no_textures: true` skips them.
+For faster drafts, `texture-max-size` shrinks textures and `no-textures: true` skips them.
 
 #grid(columns: 2, gutter: 1em,
 ```example
 // hl: 2
 #render-gltf(tokyo, ..studio,
-  texture_max_size: 16)
+  texture-max-size: 16)
 ```,
 ```example
 // hl: 2
 #render-gltf(tokyo, ..studio,
-  no_textures: true)
+  no-textures: true)
 ```,
 )
 ]
