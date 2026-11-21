@@ -575,9 +575,9 @@ dependencies = [
 
 [[package]]
 name = "manifold-csg"
-version = "0.4.0"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6e802a0d90cbb6fe43a8eafdd1c5df1862768cb85fdbc6965b0436449a0bdb6"
+checksum = "6fa2f409d0894a2e2dabf29c65c81702fc8a5b05965fe30470d7c77ff606829d"
 dependencies = [
  "log",
  "manifold-csg-sys",
@@ -586,7 +586,9 @@ dependencies = [
 
 [[package]]
 name = "manifold-csg-sys"
-version = "3.5.104"
+version = "3.5.106"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "618f8490ed92c759f14256b6fb58b33b74828a348318057196d083c8ef65ea9c"
 dependencies = [
  "cmake",
 ]
@@ -1343,3 +1345,7 @@ dependencies = [
  "zune-core",
  "zune-inflate",
 ]
+
+[[patch.unused]]
+name = "manifold-csg-sys"
+version = "3.5.104"
